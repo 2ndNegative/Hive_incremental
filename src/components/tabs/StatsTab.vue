@@ -5,10 +5,13 @@ import { NUTRIENTS, MACROS, MICROS, isRevealed } from '../../game/definitions/nu
 import { STRUCTURE_ORDER, STRUCTURES } from '../../game/definitions/structures.js';
 import { ITEMS } from '../../game/definitions/items/index.js';
 import { formatNumber, formatDuration } from '../../game/format.js';
+import { lifetimeTotals } from '../../game/run.js';
 import { formatMass, formatMassFlow, formatEnergy, formatPower } from '../../game/units.js';
 
+const lifetime = computed(() => lifetimeTotals());
+
 const tiles = computed(() => [
-  { label: 'Elapsed', value: formatDuration(state.playtime) },
+  { label: 'This run', value: formatDuration(state.playtime) },
   { label: 'Mass ingested', value: formatMass(state.stats.ingested) },
   { label: 'Energy metabolised', value: formatEnergy(state.stats.metabolised) },
   { label: 'Manual intakes', value: formatNumber(state.stats.clicks, { notation: 'plain' }) },
@@ -55,6 +58,70 @@ const built = computed(() =>
       <div v-for="tile in tiles" :key="tile.label" class="stat-tile">
         <div class="label">{{ tile.label }}</div>
         <div class="value">{{ tile.value }}</div>
+      </div>
+    </div>
+
+    <div class="panel-box" style="margin-bottom: 0.9rem">
+      <div class="panel-head">
+        <span>Lifetime</span>
+        <span class="muted num">
+          run {{ lifetime.runs }}<template v-if="lifetime.devUsed"> · dev-touched</template>
+        </span>
+      </div>
+      <div class="panel-body" style="overflow-x: auto">
+        <p class="muted" style="font-size: 0.78rem; margin-bottom: 0.5rem">
+          Totals across every run, including this one. Restarting a run keeps all of this;
+          only wiping the save clears it.
+        </p>
+        <table class="table is-fullwidth is-narrow data-table">
+          <thead>
+            <tr><th>Measure</th><th class="right">This run</th><th class="right">All runs</th><th class="right">Best run</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Time</td>
+              <td class="right num">{{ formatDuration(state.playtime) }}</td>
+              <td class="right num">{{ formatDuration(lifetime.playtime) }}</td>
+              <td class="right num">{{ formatDuration(lifetime.bestPlaytime) }}</td>
+            </tr>
+            <tr>
+              <td>Mass consumed</td>
+              <td class="right num">{{ formatMass(state.stats.ingested) }}</td>
+              <td class="right num">{{ formatMass(lifetime.ingested) }}</td>
+              <td class="right num muted">—</td>
+            </tr>
+            <tr>
+              <td>Energy metabolised</td>
+              <td class="right num">{{ formatEnergy(state.stats.metabolised) }}</td>
+              <td class="right num">{{ formatEnergy(lifetime.metabolised) }}</td>
+              <td class="right num muted">—</td>
+            </tr>
+            <tr>
+              <td>Peak drones</td>
+              <td class="right num">{{ state.stats.peakDrones }}</td>
+              <td class="right num muted">—</td>
+              <td class="right num">{{ lifetime.bestDrones }}</td>
+            </tr>
+            <tr>
+              <td>Research complete</td>
+              <td class="right num">{{ state.stats.researched }} / 12</td>
+              <td class="right num">{{ lifetime.researched }}</td>
+              <td class="right num">{{ lifetime.bestResearched }} / 12</td>
+            </tr>
+            <tr>
+              <td>Structures grown</td>
+              <td class="right num">{{ state.stats.built }}</td>
+              <td class="right num">{{ lifetime.built }}</td>
+              <td class="right num muted">—</td>
+            </tr>
+            <tr>
+              <td>Drones starved</td>
+              <td class="right num">{{ state.stats.dronesLost }}</td>
+              <td class="right num">{{ lifetime.dronesLost }}</td>
+              <td class="right num muted">—</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 

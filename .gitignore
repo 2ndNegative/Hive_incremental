@@ -13,6 +13,9 @@ build/
 # Portable single-file build — regenerate with `npm run single`
 HiveIdle.html
 
+# Retired files kept around rather than deleted
+deprecated/
+
 # ----------------------------------------------------- local launcher scripts
 # Convenience wrappers for one machine, not repository content. If you ever
 # want to share one, force it in with: git add -f "Name.bat"

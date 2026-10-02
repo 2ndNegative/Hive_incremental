@@ -928,6 +928,72 @@ textarea.save-box {
   background: var(--panel-alt);
 }
 
+.modal-card.is-danger {
+  border-color: var(--bad);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65);
+}
+
+.modal-head.is-danger {
+  color: var(--bad);
+  border-bottom-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 16%, var(--panel-alt));
+}
+
+.modal-body > .columns {
+  margin-bottom: 0;
+}
+
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.plain-list li::before {
+  content: '— ';
+  opacity: 0.6;
+}
+
+.confirm-phrase {
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+.confirm-phrase label {
+  display: block;
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+  color: var(--text);
+}
+
+.confirm-phrase strong {
+  font-family: var(--mono);
+  color: var(--bad);
+  letter-spacing: 0.08em;
+}
+
+.confirm-phrase input {
+  width: 100%;
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+}
+
+.btn.is-danger-solid {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+  font-weight: 700;
+}
+
+.btn.is-danger-solid:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 80%, #000);
+  border-color: var(--bad);
+  color: #fff;
+}
+
 .progress-track {
   height: 10px;
   background: var(--bg-deep);

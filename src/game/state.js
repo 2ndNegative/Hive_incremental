@@ -65,6 +65,7 @@ export function createInitialState() {
       overrides: {},
     },
 
+    // THIS RUN. Everything here resets when a run restarts.
     stats: {
       clicks: 0,
       ingested: 0, // grams of item mass consumed
@@ -75,6 +76,27 @@ export function createInitialState() {
       peakDrones: 2,
       ticks: 0,
       devUsed: false,
+    },
+
+    // ACROSS ALL RUNS. Survives a restart; only a full wipe clears it.
+    //
+    // These totals cover *completed* runs only — the run in progress is added
+    // in at display time. Folding the live run in here as it happened would
+    // double-count it the moment the run ended.
+    lifetime: {
+      firstStartedAt: Date.now(),
+      runs: 1, // including the one in progress
+      playtime: 0,
+      clicks: 0,
+      ingested: 0,
+      metabolised: 0,
+      built: 0,
+      researched: 0,
+      dronesLost: 0,
+      bestDrones: 0,
+      bestPlaytime: 0,
+      bestResearched: 0,
+      devUsed: false, // sticky: a cheat in any run marks the save forever
     },
 
     // Unlocked by entering the code in Settings; persists in the save.
