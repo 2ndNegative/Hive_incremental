@@ -1,0 +1,25 @@
+{
+  "name": "hiveidle",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "An Evolve-style idle/incremental game skeleton.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "play": "vite preview --open --port 4173",
+    "single": "node tools/build-single.mjs",
+    "validate": "node tools/validate-items.mjs",
+    "balance": "node tools/balance-sim.mjs"
+  },
+  "dependencies": {
+    "bulma": "^1.0.4",
+    "vue": "^3.5.43"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "sass": "^1.105.1",
+    "vite": "^7.1.12"
+  }
+}

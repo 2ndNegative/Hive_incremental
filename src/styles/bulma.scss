@@ -1,0 +1,21 @@
+// Only the Bulma pieces HiveIdle actually uses.
+//
+// The full bundle is ~690 kB of CSS; this trim keeps it near 240 kB (~25 kB
+// gzipped). Add a line when you start using another Bulma component — the names
+// match the folders under node_modules/bulma/sass/.
+//
+// `themes` is what defines Bulma's --bulma-* custom properties. theme.css then
+// remaps the important ones onto HiveIdle's own tokens, so any Bulma component
+// you drop in picks up the dark skin automatically.
+
+@use 'bulma/sass/utilities';
+@use 'bulma/sass/base';
+@use 'bulma/sass/themes';
+
+// Elements
+@use 'bulma/sass/elements/table';
+@use 'bulma/sass/elements/tag';
+@use 'bulma/sass/elements/progress';
+
+// Layout
+@use 'bulma/sass/grid/columns';

@@ -1,0 +1,17 @@
+# Normalise line endings. Without this, committing from Windows stores CRLF and
+# every file looks changed when touched from anywhere else.
+* text=auto eol=lf
+
+# Keep Windows scripts CRLF in the working tree — some shells mis-parse LF .bat
+# files. (They are gitignored by default; this covers any you force-add.)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary: never touch these
+*.png binary
+*.jpg binary
+*.svg text
+*.ico binary
+*.woff binary
+*.woff2 binary
