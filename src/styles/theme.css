@@ -1416,3 +1416,89 @@ textarea.save-box {
 .gut-meter.is-behind > span {
   background: var(--bad, #d9534f);
 }
+
+/* ----------------------------------------------------------------- territory */
+
+.terr-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) 6rem 4rem;
+  align-items: baseline;
+  gap: 0.15rem 0.9rem;
+  padding: 0.35rem 0.6rem;
+}
+
+.terr-row + .terr-row {
+  border-top: 1px solid var(--border);
+}
+
+.terr-name .terr-climate {
+  font-size: 0.68rem;
+  margin-left: 0.4rem;
+}
+
+.terr-area,
+.terr-share {
+  text-align: right;
+  font-size: 0.8rem;
+}
+
+.terr-bar {
+  grid-column: 1 / -1;
+  height: 3px;
+  background: var(--bg-deep);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.terr-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent, #6cf);
+}
+
+.terr-desc {
+  grid-column: 1 / -1;
+  font-size: 0.74rem;
+}
+
+.offer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.3rem 0.6rem 0.15rem;
+  font-size: 0.8rem;
+  color: var(--text-strong);
+}
+
+.offer-empty {
+  padding: 0 0.6rem 0.4rem;
+  font-size: 0.75rem;
+}
+
+.offer-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0 0.6rem 0.5rem;
+}
+
+.offer-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.12rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.74rem;
+  background: var(--bg-deep);
+}
+
+.offer-chip .offer-pct {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+}
+
+.last-gather {
+  padding: 0.3rem 0 0;
+  font-size: 0.74rem;
+}

@@ -5,6 +5,8 @@ import { ITEMS, ITEM_IDS, CATEGORIES, itemJoulesPerGram } from '../../game/defin
 import { ORGANISMS, ORGANISM_IDS, butcherYield } from '../../game/definitions/organisms.js';
 import { NUTRIENTS, MACROS, MICROS, isRevealed } from '../../game/definitions/nutrients.js';
 import { formatMass, formatEnergy } from '../../game/units.js';
+import { FORAGE, GATHER_TYPES } from '../../game/definitions/forage.js';
+import { BIOMES } from '../../game/definitions/biomes.js';
 
 const SORTS = {
   name: (a, b) => ITEMS[a].name.localeCompare(ITEMS[b].name),
@@ -58,6 +60,23 @@ const preyFor = computed(() =>
 );
 
 const perKg = computed(() => (selected.value ? itemJoulesPerGram(selected.value) * 1000 : 0));
+
+/**
+ * Where this turns up and who can collect it. The whole forage table is in the
+ * game but invisible until the player happens to roll something, so the codex
+ * is where it gets stated outright.
+ */
+const whereFound = computed(() => {
+  const entry = FORAGE[state.ui.selectedItem];
+  if (!entry) return null;
+  return {
+    gather: entry.gather.map((g) => GATHER_TYPES[g].name),
+    huntedOnly: entry.gather.includes('hunter') && !Object.keys(entry.biomes).length,
+    biomes: Object.entries(entry.biomes)
+      .sort((a, b) => b[1] - a[1])
+      .map(([id, weight]) => ({ id, name: BIOMES[id].name, weight })),
+  };
+});
 
 const COVERAGE_LABEL = {
   full: 'full panel sourced',
@@ -179,6 +198,28 @@ const CONFIDENCE_LABEL = {
               {{ composition.unresolved }} further compound{{ composition.unresolved === 1 ? '' : 's' }}
               detected in this material but not yet resolved. The hive absorbs them regardless.
             </p>
+
+            <div v-if="whereFound" class="field-row">
+              <span class="field-label">
+                Collected by
+                <span class="field-help">
+                  {{ whereFound.gather.join(', ') }}.
+                  <template v-if="whereFound.huntedOnly">
+                    Reachable only through prey — nothing is lying about to pick up.
+                  </template>
+                </span>
+              </span>
+            </div>
+
+            <div v-if="whereFound && whereFound.biomes.length" class="field-row">
+              <span class="field-label">
+                Found in
+                <span class="field-help">
+                  {{ whereFound.biomes.map((b) => `${b.name} (${b.weight})`).join(', ') }} —
+                  higher numbers are commoner within that biome, not across them.
+                </span>
+              </span>
+            </div>
 
             <div v-if="preyFor.length" class="field-row">
               <span class="field-label">

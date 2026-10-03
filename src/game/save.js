@@ -286,6 +286,17 @@ function migrate(raw) {
     raw.spilledItems ??= {};
   }
 
+  // Saves from before territory existed were played on an implicit temperate
+  // forest — that is what the Anthill has always been — so they are granted the
+  // same 36 m2 a new Anthill run starts with rather than being left on nothing,
+  // which would stop every caste finding anything at all.
+  if ((raw.version ?? 0) < 5) {
+    raw.forage ??= {};
+    if (!raw.territory || Object.keys(raw.territory).length === 0) {
+      raw.territory = raw.origin ? { temperateForest: 36 } : {};
+    }
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

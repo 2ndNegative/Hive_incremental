@@ -11,7 +11,9 @@
 //
 //   unlock(lifetime, state)  true when the site can be picked
 //   unlockHint               one line shown while it is locked
-//   start                    opening conditions, applied to a blank hive
+//   start                    opening conditions, applied to a blank hive,
+//                            including the territory the site sits on — which
+//                            is what every forage roll of the run reads from
 //   effects                  display lines for the card
 //
 // A site must never be *required* to progress — it changes the shape of the
@@ -28,11 +30,13 @@ export const ORIGINS = {
       'become the first meal.',
     unlock: () => true,
     effects: [
+      '36 m² of temperate forest',
       'Standard opening stores',
       'Two drones wake immediately',
       'No structures — build from nothing',
     ],
     start: {
+      territory: { temperateForest: 36 },
       nutrients: { water: 400, protein: 300, fat: 250, carb: 200 },
       drones: 2,
       structures: {},

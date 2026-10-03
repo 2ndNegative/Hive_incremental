@@ -6,10 +6,16 @@
 //
 //   basalWatts   paid by every drone in the hive, idle included
 //   workWatts    extra draw while assigned to this caste
-//   harvest      { itemId: gramsPerSecond } per assigned drone
+//   gather       which forage route this caste works — 'forager', 'scavenger',
+//                'excavator', 'siphon' or 'hunter'. It does NOT name an item:
+//                what a caste finds is rolled from the hive's territory every
+//                forage cycle, so the same forager returns acorns in a forest
+//                and discarded bread in a city.
+//   harvestRate  grams per second per assigned drone, of whatever it rolled.
+//                For a hunter this is grams of LIVE prey, which then butchers
+//                down into a carcass worth of separate cuts.
 //   insight      insight per second per assigned drone
 //   slots        null = unlimited, otherwise a key that structures provide
-//   organism     prey species this caste butchers (harvest derived from it)
 
 export const BASAL_WATTS = 20;
 
@@ -38,7 +44,8 @@ export const CASTES = {
     assignable: true,
     slots: null,
     workWatts: 5,
-    harvest: { fresh_water: 5.0 },
+    gather: 'siphon',
+    harvestRate: 5.0,
   },
   forager: {
     id: 'forager',
@@ -48,7 +55,8 @@ export const CASTES = {
     assignable: true,
     slots: null,
     workWatts: 8,
-    harvest: { pasture_grass: 25 },
+    gather: 'forager',
+    harvestRate: 25,
   },
   analyst: {
     id: 'analyst',
@@ -69,7 +77,8 @@ export const CASTES = {
     assignable: true,
     slots: null,
     workWatts: 15,
-    harvest: { carrion: 12, leaf_litter: 15 },
+    gather: 'scavenger',
+    harvestRate: 27,
   },
   excavator: {
     id: 'excavator',
@@ -79,7 +88,8 @@ export const CASTES = {
     assignable: true,
     slots: 'excavator',
     workWatts: 25,
-    harvest: { topsoil: 50, limestone: 10 },
+    gather: 'excavator',
+    harvestRate: 60,
   },
   hunter: {
     id: 'hunter',
@@ -89,8 +99,8 @@ export const CASTES = {
     assignable: true,
     slots: 'hunter',
     workWatts: 60,
-    organism: 'deer',
-    harvestRate: 20, // grams of live mass per second per drone
+    gather: 'hunter',
+    harvestRate: 20, // grams of LIVE mass per second per drone
     mult: 'hunter',
   },
 };

@@ -13,6 +13,7 @@ const tabs = computed(() => [
   { id: 'drones', label: 'Drones', badge: state.castes.dormant || 0 },
   // The alert is the one thing the player needs to notice without looking:
   // matter is spoiling because the gut cannot keep up with the harvest.
+  { id: 'territory', label: 'Territory' },
   { id: 'storage', label: 'Storage', alert: Object.values(derived.value.itemSpill).some((r) => r > 0) },
   { id: 'metabolism', label: 'Metabolism', alert: derived.value.energy.ratio < 0.999 },
   { id: 'research', label: 'Research', badge: affordableResearch.value },

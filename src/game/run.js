@@ -15,8 +15,37 @@
 
 import { state, replaceState, createInitialState, pushLog } from './state.js';
 import { ORIGINS, originAvailability } from './definitions/origins.js';
+import { BIOMES } from './definitions/biomes.js';
 import { formatDuration } from './format.js';
 import { formatMass } from './units.js';
+
+/**
+ * Add land to the hive.
+ *
+ * This is the only way territory is ever gained, and nothing calls it yet
+ * except the landing site. It exists now so that whatever eventually does the
+ * gaining — a claim action, a structure that annexes ground over time, a
+ * prestige award, a tech that opens a biome — has one door to come through,
+ * and the forage system never has to learn about any of them.
+ *
+ * Returns the new area of that biome, or 0 if the biome or area was invalid.
+ */
+export function grantTerritory(biomeId, squareMetres) {
+  if (!BIOMES[biomeId] || !(squareMetres > 0)) return 0;
+  state.territory ??= {};
+  state.territory[biomeId] = (state.territory[biomeId] || 0) + squareMetres;
+  return state.territory[biomeId];
+}
+
+/** Give land back. Also unused for now; the counterpart of the above. */
+export function revokeTerritory(biomeId, squareMetres) {
+  if (!BIOMES[biomeId] || !(squareMetres > 0)) return 0;
+  const held = state.territory?.[biomeId] || 0;
+  const next = Math.max(0, held - squareMetres);
+  if (next <= 0) delete state.territory[biomeId];
+  else state.territory[biomeId] = next;
+  return next;
+}
 
 /** What carries over from one run to the next. */
 const PRESERVED_KEYS = ['lifetime', 'settings', 'dev'];
@@ -127,6 +156,9 @@ export function chooseOrigin(id) {
   }
   for (const [structure, count] of Object.entries(start.structures || {})) {
     state.structures[structure] = (state.structures[structure] || 0) + count;
+  }
+  for (const [biome, area] of Object.entries(start.territory || {})) {
+    grantTerritory(biome, area);
   }
   const drones = start.drones || 0;
   state.drones += drones;

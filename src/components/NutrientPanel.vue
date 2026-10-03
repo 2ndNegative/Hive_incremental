@@ -3,9 +3,10 @@ import { computed, ref } from 'vue';
 import { state, derived, showInCodex } from '../game/useGame.js';
 import { NUTRIENTS, MACROS, MICROS, ASSAY_GROUPS, isRevealed } from '../game/definitions/nutrients.js';
 import { formatMass, formatMassFlow, formatEnergy } from '../game/units.js';
-import { consumeBiomass, MANUAL_INTAKE } from '../game/actions.js';
+import { consumeBiomass, MANUAL_INTAKE, manualOdds } from '../game/actions.js';
 import { ITEMS } from '../game/definitions/items/index.js';
 import { isPinned, pinHandlers } from '../game/tips.js';
+import { BIOMES, holdings, totalArea } from '../game/definitions/biomes.js';
 
 const collapsed = ref({});
 function toggle(key) {
@@ -52,24 +53,24 @@ const groups = computed(() => {
 const hiddenCount = computed(() => MICROS.filter((id) => !isRevealed(state, id)).length);
 
 /**
- * What one manual intake yields — showing ONLY what the hive can identify.
- * Naming an unassayed compound here would hand the player the whole
- * micronutrient panel for free and undo the point of assay research, so
- * unresolved compounds are counted, never listed.
+ * A click no longer means a known mouthful. The drone picks up whatever is
+ * within reach on the hive's own land, so the tooltip shows the distribution
+ * rather than a result — and the last find is shown under the button, because
+ * a log line per click would bury everything else in the log.
  */
-const manualItem = ITEMS[MANUAL_INTAKE.itemId];
-const manualYield = computed(() => {
-  const known = [];
-  let unresolved = 0;
-  for (const [n, per100] of Object.entries(manualItem.per100g)) {
-    if (!per100) continue;
-    if (isRevealed(state, n)) {
-      known.push({ n, name: NUTRIENTS[n].name, grams: (per100 * MANUAL_INTAKE.grams) / 100 });
-    } else {
-      unresolved += 1;
-    }
-  }
-  return { known, unresolved };
+const odds = computed(() => manualOdds(6));
+const land = computed(() => holdings(state));
+const area = computed(() => totalArea(state));
+
+const lastGather = computed(() => {
+  const last = state.lastGather;
+  if (!last) return null;
+  return {
+    name: last.itemId ? ITEMS[last.itemId].name : null,
+    itemId: last.itemId,
+    biome: last.biomeId ? BIOMES[last.biomeId] : null,
+    grams: last.grams,
+  };
 });
 </script>
 
@@ -84,19 +85,32 @@ const manualYield = computed(() => {
       <span class="tip tip-side" style="display: block">
         <button class="gather-btn" @click="consumeBiomass()">Consume biomass</button>
         <span class="tip-body">
-          <span class="tip-title">
-            {{ formatMass(MANUAL_INTAKE.grams) }} of {{ manualItem.name.toLowerCase() }}
+          <span class="tip-title">{{ formatMass(MANUAL_INTAKE.grams) }} of whatever is to hand</span>
+          <span class="muted" style="display: block; margin-bottom: 0.3rem">
+            A drone picks up what it can reach on the hive's
+            {{ area.toFixed(0) }} m² and eats it where it stands. What it finds depends on the
+            ground.
           </span>
-          <span v-for="entry in manualYield.known" :key="entry.n" class="tip-row">
-            <span>{{ entry.name }}</span>
-            <span>{{ formatMass(entry.grams) }}</span>
+          <span v-for="o in odds" :key="o.itemId" class="tip-row">
+            <span>{{ o.name }}</span>
+            <span>{{ (o.chance * 100).toFixed(0) }}%</span>
           </span>
-          <span v-if="manualYield.unresolved" class="tip-row muted" style="margin-top: 0.25rem">
-            <span>+{{ manualYield.unresolved }} unresolved in this sample</span>
-            <span>?</span>
+          <span v-if="!odds.length" class="tip-row warn">
+            <span>No land, nothing within reach</span><span>—</span>
           </span>
         </span>
       </span>
+
+      <div v-if="lastGather" class="last-gather">
+        <template v-if="lastGather.name">
+          Last: {{ formatMass(lastGather.grams) }}
+          <button class="codex-link" @click="showInCodex(lastGather.itemId)">
+            {{ lastGather.name.toLowerCase() }}
+          </button>
+          <span class="muted">· {{ lastGather.biome.name.toLowerCase() }}</span>
+        </template>
+        <span v-else class="warn">Found nothing.</span>
+      </div>
     </div>
 
     <div v-for="group in groups" :key="group.key">

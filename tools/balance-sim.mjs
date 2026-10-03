@@ -21,6 +21,7 @@ import { RESEARCH, RESEARCH_ORDER } from '../src/game/definitions/research.js';
 import { STRUCTURE_ORDER, STRUCTURES } from '../src/game/definitions/structures.js';
 import { CASTE_ORDER, CASTES } from '../src/game/definitions/castes.js';
 import { NUTRIENTS, MACROS, MICROS, isRevealed } from '../src/game/definitions/nutrients.js';
+import { BIOMES, holdings, totalArea } from '../src/game/definitions/biomes.js';
 import { formatDuration } from '../src/game/format.js';
 import { formatMass, formatEnergy, formatPower, formatMassFlow } from '../src/game/units.js';
 
@@ -160,6 +161,7 @@ console.log(`starving        ${((starvedTicks / TOTAL) * 100).toFixed(1)}% of ti
       `harvest ${formatMassFlow(d.harvestRate)} (${(d.digestRatio * 100).toFixed(0)}% kept up with)`,
   );
   console.log(`storage         ${formatMass(backlog)} held, cap ${formatMass(d.itemCap)} each, ${formatMass(spoiled)} spoiled`);
+  console.log(`territory       ${totalArea(state).toFixed(0)} m² — ${holdings(state).map((h) => `${h.def.name} ${h.area.toFixed(0)}`).join(', ') || 'none'}`);
   const queued = Object.entries(state.items || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
   if (!quiet && queued.length) {
     for (const [id, grams] of queued) {

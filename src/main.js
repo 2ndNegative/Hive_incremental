@@ -8,8 +8,11 @@ import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS 
 import { runOfflineCatchup, offline, skipOffline } from './game/offline.js';
 import { NUTRIENTS, FUELS, itemYield, parentsOf } from './game/definitions/nutrients.js';
 import { ITEMS } from './game/definitions/items/index.js';
-import { ORGANISMS } from './game/definitions/organisms.js';
-import { research, ingestItem } from './game/actions.js';
+import { ORGANISMS, preyFor } from './game/definitions/organisms.js';
+import { BIOMES, BIOME_IDS, biomeShares, totalArea, holdings } from './game/definitions/biomes.js';
+import { FORAGE, poolFor } from './game/definitions/forage.js';
+import * as forage from './game/forage.js';
+import { research, ingestItem, consumeBiomass, manualOdds } from './game/actions.js';
 import { formatMass, formatEnergy, formatPower } from './game/units.js';
 import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
 import * as dev from './game/dev.js';
@@ -52,6 +55,17 @@ window.hive = {
   fuels: FUELS,
   items: ITEMS,
   organisms: ORGANISMS,
+  biomes: BIOMES,
+  biomeIds: BIOME_IDS,
+  biomeShares: () => biomeShares(state),
+  totalArea: () => totalArea(state),
+  holdings: () => holdings(state),
+  forageTable: FORAGE,
+  poolFor,
+  preyFor,
+  forage,
+  consumeBiomass,
+  manualOdds,
   canAfford,
   itemYield,
   parentsOf,

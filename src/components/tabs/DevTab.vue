@@ -1,4 +1,5 @@
 <script setup>
+import { BIOMES, BIOME_IDS } from '../../game/definitions/biomes.js';
 import { ref, computed } from 'vue';
 import { state, derived } from '../../game/useGame.js';
 import { NUTRIENTS, NUTRIENT_IDS, MACROS, MICROS, isRevealed } from '../../game/definitions/nutrients.js';
@@ -14,6 +15,8 @@ const itemGrams = ref(10000);
 const insightAmount = ref(5000);
 const droneCount = ref(10);
 const skipHours = ref(1);
+const biomeId = ref('denseUrban');
+const biomeArea = ref(36);
 
 const nutrientOptions = computed(() =>
   NUTRIENT_IDS.map((id) => ({
@@ -102,6 +105,23 @@ const SKIP_PRESETS = [
           </span>
           <button class="btn is-primary" @click="dev.fillStorage()">Fill storage</button>
           <button class="btn is-danger" @click="dev.emptyStorage()">Empty storage</button>
+        </div>
+
+        <div class="field-row">
+          <span class="field-label">
+            Territory
+            <span class="field-help">
+              Nothing in the game grants land yet. This is the only way to see a mixed holding
+              behave — every caste re-rolls against the new ground immediately.
+            </span>
+          </span>
+          <select class="fuel-select" style="max-width: 14rem" v-model="biomeId">
+            <option v-for="id in BIOME_IDS" :key="id" :value="id">{{ BIOMES[id].name }}</option>
+          </select>
+          <input class="dev-number num" type="number" v-model.number="biomeArea" min="0" />
+          <button class="btn" @click="dev.addTerritory(biomeId, biomeArea)">Claim m²</button>
+          <button class="btn" @click="dev.rerollForage()">Reroll</button>
+          <button class="btn is-danger" @click="dev.clearTerritory()">Clear</button>
         </div>
       </div>
     </div>

@@ -8,60 +8,25 @@ import { ORGANISMS } from '../../game/definitions/organisms.js';
 import { assignCaste, clearCastes } from '../../game/actions.js';
 import { DRONE_PROTEIN_COST } from '../../game/engine.js';
 import { formatMass, formatMassFlow, formatPower, formatEnergy } from '../../game/units.js';
+import { describeFind, expectedYield } from '../../game/forage.js';
+import { GATHER_TYPES } from '../../game/definitions/forage.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
 
 /**
- * What one drone in this caste brings in per second, as parts rather than a
- * string, so every name it mentions can link to its codex entry. A caste's
- * yields are the one place the player meets these items by name, and following
- * them to the full composition should not mean searching the Codex by hand.
+ * What a caste is currently on. There is no fixed yield any more — a forager
+ * finds whatever the ground it rolled had — so the row shows the find rather
+ * than a promise, and the energy figure beside it is an average over everything
+ * it could have rolled instead.
  */
-function harvestParts(def) {
-  const parts = [];
-  for (const [itemId, grams] of Object.entries(def.harvest || {})) {
-    parts.push({ kind: 'item', itemId, name: ITEMS[itemId].name, rate: formatMassFlow(grams) });
-  }
-  if (def.organism && def.harvestRate) {
-    const org = ORGANISMS[def.organism];
-    parts.push({
-      kind: 'organism',
-      organism: def.organism,
-      name: org.name,
-      rate: formatMassFlow(def.harvestRate),
-      // Prey is not a codex entry of its own; the cuts it butchers into are.
-      cuts: Object.entries(org.parts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([itemId, fraction]) => ({
-          itemId,
-          name: ITEMS[itemId].name,
-          grams: def.harvestRate * fraction,
-        })),
-    });
-  }
-  if (def.insight) parts.push({ kind: 'insight', name: `+${def.insight}/s insight` });
-  return parts;
+function findFor(id) {
+  return describeFind(state, id);
 }
 
-/** Energy value of what one drone brings in, minus what it costs to run. */
-function netLine(def) {
-  let joulesPerSecond = 0;
-  const addItem = (itemId, grams) => {
-    const item = ITEMS[itemId];
-    for (const n of Object.keys(item.per100g)) {
-      if (!NUTRIENTS[n].fuel) continue;
-      if (NUTRIENTS[n].fuelRequires && !state.tech[NUTRIENTS[n].fuelRequires]) continue;
-      joulesPerSecond +=
-        ((item.per100g[n] * grams) / 100) * NUTRIENTS[n].kjPerGram * 1000 * derived.value.efficiency[n];
-    }
-  };
-  for (const [itemId, grams] of Object.entries(def.harvest || {})) addItem(itemId, grams);
-  if (def.organism && def.harvestRate) {
-    const org = ORGANISMS[def.organism];
-    for (const [itemId, fraction] of Object.entries(org.parts)) {
-      addItem(itemId, def.harvestRate * fraction);
-    }
-  }
-  return joulesPerSecond - (def.workWatts + BASAL_WATTS);
+/** Expected energy return per drone, averaged across the hive's territory. */
+function netLine(id) {
+  const def = CASTES[id];
+  const gained = expectedYield(state, id, NUTRIENTS, state.tech, derived.value.efficiency);
+  return gained - (def.workWatts + BASAL_WATTS);
 }
 
 const rows = computed(() =>
@@ -79,8 +44,9 @@ const rows = computed(() =>
         limited: Number.isFinite(slots),
         canAdd: state.castes.dormant > 0 && assigned < slots,
         canRemove: assigned > 0,
-        harvest: harvestParts(def),
-        net: netLine(def),
+        gathers: Boolean(def.gather),
+        found: def.gather ? findFor(id) : null,
+        net: netLine(id),
         watts: def.workWatts + BASAL_WATTS,
       };
     }),
@@ -136,49 +102,32 @@ const growthPercent = computed(() => Math.floor((state.growth || 0) * 100));
             <span class="job-name">{{ r.def.name }}</span>
             <span class="muted" style="font-size: 0.74rem"> · {{ formatPower(r.watts) }}/drone</span>
             <span v-if="r.net > 0" class="good" style="font-size: 0.74rem">
-              · net {{ formatPower(r.net) }}
+              · net {{ formatPower(r.net) }}<span class="muted"> avg</span>
             </span>
-            <span v-else-if="r.def.harvest || r.def.organism" class="bad" style="font-size: 0.74rem">
-              · net {{ formatPower(r.net) }}
+            <span v-else-if="r.gathers" class="bad" style="font-size: 0.74rem">
+              · net {{ formatPower(r.net) }}<span class="muted"> avg</span>
             </span>
             <br />
             <span class="job-desc">
               {{ r.def.desc }}
-              <em>Yields:</em>&nbsp;
-              <template v-if="!r.harvest.length">nothing</template>
-              <template v-for="(part, i) in r.harvest" :key="i">
-                <span v-if="i" class="muted"> · </span>
-                <template v-if="part.kind === 'item'">
-                  {{ part.rate }}
-                  <button class="codex-link" @click="showInCodex(part.itemId)">{{ part.name }}</button>
+              <template v-if="r.gathers">
+                <em>{{ GATHER_TYPES[r.def.gather].name }}</em>,
+                {{ formatMassFlow(r.def.harvestRate) }} per drone.
+                <template v-if="r.found.empty">
+                  <span class="warn">{{ r.found.label }}.</span>
                 </template>
-                <template v-else-if="part.kind === 'organism'">
-                  {{ part.rate }} live
-                  <span
-                    class="tip"
-                    :class="{ 'is-pinned': isPinned(`prey:${r.id}`) }"
-                    v-on="pinHandlers(`prey:${r.id}`)"
-                  >
-                    <span class="tip-link">{{ part.name }}</span>
-                    <span class="tip-body">
-                      <span class="tip-title">{{ part.name }}, butchered</span>
-                      <span class="muted" style="display: block; margin-bottom: 0.3rem">
-                        What one drone recovers per second. Any of these opens in the Codex.
-                      </span>
-                      <span v-for="cut in part.cuts" :key="cut.itemId" class="tip-row">
-                        <span>
-                          <button class="codex-link" @click="showInCodex(cut.itemId)">{{ cut.name }}</button>
-                        </span>
-                        <span>{{ formatMassFlow(cut.grams) }}</span>
-                      </span>
-                      <span class="tip-hint">
-                        {{ isPinned(`prey:${r.id}`) ? 'Pinned — Escape to release' : 'Middle-click to pin' }}
-                      </span>
-                    </span>
-                  </span>
+                <template v-else>
+                  Currently on
+                  <button
+                    v-if="r.found.itemId"
+                    class="codex-link"
+                    @click="showInCodex(r.found.itemId)"
+                  >{{ r.found.label.toLowerCase() }}</button>
+                  <strong v-else>{{ r.found.label.toLowerCase() }}</strong>
+                  in {{ r.found.biome.name.toLowerCase() }}.
                 </template>
-                <template v-else>{{ part.name }}</template>
               </template>
+              <template v-else-if="r.def.insight">Yields +{{ r.def.insight }}/s insight.</template>
             </span>
           </span>
 

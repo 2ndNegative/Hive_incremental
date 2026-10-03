@@ -14,7 +14,7 @@ import { STRUCTURE_ORDER } from './definitions/structures.js';
 import { CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -51,6 +51,21 @@ export function createInitialState() {
     // from here; a hive that cannot digest fast enough visibly backs up.
     items: {},
     spilledItems: {}, // lifetime item mass lost to full storage, per item
+
+    // Land held, in square metres, keyed by biome. What the hive holds decides
+    // what it can find; the landing site seeds it and nothing else adds to it
+    // yet. See run.js grantTerritory, which is the one way in.
+    territory: {},
+
+    // What the last manual gather turned up, so the panel can show it without
+    // putting a line in the log for every single click.
+    lastGather: null,
+
+    // What each gathering caste is working on right now: the biome it rolled,
+    // the item (or prey) it found there, and how long it has been on it. Rolled
+    // in tick(), never in computeDerived — the interface reads this, so it has
+    // to be the same from one frame to the next.
+    forage: {},
     insight: 0,
     drones: 0,
 
@@ -126,6 +141,7 @@ export function createInitialState() {
       selectedItem: null,
       storageSort: 'mass',
       storageSearch: '',
+      territoryGather: 'forager',
       pinnedTip: null,
     },
 

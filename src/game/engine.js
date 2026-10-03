@@ -54,6 +54,8 @@ import {
 import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import { ORGANISMS } from './definitions/organisms.js';
+import { BIOMES } from './definitions/biomes.js';
+import { advanceForage } from './forage.js';
 
 export const TICK_MS = 100;
 export const TICK_SECONDS = TICK_MS / 1000;
@@ -297,34 +299,56 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   const itemSources = {}; // itemId -> [{ label, amount, casteId, organism }]
   let insightRate = 0;
 
+  // What each caste is currently bringing in. The find was rolled in tick();
+  // this only reads it, so the same numbers come back however many times the
+  // interface asks.
+  const forage = {};
+
   for (const id of CASTE_ORDER) {
     const assigned = state.castes[id] || 0;
     const def = CASTES[id];
     if (!assigned || !def.assignable) continue;
     const scale = (1 + (def.mult ? mult[def.mult] || 0 : 0)) * energyRatio;
 
-    for (const [itemId, perDrone] of Object.entries(def.harvest || {})) {
-      const amount = perDrone * assigned * scale;
-      itemFlow[itemId] = (itemFlow[itemId] || 0) + amount;
-      (itemSources[itemId] ||= []).push({
-        label: `${def.name} ×${assigned}`,
-        amount,
+    if (def.gather && def.harvestRate) {
+      const slot = state.forage?.[id];
+      const biome = slot?.biomeId ? BIOMES[slot.biomeId] : null;
+      const where = biome ? ` in ${biome.name.toLowerCase()}` : '';
+      forage[id] = {
         casteId: id,
-      });
-    }
+        gather: def.gather,
+        biomeId: slot?.biomeId ?? null,
+        itemId: slot?.itemId ?? null,
+        organismId: slot?.organismId ?? null,
+        rate: def.harvestRate * assigned * scale,
+        empty: !slot?.itemId && !slot?.organismId,
+      };
 
-    // Hunters butcher a whole organism; the yield table does the rest.
-    if (def.organism && def.harvestRate) {
-      const org = ORGANISMS[def.organism];
-      const liveGrams = def.harvestRate * assigned * scale;
-      for (const [itemId, fraction] of Object.entries(org.parts)) {
-        const amount = liveGrams * fraction;
-        itemFlow[itemId] = (itemFlow[itemId] || 0) + amount;
-        (itemSources[itemId] ||= []).push({
-          label: `${def.name} ×${assigned} working ${org.name}`,
+      if (def.gather === 'hunter' && slot?.organismId) {
+        // A hunter brings back a carcass, not a cut: one roll becomes a dozen
+        // different items at once, which is what makes hunting feel unlike
+        // every other caste.
+        const org = ORGANISMS[slot.organismId];
+        const liveGrams = def.harvestRate * assigned * scale;
+        for (const [itemId, fraction] of Object.entries(org.parts)) {
+          const amount = liveGrams * fraction;
+          itemFlow[itemId] = (itemFlow[itemId] || 0) + amount;
+          (itemSources[itemId] ||= []).push({
+            label: `${def.name} ×${assigned} working ${org.name}${where}`,
+            amount,
+            casteId: id,
+            organism: slot.organismId,
+            biomeId: slot.biomeId,
+          });
+        }
+      } else if (slot?.itemId) {
+        const amount = def.harvestRate * assigned * scale;
+        itemFlow[slot.itemId] = (itemFlow[slot.itemId] || 0) + amount;
+        (itemSources[slot.itemId] ||= []).push({
+          label: `${def.name} ×${assigned}${where}`,
           amount,
           casteId: id,
-          organism: def.organism,
+          biomeId: slot.biomeId,
         });
       }
     }
@@ -452,6 +476,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     flowSources,
     itemFlow,
     itemSources,
+    forage,
     itemNet,
     itemSpill,
     itemCap,
@@ -531,6 +556,9 @@ export function etaFor(state, derived, cost) {
 /* ------------------------------------------------------------------- the tick */
 
 export function tick(state, dt) {
+  // Derived first, forage after: this tick delivers what the castes were
+  // already carrying, and only then do they go out and find the next thing.
+  // Rolling first would mean a find the player never saw arrive.
   const derived = computeDerived(state, dt);
 
   // Storage first: `itemNet` already has the cap and the spoilage folded in,
@@ -611,6 +639,8 @@ export function tick(state, dt) {
   if (assigned !== state.drones) {
     state.castes.dormant = Math.max(0, state.castes.dormant + (state.drones - assigned));
   }
+
+  advanceForage(state, dt);
 
   state.stats.peakDrones = Math.max(state.stats.peakDrones, state.drones);
   state.playtime += dt;

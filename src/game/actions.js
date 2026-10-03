@@ -16,8 +16,10 @@ import { RESEARCH } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import { structureCost, canAfford, computeDerived, affordableCount } from './engine.js';
 import { formatMass } from './units.js';
+import { biomeShares } from './definitions/biomes.js';
+import { poolFor } from './definitions/forage.js';
+import { pickWeighted } from './forage.js';
 
-const MANUAL_ITEM = 'pasture_grass';
 const MANUAL_GRAMS = 40;
 
 /**
@@ -44,13 +46,64 @@ export function ingestItem(itemId, grams) {
   return grams;
 }
 
-/** The click action. */
+/**
+ * The click action: a drone picks up whatever is within reach and eats it.
+ *
+ * Reach means the hive's own land, so the roll is the same two-stage roll every
+ * caste makes — a biome by area share, then something from it. It draws on the
+ * foraged and scavenged pools together, because those are the two things a
+ * drone can simply pick up; rock has to be dug and water has to be siphoned.
+ *
+ * Unlike a caste's harvest this goes straight to the nutrient stores rather
+ * than into storage. One drone chewing a mouthful does not need an organ.
+ */
 export function consumeBiomass() {
   state.stats.clicks += 1;
-  return ingestItem(MANUAL_ITEM, MANUAL_GRAMS);
+
+  const shares = biomeShares(state);
+  const biome = pickWeighted(Object.entries(shares).map(([id, weight]) => ({ id, weight })));
+  if (!biome) {
+    state.lastGather = { itemId: null, biomeId: null, grams: 0 };
+    return 0;
+  }
+
+  const pool = [...poolFor('forager', biome.id), ...poolFor('scavenger', biome.id)];
+  const found = pickWeighted(pool);
+  if (!found) {
+    state.lastGather = { itemId: null, biomeId: biome.id, grams: 0 };
+    return 0;
+  }
+
+  state.lastGather = { itemId: found.itemId, biomeId: biome.id, grams: MANUAL_GRAMS };
+  return ingestItem(found.itemId, MANUAL_GRAMS);
 }
 
-export const MANUAL_INTAKE = { itemId: MANUAL_ITEM, grams: MANUAL_GRAMS };
+export const MANUAL_INTAKE = { grams: MANUAL_GRAMS };
+
+/**
+ * What a click could turn up, likeliest first — the whole distribution rather
+ * than a prediction, since the roll happens on the click. Shares are folded in,
+ * so a hive that is nine parts city shows city food at the top.
+ */
+export function manualOdds(limit = 8) {
+  const shares = biomeShares(state);
+  const weights = {};
+  let total = 0;
+  for (const [biomeId, share] of Object.entries(shares)) {
+    const pool = [...poolFor('forager', biomeId), ...poolFor('scavenger', biomeId)];
+    const sum = pool.reduce((a, e) => a + e.weight, 0);
+    if (sum <= 0) continue;
+    for (const { itemId, weight } of pool) {
+      const p = share * (weight / sum);
+      weights[itemId] = (weights[itemId] || 0) + p;
+      total += p;
+    }
+  }
+  return Object.entries(weights)
+    .map(([itemId, p]) => ({ itemId, name: ITEMS[itemId].name, chance: total > 0 ? p / total : 0 }))
+    .sort((a, b) => b.chance - a.chance)
+    .slice(0, limit);
+}
 
 /* ----------------------------------------------------------------- structures */
 

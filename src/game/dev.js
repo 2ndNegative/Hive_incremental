@@ -11,6 +11,9 @@ import { ASSAY_GROUPS } from './definitions/nutrients.js';
 import { computeDerived, advance } from './engine.js';
 import { ingestItem } from './actions.js';
 import { ITEMS } from './definitions/items/index.js';
+import { BIOMES, BIOME_IDS } from './definitions/biomes.js';
+import { grantTerritory } from './run.js';
+import { resetForage } from './forage.js';
 import { formatMass } from './units.js';
 import { formatDuration } from './format.js';
 
@@ -107,6 +110,35 @@ export function emptyStorage() {
   state.items = {};
   touch();
   pushLog('Storage emptied.', 'info');
+}
+
+/* ---------------------------------------------------------------- territory */
+
+/**
+ * Hand the hive land. There is no legitimate way to gain territory yet, so this
+ * is also the only way to see a mixed holding behave before expansion exists.
+ */
+export function addTerritory(biomeId, squareMetres) {
+  const area = grantTerritory(biomeId, squareMetres);
+  if (!area) return 0;
+  resetForage(state); // every caste re-rolls against the new ground
+  touch();
+  pushLog(`Claimed ${squareMetres} m² of ${BIOMES[biomeId].name.toLowerCase()}.`, 'unlock');
+  return area;
+}
+
+export function clearTerritory() {
+  state.territory = {};
+  resetForage(state);
+  touch();
+  pushLog('All territory released.', 'info');
+}
+
+/** Force every caste to find something new right now. */
+export function rerollForage() {
+  resetForage(state);
+  touch();
+  pushLog('Every caste sent back out.', 'info');
 }
 
 /* ------------------------------------------------- insight, drones, research */

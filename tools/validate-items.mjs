@@ -20,11 +20,16 @@
  *   4. Plausibility — no negative values, no micronutrient exceeding 1% of mass
  *      unless the item is a mineral or is flagged as an outlier.
  *   5. Referential integrity — organism parts must name real items.
+ *   6. Forage coverage — every item must be classified in forage.js, name real
+ *      biomes, and be reachable by SOME route; every biome must offer every
+ *      caste something, or a hive made of it strands that caste.
  */
 
 import { ITEMS, ITEM_IDS, itemJoulesPerGram } from '../src/game/definitions/items/index.js';
 import { ORGANISMS, ORGANISM_IDS } from '../src/game/definitions/organisms.js';
 import { NUTRIENTS, MACROS, MICROS, parentsOf } from '../src/game/definitions/nutrients.js';
+import { FORAGE, hasDirectRoute, poolFor } from '../src/game/definitions/forage.js';
+import { BIOMES, BIOME_IDS } from '../src/game/definitions/biomes.js';
 import { formatEnergy } from '../src/game/units.js';
 
 const verbose = process.argv.includes('--verbose');
@@ -199,6 +204,52 @@ for (const oid of ORGANISM_IDS) {
   if (total < 0.3) warn(`organism ${oid}`, `only ${(total * 100).toFixed(0)}% of live mass is recovered`);
 }
 
+/* 6. forage coverage */
+{
+  const fromPrey = new Set();
+  for (const oid of ORGANISM_IDS) {
+    if (!ORGANISMS[oid].biomes || Object.keys(ORGANISMS[oid].biomes).length === 0) {
+      err(`organism ${oid}`, 'lives in no biome, so it can never be hunted');
+    }
+    for (const b of Object.keys(ORGANISMS[oid].biomes || {})) {
+      if (!BIOMES[b]) err(`organism ${oid}`, `names unknown biome "${b}"`);
+    }
+    for (const itemId of Object.keys(ORGANISMS[oid].parts)) fromPrey.add(itemId);
+  }
+
+  for (const id of ITEM_IDS) {
+    const entry = FORAGE[id];
+    if (!entry) {
+      err(id, 'is not classified in forage.js — it can never be found anywhere');
+      continue;
+    }
+    for (const b of Object.keys(entry.biomes)) {
+      if (!BIOMES[b]) err(id, `names unknown biome "${b}"`);
+    }
+    if (!entry.gather.length) err(id, 'has no gather type, so no caste can collect it');
+    if (!hasDirectRoute(id) && !fromPrey.has(id)) {
+      err(id, 'has no direct route and is not butchered from any prey — unobtainable');
+    }
+  }
+  for (const id of Object.keys(FORAGE)) {
+    if (!ITEMS[id]) err('forage.js', `classifies "${id}", which is not an item`);
+  }
+
+  // A biome that offers a caste nothing strands that caste on a hive made of
+  // it. Deserts having no standing fresh water is the one deliberate case.
+  const ALLOWED_GAPS = new Set(['desert:siphon']);
+  for (const b of BIOME_IDS) {
+    for (const g of ['forager', 'scavenger', 'excavator', 'siphon']) {
+      if (poolFor(g, b).length === 0 && !ALLOWED_GAPS.has(`${b}:${g}`)) {
+        warn(`biome ${b}`, `offers a ${g} nothing at all`);
+      }
+    }
+    if (ORGANISM_IDS.every((o) => !(ORGANISMS[o].biomes?.[b] > 0))) {
+      warn(`biome ${b}`, 'has no prey, so a hunter working it comes back empty');
+    }
+  }
+}
+
 /* ------------------------------------------------------------------ report */
 
 const byConfidence = {};
@@ -212,6 +263,7 @@ console.log(`\n=== item database ===`);
 console.log(`items          ${ITEM_IDS.length}`);
 console.log(`organisms      ${ORGANISM_IDS.length}`);
 console.log(`nutrients      ${MACROS.length} macro + ${MICROS.length} micro`);
+console.log(`biomes         ${BIOME_IDS.length}, all ${ITEM_IDS.length} items classified`);
 console.log(`confidence     ${Object.entries(byConfidence).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 console.log(`coverage       ${Object.entries(byCoverage).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 
