@@ -1419,46 +1419,111 @@ textarea.save-box {
 
 /* ----------------------------------------------------------------- territory */
 
-.terr-row {
-  display: grid;
-  grid-template-columns: minmax(8rem, 1fr) 6rem 4rem;
-  align-items: baseline;
-  gap: 0.15rem 0.9rem;
-  padding: 0.35rem 0.6rem;
-}
-
-.terr-row + .terr-row {
-  border-top: 1px solid var(--border);
-}
-
-.terr-name .terr-climate {
-  font-size: 0.68rem;
-  margin-left: 0.4rem;
-}
-
-.terr-area,
-.terr-share {
-  text-align: right;
-  font-size: 0.8rem;
-}
-
-.terr-bar {
-  grid-column: 1 / -1;
-  height: 3px;
+/* The treemap. Tiles are absolutely positioned in percentages, so the map
+   stretches with the panel and never needs measuring. */
+.terr-map {
+  position: relative;
+  width: 100%;
+  height: 300px;
   background: var(--bg-deep);
-  border-radius: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
-.terr-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--accent, #6cf);
+.terr-tile {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 1px;
+  padding: 6px 8px;
+  overflow: hidden;
+  /* The gap between tiles is a border rather than a margin, so the geometry
+     stays exactly proportional — insetting the boxes would quietly shrink the
+     small ones more than the large ones. */
+  border: 1px solid var(--bg-deep);
+  border-radius: 2px;
+  /* A holding a millionth the size of the biggest one is laid out at its true
+     (sub-pixel) size. This keeps it visible and hoverable without the layout
+     lying about its share. */
+  min-width: 3px;
+  min-height: 3px;
 }
 
-.terr-desc {
-  grid-column: 1 / -1;
-  font-size: 0.74rem;
+.terr-tile:hover {
+  border-color: var(--text-strong);
+  z-index: 70;
+}
+
+.terr-tile.is-pinned {
+  border-color: var(--accent);
+}
+
+.terr-tile-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terr-tile-figure {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .terr-map {
+    height: 380px;
+  }
+}
+
+/* The legend is where a 0.4% sliver gets its name said out loud. */
+.terr-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 0.1rem 1rem;
+  margin-top: 0.6rem;
+}
+
+.terr-key {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.75rem;
+  padding: 0.1rem 0;
+}
+
+.terr-key-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.terr-key-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terr-key-num {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.terr-key-pct {
+  font-size: 0.7rem;
+  color: var(--text-strong);
+  width: 2.4rem;
+  text-align: right;
 }
 
 .offer-head {

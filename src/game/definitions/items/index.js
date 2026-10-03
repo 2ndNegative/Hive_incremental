@@ -8,9 +8,11 @@
 import animal from './animal.js';
 import plant from './plant.js';
 import material from './material.js';
+import processed from './processed.js';
+import wild from './wild.js';
 import { normalizeItem, CATEGORIES } from './normalize.js';
 
-const RAW = [...animal, ...plant, ...material];
+const RAW = [...animal, ...plant, ...material, ...processed, ...wild];
 
 export const ITEMS = {};
 for (const raw of RAW) {

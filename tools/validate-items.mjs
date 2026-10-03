@@ -237,15 +237,22 @@ for (const oid of ORGANISM_IDS) {
 
   // A biome that offers a caste nothing strands that caste on a hive made of
   // it. Deserts having no standing fresh water is the one deliberate case.
-  const ALLOWED_GAPS = new Set(['desert:siphon']);
+  // Deliberate: a desert has no standing fresh water, and there is nothing to
+  // dig in open water — the seabed biomes are where a hive mines the ocean.
+  const ALLOWED_GAPS = new Set([
+    'desert:siphon',
+    'openOcean:excavator', 'twilightZone:excavator', 'polarSea:excavator',
+  ]);
   for (const b of BIOME_IDS) {
     for (const g of ['forager', 'scavenger', 'excavator', 'siphon']) {
       if (poolFor(g, b).length === 0 && !ALLOWED_GAPS.has(`${b}:${g}`)) {
         warn(`biome ${b}`, `offers a ${g} nothing at all`);
       }
     }
-    if (ORGANISM_IDS.every((o) => !(ORGANISMS[o].biomes?.[b] > 0))) {
-      warn(`biome ${b}`, 'has no prey, so a hunter working it comes back empty');
+    // A hunter's pool is prey AND huntable items, so both count here.
+    const prey = ORGANISM_IDS.filter((o) => ORGANISMS[o].biomes?.[b] > 0).length;
+    if (prey + poolFor('hunter', b).length === 0) {
+      warn(`biome ${b}`, 'has nothing to hunt, so a hunter working it comes back empty');
     }
   }
 }

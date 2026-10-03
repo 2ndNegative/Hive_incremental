@@ -13,7 +13,8 @@
  */
 import { computed } from 'vue';
 import { state, derived, showInCodex } from '../../game/useGame.js';
-import { BIOMES, CLIMATES, holdings, totalArea, biomeShares } from '../../game/definitions/biomes.js';
+import { BIOMES, CLIMATES, holdings, totalArea, biomeShares, needsLightText } from '../../game/definitions/biomes.js';
+import { squarify } from '../../game/treemap.js';
 import { GATHER_TYPES, poolFor } from '../../game/definitions/forage.js';
 import { ORGANISMS, preyFor } from '../../game/definitions/organisms.js';
 import { ITEMS } from '../../game/definitions/items/index.js';
@@ -25,6 +26,54 @@ import { isPinned, pinHandlers } from '../../game/tips.js';
 const area = computed(() => totalArea(state));
 const land = computed(() => holdings(state)); // already sorted largest first
 const shares = computed(() => biomeShares(state));
+
+/**
+ * The holdings as a treemap. Laid out against a fixed virtual frame and then
+ * expressed in percentages, so it stretches with the panel without having to
+ * measure anything — the aspect ratio only has to be roughly right for the
+ * tiles to come out roughly square.
+ */
+const FRAME = { w: 1000, h: 300 };
+const tiles = computed(() =>
+  squarify(land.value.map((h) => ({ id: h.id, value: h.area })), FRAME.w, FRAME.h).map((t) => {
+    const def = BIOMES[t.id];
+    const share = shares.value[t.id] || 0;
+    // A tile too small for its own name hands the job to the legend below.
+    const roomForName = t.w > 120 && t.h > 40;
+    const roomForFigure = t.w > 74 && t.h > 22;
+    return {
+      id: t.id,
+      def,
+      share,
+      area: t.value,
+      roomForName,
+      roomForFigure,
+      ink: needsLightText(def.colour) ? '#eef1f5' : '#0f1113',
+      inkDim: needsLightText(def.colour) ? 'rgba(238,241,245,0.78)' : 'rgba(15,17,19,0.74)',
+      style: {
+        left: `${(t.x / FRAME.w) * 100}%`,
+        top: `${(t.y / FRAME.h) * 100}%`,
+        width: `${(t.w / FRAME.w) * 100}%`,
+        height: `${(t.h / FRAME.h) * 100}%`,
+        background: def.colour,
+      },
+    };
+  }),
+);
+
+/** What the selected gather type would find on one biome, for its tooltip. */
+function topFinds(biomeId, limit = 4) {
+  const raw =
+    gather.value === 'hunter'
+      ? [...preyFor(biomeId).map((p) => ({ name: ORGANISMS[p.organismId].name, weight: p.weight })),
+         ...poolFor('hunter', biomeId).map((p) => ({ name: ITEMS[p.itemId].name, weight: p.weight }))]
+      : poolFor(gather.value, biomeId).map((p) => ({ name: ITEMS[p.itemId].name, weight: p.weight }));
+  const total = raw.reduce((a, e) => a + e.weight, 0);
+  return raw
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, limit)
+    .map((e) => ({ ...e, chance: total > 0 ? e.weight / total : 0 }));
+}
 
 const GATHERS = ['forager', 'scavenger', 'hunter', 'excavator', 'siphon'];
 const gather = computed({
@@ -90,16 +139,62 @@ const working = computed(() =>
         </span>
       </div>
 
-      <div v-else class="panel-body tight">
-        <div v-for="h in land" :key="h.id" class="terr-row">
-          <span class="terr-name">
-            {{ h.def.name }}
-            <span class="muted terr-climate">{{ CLIMATES[h.def.climate] }}</span>
-          </span>
-          <span class="terr-area num">{{ h.area.toFixed(0) }} m²</span>
-          <span class="terr-share num">{{ ((shares[h.id] || 0) * 100).toFixed(0) }}%</span>
-          <span class="terr-bar"><span :style="{ width: `${(shares[h.id] || 0) * 100}%` }" /></span>
-          <span class="terr-desc muted">{{ h.def.desc }}</span>
+      <div v-else class="panel-body">
+        <!-- Every tile's AREA is its share of the next roll. No axis to read
+             and no bars to compare: the biggest thing on screen is the thing
+             the hive is most likely to find. -->
+        <div class="terr-map">
+          <div
+            v-for="t in tiles"
+            :key="t.id"
+            class="terr-tile tip"
+            :class="{ 'is-pinned': isPinned(`terr:${t.id}`) }"
+            :style="t.style"
+            v-on="pinHandlers(`terr:${t.id}`)"
+          >
+            <span v-if="t.roomForName" class="terr-tile-name" :style="{ color: t.ink }">
+              {{ t.def.name }}
+            </span>
+            <span v-if="t.roomForFigure" class="terr-tile-figure" :style="{ color: t.inkDim }">
+              {{ t.area.toFixed(0) }} m² · {{ (t.share * 100).toFixed(0) }}%
+            </span>
+
+            <span class="tip-body">
+              <span class="tip-title">{{ t.def.name }}</span>
+              <span class="muted" style="display: block; margin-bottom: 0.3rem">
+                {{ CLIMATES[t.def.climate] }} · {{ t.def.desc }}
+              </span>
+              <span class="tip-row">
+                <span>Held</span>
+                <span>{{ t.area.toFixed(0) }} m²</span>
+              </span>
+              <span class="tip-row">
+                <span>Share of every roll</span>
+                <span>{{ (t.share * 100).toFixed(1) }}%</span>
+              </span>
+              <hr style="border-color: var(--border); margin: 0.3rem 0" />
+              <span class="tip-title" style="font-size: 0.72rem">
+                Likeliest {{ GATHER_TYPES[gather].name.toLowerCase() }} here
+              </span>
+              <span v-for="fnd in topFinds(t.id)" :key="fnd.name" class="tip-row">
+                <span>{{ fnd.name }}</span>
+                <span>{{ (fnd.chance * 100).toFixed(0) }}%</span>
+              </span>
+              <span v-if="!topFinds(t.id).length" class="tip-row warn">
+                <span>Nothing for this caste</span><span>—</span>
+              </span>
+            </span>
+          </div>
+        </div>
+
+        <!-- The legend carries the slivers the map has no room to label. -->
+        <div class="terr-legend">
+          <div v-for="h in land" :key="h.id" class="terr-key">
+            <span class="terr-key-dot" :style="{ background: h.def.colour }"></span>
+            <span class="terr-key-name">{{ h.def.name }}</span>
+            <span class="terr-key-num num">{{ h.area.toFixed(0) }} m²</span>
+            <span class="terr-key-pct num">{{ ((shares[h.id] || 0) * 100).toFixed(0) }}%</span>
+          </div>
         </div>
       </div>
     </div>

@@ -13,6 +13,11 @@
 //
 //   id        stable key, used in saves
 //   name      what the player sees
+//   colour    the tile in the territory treemap. Chosen to differ in LIGHTNESS
+//             as well as hue, so the map is still readable without colour
+//             vision — the depth gradient from shelf to abyss is the clearest
+//             example, and it doubles as the thing that makes the sea look
+//             like the sea.
 //   climate   grouping for the interface only
 //   desc      one line of flavour that also tells the player what it is for
 //
@@ -26,24 +31,28 @@ export const BIOMES = {
   temperateForest: {
     id: 'temperateForest',
     name: 'Temperate forest',
+    colour: '#4a7c4e',
     climate: 'forest',
     desc: 'Broadleaf woodland with a deep litter layer. Mast years, browsing deer, and more fungus than anything else here.',
   },
   temperateRainforest: {
     id: 'temperateRainforest',
     name: 'Temperate rainforest',
+    colour: '#35705f',
     climate: 'forest',
     desc: 'Wet, cool and permanently dripping. Enormous standing biomass, slow to rot, and salmon coming up the rivers.',
   },
   tropicalRainforest: {
     id: 'tropicalRainforest',
     name: 'Tropical rainforest',
+    colour: '#5b9e3f',
     climate: 'forest',
     desc: 'The densest standing biomass on the planet, and the fastest turnover. Fruit year-round, insects without end.',
   },
   taiga: {
     id: 'taiga',
     name: 'Taiga',
+    colour: '#3a5f52',
     climate: 'cold',
     desc: 'Boreal conifer. Poor, acidic, frozen half the year — but vast, and almost nothing competes for it.',
   },
@@ -53,30 +62,35 @@ export const BIOMES = {
   grassland: {
     id: 'grassland',
     name: 'Temperate grassland',
+    colour: '#b5a04a',
     climate: 'open',
     desc: 'Prairie and steppe. Grass to the horizon, deep black soil beneath it, and herds that follow the rain.',
   },
   savanna: {
     id: 'savanna',
     name: 'Tropical savanna',
+    colour: '#c08a3e',
     climate: 'open',
     desc: 'Grass and scattered trees under a hard sun. Seasonal, locust-prone, and crossed by very large animals.',
   },
   tundra: {
     id: 'tundra',
     name: 'Tundra',
+    colour: '#8fa3a8',
     climate: 'cold',
     desc: 'Permafrost under lichen and dwarf shrub. Almost no energy in it, and what there is arrives for eight weeks a year.',
   },
   desert: {
     id: 'desert',
     name: 'Desert',
+    colour: '#d4a259',
     climate: 'arid',
     desc: 'Mineral-rich and biologically empty. Nothing to eat, everything to dig — evaporites sit on the surface here.',
   },
   alpine: {
     id: 'alpine',
     name: 'Alpine',
+    colour: '#7d8794',
     climate: 'cold',
     desc: 'Above the treeline. Thin air, bare rock, exposed ore bodies and a short violent growing season.',
   },
@@ -86,20 +100,100 @@ export const BIOMES = {
   wetland: {
     id: 'wetland',
     name: 'Wetland',
+    colour: '#5f9080',
     climate: 'water',
     desc: 'Marsh, bog and fen. Waterlogged, anaerobic, and the most productive ground per square metre on Earth.',
   },
   riverine: {
     id: 'riverine',
-    name: 'River and lake',
+    name: 'River',
+    colour: '#3d7fa6',
     climate: 'water',
-    desc: 'Fresh water in quantity, with everything that comes to drink from it and everything that lives in it.',
+    desc: 'Running fresh water. Everything that lives in it has to hold station, and everything on land comes to drink.',
   },
+  lake: {
+    id: 'lake',
+    name: 'Freshwater lake',
+    colour: '#4b8fb8',
+    climate: 'water',
+    desc: 'Standing fresh water, stratified and slow. Poorer per litre than a river but vastly larger, and it holds what it grows.',
+  },
+
+  /* ---------------------------------------------------------------- marine -- */
+  //
+  // The sea is layered, and the layers are not interchangeable. Sunlight stops
+  // at about 200 m and everything below it is living on what falls from above,
+  // which is why the deep entries are sparse, strange and mostly water.
+
   coast: {
     id: 'coast',
     name: 'Coast',
-    climate: 'water',
+    colour: '#4aa3b5',
+    climate: 'marine',
     desc: 'Intertidal rock and sand. Shellfish, weed and brine — the richest source of trace elements the planet offers.',
+  },
+  estuary: {
+    id: 'estuary',
+    name: 'Estuary',
+    colour: '#5a9aa0',
+    climate: 'marine',
+    desc: 'Where the river meets the tide. Brackish, turbid, and a nursery for half the species on the shelf.',
+  },
+  kelpForest: {
+    id: 'kelpForest',
+    name: 'Kelp forest',
+    colour: '#2f7d6a',
+    climate: 'marine',
+    desc: 'Standing algal forest in cold shallow water. It grows half a metre a day and shelters everything that eats it.',
+  },
+  coralReef: {
+    id: 'coralReef',
+    name: 'Coral reef',
+    colour: '#d96f8a',
+    climate: 'marine',
+    desc: 'A limestone city built by animals. Extraordinary diversity packed onto almost no nutrient at all.',
+  },
+  continentalShelf: {
+    id: 'continentalShelf',
+    name: 'Continental shelf',
+    colour: '#3f6f94',
+    climate: 'marine',
+    desc: 'Shallow seabed out to the drop-off. Flatfish on the bottom, shoals above it, and most of the planet\'s fishing.',
+  },
+  openOcean: {
+    id: 'openOcean',
+    name: 'Open ocean',
+    colour: '#2f5f8f',
+    climate: 'marine',
+    desc: 'The sunlit surface layer, out of sight of land. Thin, enormous, and crossed by the fastest animals in the sea.',
+  },
+  twilightZone: {
+    id: 'twilightZone',
+    name: 'Twilight zone',
+    colour: '#3b4f78',
+    climate: 'marine',
+    desc: 'Two hundred metres down to a thousand. The largest animal biomass on the planet lives here and rises every night to feed.',
+  },
+  abyssalPlain: {
+    id: 'abyssalPlain',
+    name: 'Abyssal plain',
+    colour: '#2a3550',
+    climate: 'marine',
+    desc: 'Cold, dark, four kilometres down and flat to the horizon. Everything alive here is waiting for something to fall.',
+  },
+  hydrothermalVent: {
+    id: 'hydrothermalVent',
+    name: 'Hydrothermal vent',
+    colour: '#b5563f',
+    climate: 'marine',
+    desc: 'Superheated mineral water on the ocean floor, and an ecosystem running on sulfide instead of sunlight. The hive should find this very interesting.',
+  },
+  polarSea: {
+    id: 'polarSea',
+    name: 'Polar sea',
+    colour: '#9fc0cf',
+    climate: 'marine',
+    desc: 'Sea ice and the water beneath it. Algae grow on the underside of the ice, krill eat the algae, and everything else eats the krill.',
   },
 
   /* --------------------------------------------------------------- human -- */
@@ -107,24 +201,28 @@ export const BIOMES = {
   farmland: {
     id: 'farmland',
     name: 'Farmland',
+    colour: '#9aad3e',
     climate: 'built',
     desc: 'Monoculture at scale. A biosphere reduced to six species and fed deliberately, which makes it absurdly easy to raid.',
   },
   lightUrban: {
     id: 'lightUrban',
     name: 'Light urban',
+    colour: '#8a7f9c',
     climate: 'built',
     desc: 'Suburb and village. Gardens, bins, pets, and a density of discarded food no wild habitat can match.',
   },
   denseUrban: {
     id: 'denseUrban',
     name: 'Dense urban',
+    colour: '#6f6a7d',
     climate: 'built',
     desc: 'City proper. Refuse by the tonne, rats and pigeons living on it, and the locals themselves at the highest density they ever reach.',
   },
   industrial: {
     id: 'industrial',
     name: 'Industrial',
+    colour: '#a78377',
     climate: 'built',
     desc: 'Works, yards and tips. No food worth the name, but refined metal and pure hydrocarbon lying in the open.',
   },
@@ -137,9 +235,26 @@ export const CLIMATES = {
   open: 'Open land',
   cold: 'Cold',
   arid: 'Arid',
-  water: 'Wet',
+  water: 'Fresh water',
+  marine: 'Marine',
   built: 'Human',
 };
+
+/**
+ * Is this tile dark enough to need light text on it?
+ *
+ * Relative luminance by the WCAG formula, against the point where black and
+ * white contrast equally (0.179). Above it black wins, below it white does —
+ * which is why the desert gets dark labels and the abyssal plain gets light
+ * ones, and why neither has to be eyeballed.
+ */
+export function needsLightText(hex) {
+  const v = (i) => {
+    const c = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * v(0) + 0.7152 * v(1) + 0.0722 * v(2) < 0.179;
+}
 
 /** The hive's holdings, largest first. Zero and negative areas are dropped. */
 export function holdings(state) {

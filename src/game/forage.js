@@ -66,8 +66,13 @@ export function rollForage(state, casteId, random = Math.random) {
   slot.biomeId = biome.id;
 
   if (def.gather === 'hunter') {
-    const prey = pickWeighted(preyFor(biome.id), random);
-    if (prey) slot.organismId = prey.organismId;
+    // A hunter's pool is prey AND huntable items together. A deer is worth
+    // butchering into a dozen cuts, so it is an organism; a shoal of anchovies
+    // or a single lanternfish is just the thing itself, and giving every small
+    // species its own butchery table would say nothing the item does not.
+    const caught = pickWeighted([...preyFor(biome.id), ...poolFor('hunter', biome.id)], random);
+    if (caught?.organismId) slot.organismId = caught.organismId;
+    else if (caught?.itemId) slot.itemId = caught.itemId;
     return slot;
   }
 

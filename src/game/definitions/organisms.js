@@ -25,7 +25,17 @@ const DE = 'desert';
 const AL = 'alpine';
 const WE = 'wetland';
 const RI = 'riverine';
+const LK = 'lake';
 const CO = 'coast';
+const ES = 'estuary';
+const KE = 'kelpForest';
+const RE = 'coralReef';
+const SH = 'continentalShelf';
+const OO = 'openOcean';
+const TW = 'twilightZone';
+const AB = 'abyssalPlain';
+const HV = 'hydrothermalVent';
+const PO = 'polarSea';
 const FA = 'farmland';
 const LU = 'lightUrban';
 const DU = 'denseUrban';
@@ -161,7 +171,7 @@ export const ORGANISMS = {
   cod: {
     id: 'cod',
     name: 'Cod',
-    biomes: { [CO]: 7 },
+    biomes: { [SH]: 7, [PO]: 4, [CO]: 3, [KE]: 2 },
     habitat: 'ocean',
     liveMass: 5_000,
     difficulty: 7,
@@ -174,7 +184,7 @@ export const ORGANISMS = {
   salmon: {
     id: 'salmon',
     name: 'Salmon',
-    biomes: { [RI]: 7, [CO]: 5, [TR]: 4 },
+    biomes: { [RI]: 7, [CO]: 4, [ES]: 4, [PO]: 3, [LK]: 2 },
     habitat: 'river',
     liveMass: 4_000,
     difficulty: 6,
@@ -228,7 +238,7 @@ export const ORGANISMS = {
   mackerel: {
     id: 'mackerel',
     name: 'Mackerel shoal',
-    biomes: { [CO]: 6 },
+    biomes: { [OO]: 5, [SH]: 5, [CO]: 3 },
     habitat: 'ocean',
     liveMass: 6_000,
     difficulty: 5,
@@ -238,7 +248,7 @@ export const ORGANISMS = {
   herring: {
     id: 'herring',
     name: 'Herring shoal',
-    biomes: { [CO]: 6 },
+    biomes: { [SH]: 5, [OO]: 4, [PO]: 3, [CO]: 3 },
     habitat: 'ocean',
     liveMass: 5_000,
     difficulty: 4,
@@ -247,7 +257,7 @@ export const ORGANISMS = {
   tuna: {
     id: 'tuna',
     name: 'Tuna',
-    biomes: { [CO]: 2 },
+    biomes: { [OO]: 4 },
     habitat: 'ocean',
     liveMass: 250_000,
     difficulty: 9,
@@ -257,7 +267,7 @@ export const ORGANISMS = {
   trout: {
     id: 'trout',
     name: 'Trout',
-    biomes: { [RI]: 6, [AL]: 3, [TR]: 3 },
+    biomes: { [RI]: 6, [LK]: 5, [AL]: 3 },
     habitat: 'river',
     liveMass: 1_500,
     difficulty: 5,
@@ -266,7 +276,7 @@ export const ORGANISMS = {
   squid: {
     id: 'squid',
     name: 'Squid',
-    biomes: { [CO]: 4 },
+    biomes: { [SH]: 4, [OO]: 3, [RE]: 2 },
     habitat: 'ocean',
     liveMass: 1_200,
     difficulty: 5,
@@ -276,7 +286,7 @@ export const ORGANISMS = {
   octopus: {
     id: 'octopus',
     name: 'Octopus',
-    biomes: { [CO]: 3 },
+    biomes: { [RE]: 4, [KE]: 4, [SH]: 3, [CO]: 2 },
     habitat: 'ocean',
     liveMass: 4_000,
     difficulty: 7,
@@ -286,7 +296,7 @@ export const ORGANISMS = {
   duck: {
     id: 'duck',
     name: 'Duck',
-    biomes: { [WE]: 6, [RI]: 5, [CO]: 3, [FA]: 2 },
+    biomes: { [WE]: 6, [RI]: 5, [LK]: 4, [ES]: 3, [CO]: 3, [FA]: 2 },
     habitat: 'wetland',
     liveMass: 1_400,
     difficulty: 6,
