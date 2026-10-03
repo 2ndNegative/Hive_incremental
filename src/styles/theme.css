@@ -1016,6 +1016,125 @@ textarea.save-box {
   margin-top: 0.35rem;
 }
 
+/* --------------------------------------------------------- origin chooser */
+
+.origin-backdrop {
+  background: radial-gradient(circle at 50% 35%, rgba(20, 30, 38, 0.92), rgba(0, 0, 0, 0.95));
+  overflow-y: auto;
+  align-items: flex-start;
+  padding: 3rem 1rem;
+}
+
+.origin-panel {
+  width: min(1000px, 100%);
+  text-align: center;
+}
+
+.origin-title {
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+
+.origin-sub {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 1.6rem;
+}
+
+.origin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  align-items: stretch;
+  justify-content: center;
+  text-align: left;
+}
+
+.origin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 1rem;
+  background: linear-gradient(180deg, var(--panel-alt), var(--panel));
+  border: 1px solid var(--border-bright);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+
+.origin-card:not(:disabled):not(.is-placeholder):hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.origin-card.is-locked,
+.origin-card.is-placeholder {
+  cursor: default;
+  opacity: 0.5;
+  border-style: dashed;
+  background: transparent;
+}
+
+.origin-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.origin-tagline {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+
+.origin-desc {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+
+.origin-section {
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.origin-card .plain-list {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.origin-pick {
+  margin-top: auto;
+  padding-top: 0.7rem;
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  color: var(--good);
+}
+
+.origin-card:hover .origin-pick {
+  color: var(--text-strong);
+}
+
 /* -------------------------------------------------------------------- dev */
 
 .dev-number {

@@ -255,7 +255,6 @@ function doImport() {
           <ul class="plain-list good">
             <li>Lifetime totals and records</li>
             <li>Settings</li>
-            <li>Developer unlock, if any</li>
           </ul>
         </div>
       </div>

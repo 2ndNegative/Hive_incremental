@@ -12,6 +12,7 @@ import { ORGANISMS } from './game/definitions/organisms.js';
 import { research, ingestItem } from './game/actions.js';
 import { formatMass, formatEnergy, formatPower } from './game/units.js';
 import * as dev from './game/dev.js';
+import * as run from './game/run.js';
 
 // Restore before the first render so the UI never flashes a fresh game.
 const { offlineSeconds } = load();
@@ -25,7 +26,11 @@ createApp(App).mount('#app');
  * between frames so the modal can show progress and the Skip button works; the
  * live loop must not start until it is done, or the two would both be ticking.
  */
-runOfflineCatchup(state, offlineSeconds).then(() => {
+// A run with no landing site has no hive to simulate, so there is nothing for
+// offline time to do but confuse the player with an empty progress bar.
+const pendingOffline = state.origin ? offlineSeconds : 0;
+
+runOfflineCatchup(state, pendingOffline).then(() => {
   save();
   startLoop(state);
 });
@@ -58,6 +63,7 @@ window.hive = {
   offline,
   skipOffline,
   dev,
+  run,
 };
 
 // Best-effort save on the way out; also covers mobile tab suspension.

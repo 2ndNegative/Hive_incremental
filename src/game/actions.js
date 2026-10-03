@@ -166,8 +166,8 @@ export function research(id) {
 /* ---------------------------------------------------------------------- flavour */
 
 export function logIntro() {
-  pushLog('Seed mass deployed. Local biosphere is carbon-based and extraordinarily dense in energy.', 'info');
-  pushLog('Consume anything. Work out what it was made of afterwards.', 'info');
+  pushLog('Approach vector locked. Local biosphere is carbon-based and extraordinarily dense in energy.', 'info');
+  pushLog('Select a landing site.', 'info');
 }
 
 export function logOfflineGain(seconds, before) {

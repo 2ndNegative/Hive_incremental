@@ -14,7 +14,7 @@ import { STRUCTURE_ORDER } from './definitions/structures.js';
 import { CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -24,18 +24,16 @@ export function createInitialState() {
     nutrients[id] = 0;
     spilled[id] = 0;
   }
-  // The hive arrives with just enough mass to metabolise its way to a first meal.
-  nutrients.water = 400;
-  nutrients.protein = 300;
-  nutrients.fat = 250;
-  nutrients.carb = 200;
+  // Nothing is seeded here. A run has no mass and no drones until a starting
+  // site is chosen; the site decides the opening conditions. That also makes the
+  // pre-choice state completely inert — no demand, no growth, no starvation —
+  // so the chooser can sit open indefinitely without the hive dying behind it.
 
   const structures = {};
   for (const id of STRUCTURE_ORDER) structures[id] = 0;
 
   const castes = {};
   for (const id of CASTE_ORDER) castes[id] = 0;
-  castes.dormant = 2;
 
   const tech = {};
   for (const id of RESEARCH_ORDER) tech[id] = false;
@@ -49,7 +47,11 @@ export function createInitialState() {
     nutrients,
     spilled, // lifetime mass lost to full stores, per nutrient
     insight: 0,
-    drones: 2,
+    drones: 0,
+
+    // Which starting site this run began at. null = not chosen yet, which is
+    // what makes the chooser appear.
+    origin: null,
     growth: 0,
     starvation: 0,
 
@@ -73,7 +75,7 @@ export function createInitialState() {
       built: 0,
       researched: 0,
       dronesLost: 0,
-      peakDrones: 2,
+      peakDrones: 0,
       ticks: 0,
       devUsed: false,
     },

@@ -539,6 +539,10 @@ export function startLoop(state, onTick) {
     const now = performance.now();
     let elapsed = (now - lastStamp) / 1000;
     lastStamp = now;
+    // A run that has not been given a landing site has not started. Ticking
+    // would advance the clock and the statistics for a hive that does not exist
+    // yet, which is both wrong and enough to confuse save migration later.
+    if (!state.origin) return;
     if (elapsed <= 0) return;
     if (elapsed > MAX_CATCHUP_SECONDS) elapsed = MAX_CATCHUP_SECONDS;
     while (elapsed > 0) {

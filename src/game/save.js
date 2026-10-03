@@ -266,7 +266,16 @@ function mergeDefaults(defaults, loaded) {
 
 /** Hook for future save-format changes. */
 function migrate(raw) {
-  // if (raw.version < 3) { ...rename fields... ; raw.version = 3; }
+  // Saves from before landing sites existed describe a run already under way.
+  // Showing them the chooser would re-seed a hive someone has been playing for
+  // hours, so they are grandfathered onto the site matching how they began.
+  //
+  // Keyed on the save version, not on symptoms like "has playtime". A version
+  // number is unambiguous; a symptom is a guess, and the first guess here was
+  // wrong — a brand new save sitting on the chooser also had playtime.
+  if ((raw.version ?? 0) < 3 && !raw.origin) {
+    raw.origin = 'anthill';
+  }
   raw.version = SAVE_VERSION;
   return raw;
 }

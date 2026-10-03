@@ -16,6 +16,7 @@ import StatsTab from './components/tabs/StatsTab.vue';
 import SettingsTab from './components/tabs/SettingsTab.vue';
 import DevTab from './components/tabs/DevTab.vue';
 import OfflineModal from './components/OfflineModal.vue';
+import OriginChooser from './components/OriginChooser.vue';
 
 const TABS = {
   hive: HiveTab,
@@ -47,6 +48,7 @@ const savedAgo = computed(() => {
 <template>
   <div class="hive-shell">
     <OfflineModal />
+    <OriginChooser />
 
     <div v-if="!saveStatus.ok" class="save-alert">
       <strong>Progress is not being saved.</strong>

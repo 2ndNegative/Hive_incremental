@@ -14,6 +14,7 @@
 // deliberately the only place that decides what survives a reset.
 
 import { state, replaceState, createInitialState, pushLog } from './state.js';
+import { ORIGINS, originAvailability } from './definitions/origins.js';
 import { formatDuration } from './format.js';
 import { formatMass } from './units.js';
 
@@ -97,4 +98,48 @@ export function lifetimeTotals() {
     devUsed: l.devUsed || s.devUsed,
     firstStartedAt: l.firstStartedAt,
   };
+}
+
+/* ------------------------------------------------------------- starting site */
+
+/** Has this run been given a starting site yet? */
+export function needsOrigin() {
+  return !state.origin;
+}
+
+export function originsFor() {
+  return originAvailability(state.lifetime, state);
+}
+
+/**
+ * Begin the run at a site. Seeds the opening conditions and nothing else —
+ * everything the hive does from here is the player's doing.
+ */
+export function chooseOrigin(id) {
+  const def = ORIGINS[id];
+  if (!def) return false;
+  if (!def.unlock(state.lifetime, state)) return false;
+  if (state.origin) return false; // a run's site is fixed once picked
+
+  const start = def.start || {};
+  for (const [nutrient, grams] of Object.entries(start.nutrients || {})) {
+    state.nutrients[nutrient] = (state.nutrients[nutrient] || 0) + grams;
+  }
+  for (const [structure, count] of Object.entries(start.structures || {})) {
+    state.structures[structure] = (state.structures[structure] || 0) + count;
+  }
+  const drones = start.drones || 0;
+  state.drones += drones;
+  state.castes.dormant += drones;
+  state.stats.peakDrones = Math.max(state.stats.peakDrones, state.drones);
+
+  state.origin = id;
+  pushLog(`Landed: ${def.name}. ${def.flavour}`, 'unlock');
+  pushLog('Consume anything. Work out what it was made of afterwards.', 'info');
+  return true;
+}
+
+/** The site this run started at, for display. */
+export function currentOrigin() {
+  return state.origin ? ORIGINS[state.origin] : null;
 }
