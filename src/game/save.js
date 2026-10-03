@@ -306,6 +306,14 @@ function migrate(raw) {
     raw.energyPool ??= 0;
   }
 
+  // Before v7 nothing could brown out: a building either stood or it did not.
+  // An empty power map means every standing building is at full charge, which is
+  // exactly how those saves were behaving, so they load unchanged and only start
+  // fading if their supply is already short.
+  if ((raw.version ?? 0) < 7) {
+    raw.power ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

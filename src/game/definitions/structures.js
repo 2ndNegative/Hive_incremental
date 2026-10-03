@@ -34,6 +34,14 @@
 //   cogitDraw      cogits occupied per unit while it stands
 //   metabolism     grams per second this converts into usable energy
 //
+// WHAT POWER DOES TO ALL OF THIS
+//   Every figure in the list above that is a BENEFIT is multiplied by the
+//   structure's charge — see `state.power` and BROWNOUT_SECONDS in engine.js.
+//   A building running at 40% gives 40% of its capacity, 40% of its slots, 40%
+//   of its cogits and metabolises 40% as fast. Every figure that is a COST
+//   (upkeepWatts, cogitDraw) is not: a dark building still asks for its watts,
+//   which is exactly why it can come back when the power does.
+//
 // COUNTED OR LEVELLED
 //   By default a structure is COUNTED: you grow more of them and the effects
 //   add up. A structure with `leveled: true` is instead a single thing you
@@ -222,6 +230,28 @@ export const BUILDING_CATEGORY_ORDER = ['core', 'cognition', 'gathering', 'produ
  * Everything the engine and the interface iterate comes from here.
  */
 export const STRUCTURE_ORDER = ['hivecore', 'metabolicGenerator'];
+
+/**
+ * The order energy is handed out in when there is not enough of it.
+ *
+ * Band by band from the top of the Hive tab, and inside a band in the order the
+ * cards are laid out — which is STRUCTURE_ORDER, so reading the screen top to
+ * bottom and left to right reads the priority list. The Core is kept lit before
+ * Cognition, Cognition before Gathering, and so on down; whatever the supply
+ * runs out on browns out, and everything below it goes dark.
+ *
+ * Anything whose `category` is not a known band is appended at the end rather
+ * than dropped, so a mis-filed building loses its power first instead of
+ * silently never being billed for it. The Hive tab flags the same mistake.
+ */
+export function powerPriority() {
+  return [
+    ...BUILDING_CATEGORY_ORDER.flatMap((category) =>
+      STRUCTURE_ORDER.filter((id) => STRUCTURES[id].category === category),
+    ),
+    ...STRUCTURE_ORDER.filter((id) => !BUILDING_CATEGORIES[STRUCTURES[id].category]),
+  ];
+}
 
 /** Is this one thing you upgrade, rather than many things you grow? */
 export function isLeveled(id) {

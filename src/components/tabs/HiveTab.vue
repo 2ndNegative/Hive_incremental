@@ -52,10 +52,14 @@ const cards = computed(() =>
     const cost = structureCost(state, id, count);
     const maxed = headroom <= 0;
     const affordable = !maxed && canAfford(state, cost);
+    const power = derived.value.power?.[id] ?? { charge: 1, direction: 'steady', secondsLeft: 0 };
     return {
       id,
       def,
       owned,
+      power,
+      // Only worth saying anything when it is not simply running.
+      ailing: owned > 0 && (power.direction !== 'steady'),
       leveled: Boolean(def.leveled),
       maxed,
       // A levelled structure reads as what it would become, not how many of it
@@ -79,16 +83,34 @@ const cards = computed(() =>
  * of what this screen has to say.
  */
 const bands = computed(() =>
-  BUILDING_CATEGORY_ORDER.map((id) => {
+  BUILDING_CATEGORY_ORDER.map((id, index) => {
     const def = BUILDING_CATEGORIES[id];
+    const mine = cards.value.filter((c) => c.def.category === id);
     return {
       id,
       def,
-      cards: cards.value.filter((c) => c.def.category === id),
+      cards: mine,
+      // Bands are the power queue, so each one knows its own place in it — and
+      // says so when something inside it is in trouble, even folded shut.
+      rank: index + 1,
+      failing: mine.filter((c) => c.power.direction === 'failing').length,
+      ailing: mine.filter((c) => c.ailing).length,
       open: !state.ui.buildBands?.[id],
     };
   }),
 );
+
+/** How a building's power state reads on its card. */
+function powerLine(card) {
+  const pct = Math.round(card.power.charge * 100);
+  const secs = Math.max(1, Math.ceil(card.power.secondsLeft));
+  if (card.power.direction === 'failing') {
+    return pct > 0
+      ? `Losing power — ${pct}% output, dark in ${secs}s`
+      : 'Dark. No output at all until the power comes back.';
+  }
+  return `Coming back — ${pct}% output, full in ${secs}s`;
+}
 
 function toggleBand(id) {
   state.ui.buildBands ??= {};
@@ -102,6 +124,11 @@ const nothingBuildable = computed(() => cards.value.length === 0);
 
 const starving = computed(() => derived.value.energy.ratio < 0.999);
 const throttled = computed(() => derived.value.energy.throughputRatio < 0.999);
+
+/** The buildings actually losing their supply right now, worst-placed first. */
+const failing = computed(() =>
+  cards.value.filter((c) => c.power.direction === 'failing').sort((a, b) => a.power.priority - b.power.priority),
+);
 
 const overCapacity = computed(() =>
   cards.value.filter((card) =>
@@ -124,12 +151,21 @@ const overCapacity = computed(() =>
         — the pool is empty. Nothing converts stored matter into usable energy except a Metabolic
         Generator.
       </template>
+      <div style="margin-top: 0.35rem">
+        What there is goes to the drones first, then band by band down this page. Of what is left,
+        <template v-if="failing.length">
+          <strong class="bad">{{ failing.map((c) => c.def.name).join(', ') }}</strong>
+          {{ failing.length === 1 ? 'is' : 'are' }} not getting enough and will be dark in
+          {{ Math.max(1, Math.ceil(Math.min(...failing.map((c) => c.power.secondsLeft)))) }}s.
+        </template>
+        <template v-else>every building is still being paid for.</template>
+      </div>
     </div>
 
     <div v-else-if="overCapacity.length" class="notice is-warn">
       <strong>Storage too small.</strong>
       {{ overCapacity.map((c) => c.def.name).join(', ') }} costs more than the hive can hold.
-      Grow a Gut Sac first.
+      Nothing in the Storage band is big enough for it yet.
     </div>
 
     <div v-if="nothingBuildable" class="notice">
@@ -165,7 +201,15 @@ const overCapacity = computed(() =>
           >
             <span class="band-arrow" aria-hidden="true">{{ band.open ? '▾' : '▸' }}</span>
             <span class="band-name">{{ band.def.name }}</span>
-            <span class="band-desc">{{ band.def.desc }}</span>
+            <span class="band-desc">
+              <span v-if="band.failing" class="bad">
+                {{ band.failing }} losing power
+              </span>
+              <span v-else-if="band.ailing" class="warn">
+                {{ band.ailing }} coming back up
+              </span>
+              <template v-else>{{ band.def.desc }}</template>
+            </span>
             <span class="band-count num">{{ band.cards.length || '—' }}</span>
           </button>
         </h2>
@@ -193,6 +237,16 @@ const overCapacity = computed(() =>
                 </span>
               </span>
               <span class="action-desc">{{ card.def.desc }}</span>
+              <span
+                v-if="card.ailing"
+                class="action-power"
+                :class="card.power.direction === 'failing' ? 'bad' : 'warn'"
+              >
+                <span class="power-bar" :class="card.power.direction">
+                  <span :style="{ width: `${card.power.charge * 100}%` }" />
+                </span>
+                {{ powerLine(card) }}
+              </span>
               <span v-if="card.action" class="action-upgrade" :class="{ muted: card.maxed }">
                 {{ card.action }}
               </span>

@@ -31,17 +31,19 @@ export const ORIGINS = {
     unlock: () => true,
     effects: [
       '36 m² of temperate forest',
-      'No stores, no drones, nothing built',
+      'Hivecore at level 1',
+      'No stores, no drones, nothing else built',
     ],
-    // Zeroed for the building and drone rebuild. With nothing built and nobody
-    // awake there is no consumption either, so an empty hive simply sits there
-    // rather than starving — which is the right place to restart the economy
-    // from once the new structures exist.
+    // Stores and drones stay at zero for the building and drone rebuild — but
+    // the Hivecore is there from the first second, because a hive without one is
+    // not a hive, it is mass. It lands lit and immediately begins to brown out:
+    // 1 MW of upkeep against an empty pool, and nothing to fill the pool until
+    // the player gets a Metabolic Generator up. That is the opening problem.
     start: {
       territory: { temperateForest: 36 },
       nutrients: {},
       drones: 0,
-      structures: {},
+      structures: { hivecore: 1 },
     },
     flavour: 'The colony does not understand what has happened to it. It goes on working.',
   },

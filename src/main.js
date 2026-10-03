@@ -3,7 +3,16 @@ import './styles/bulma.scss';
 import './styles/theme.css';
 import App from './App.vue';
 import { state } from './game/state.js';
-import { startLoop, computeDerived, advance, canAfford, computeCognition } from './game/engine.js';
+import {
+  startLoop,
+  computeDerived,
+  advance,
+  canAfford,
+  computeCognition,
+  computeCharges,
+  stopLoop,
+  BROWNOUT_SECONDS,
+} from './game/engine.js';
 import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS } from './game/save.js';
 import { runOfflineCatchup, offline, skipOffline } from './game/offline.js';
 import { NUTRIENTS, FUELS, itemYield, parentsOf } from './game/definitions/nutrients.js';
@@ -14,10 +23,15 @@ import { FORAGE, poolFor } from './game/definitions/forage.js';
 import * as forage from './game/forage.js';
 import * as discovery from './game/discovery.js';
 import {
-  research, ingestItem, consumeBiomass, manualOdds,
+  research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary,
   reserveCogits, releaseCogits, releaseAllCogits, buildStructure,
 } from './game/actions.js';
-import { STRUCTURES, STRUCTURE_ORDER, maxLevelOf } from './game/definitions/structures.js';
+import {
+  STRUCTURES,
+  STRUCTURE_ORDER,
+  powerPriority,
+  maxLevelOf,
+} from './game/definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './game/definitions/castes.js';
 import { formatMass, formatEnergy, formatPower, formatCogits } from './game/units.js';
 import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
@@ -72,6 +86,7 @@ window.hive = {
   forage,
   consumeBiomass,
   manualOdds,
+  manualOddsSummary,
   canAfford,
   itemYield,
   parentsOf,
@@ -91,6 +106,9 @@ window.hive = {
   saveStatus,
   measureStorageHeadroom,
   tick: (seconds) => advance(state, seconds),
+  // Hand control of the clock, so a test can take exact samples instead of
+  // racing the live loop.
+  loop: { start: () => startLoop(state), stop: stopLoop },
   offline,
   skipOffline,
   dev,
@@ -102,6 +120,9 @@ window.hive = {
   discovery,
   structureDefs: STRUCTURES,
   structureOrder: STRUCTURE_ORDER,
+  powerPriority: () => powerPriority(),
+  charges: () => computeCharges(state),
+  brownoutSeconds: BROWNOUT_SECONDS,
   maxLevelOf,
   build: (id, n) => buildStructure(id, n),
   structuresLive: STRUCTURE_ORDER.length,

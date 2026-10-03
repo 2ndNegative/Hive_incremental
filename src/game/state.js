@@ -14,7 +14,7 @@ import { STRUCTURE_ORDER, DEPRECATED_STRUCTURE_ORDER } from './definitions/struc
 import { CASTE_ORDER, DEPRECATED_CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
 
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -82,6 +82,12 @@ export function createInitialState() {
     // each biome. See discovery.js — names are learned globally, rates per
     // biome, and the forage table stays hidden until it is.
     found: {},
+
+    // How well each standing structure is powered: 0 = dark, 1 = running. A
+    // building that cannot get its watts slides to 0 over BROWNOUT_SECONDS and
+    // climbs back over the same span when the power returns. Absent means 1, so
+    // anything newly built starts lit. See engine.js computeCharges.
+    power: {},
 
     // Cognition is a width, not a stock, so nothing is stored here — only the
     // blocks of bandwidth that actions are currently holding, keyed by whatever

@@ -150,7 +150,15 @@ function formatReserve(seconds) {
     <div class="panel-box">
       <div class="panel-head">
         <span>Energy sources</span>
-        <span class="muted">preferred, then fallback</span>
+        <span class="muted">in the order they are paid</span>
+      </div>
+      <div class="panel-body" style="padding-bottom: 0">
+        <p class="muted" style="font-size: 0.78rem; margin: 0">
+          This list is the queue. The drones are kept alive first, then the buildings band by band
+          down the Hive tab — Core, Cognition, Gathering, Production, Digestion, Storage — and
+          left to right inside each band. When there is not enough to go round, whatever the
+          supply runs out on starts to go dark, and everything below it with it.
+        </p>
       </div>
       <div class="panel-body">
         <div class="fuel-row is-global">

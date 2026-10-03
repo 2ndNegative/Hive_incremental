@@ -86,6 +86,29 @@ export function rateConfidence(state, biomeId, key) {
   return 'unknown';
 }
 
+/** Confidence levels, worst first, so two can be compared. */
+const CONFIDENCE_RANK = { unknown: 0, range: 1, exact: 2 };
+
+/**
+ * How well a rate BLENDED across several biomes is understood.
+ *
+ * A click can turn up anywhere the hive holds ground, so the odds it reports
+ * are a mixture — and a mixture is known no better than the least-known thing
+ * going into it. A hive that has worked its forest to death still cannot say
+ * what a click will turn up if half of it is city it has never walked.
+ *
+ * With no contributing ground at all there is nothing to know, so: unknown.
+ */
+export function blendedConfidence(state, biomeIds, key) {
+  let worst = null;
+  for (const biomeId of biomeIds) {
+    const level = rateConfidence(state, biomeId, key);
+    if (worst === null || CONFIDENCE_RANK[level] < CONFIDENCE_RANK[worst]) worst = level;
+    if (worst === 'unknown') break;
+  }
+  return worst ?? 'unknown';
+}
+
 /**
  * The bracket containing `chance` (0-1), as whole percents. Always contains the
  * true value — the hive's estimate is coarse, never wrong.
@@ -98,9 +121,13 @@ export function bandFor(chance) {
   return [BANDS[BANDS.length - 2], 100];
 }
 
-/** How a rate should be printed given what the hive has worked out so far. */
-export function rateLabel(state, biomeId, key, chance) {
-  switch (rateConfidence(state, biomeId, key)) {
+/**
+ * How a rate reads at a given confidence. The one place that decides what a
+ * percentage looks like, so every screen that quotes odds — the territory table
+ * and the gather button alike — obfuscates them identically.
+ */
+export function labelForConfidence(level, chance) {
+  switch (level) {
     case 'exact':
       return `${(chance * 100).toFixed(0)}%`;
     case 'range': {
@@ -110,6 +137,16 @@ export function rateLabel(state, biomeId, key, chance) {
     default:
       return '?%';
   }
+}
+
+/** How a rate should be printed given what the hive has worked out so far. */
+export function rateLabel(state, biomeId, key, chance) {
+  return labelForConfidence(rateConfidence(state, biomeId, key), chance);
+}
+
+/** The same, for a rate mixed across every biome that could produce it. */
+export function blendedRateLabel(state, biomeIds, key, chance) {
+  return labelForConfidence(blendedConfidence(state, biomeIds, key), chance);
 }
 
 /** What to call something the hive may not have met yet. */

@@ -19,7 +19,13 @@ import { formatMass } from './units.js';
 import { biomeShares } from './definitions/biomes.js';
 import { poolFor } from './definitions/forage.js';
 import { pickWeighted } from './forage.js';
-import { recordFind } from './discovery.js';
+import {
+  recordFind,
+  isNamed,
+  blendedConfidence,
+  labelForConfidence,
+  timesFoundAnywhere,
+} from './discovery.js';
 
 const MANUAL_GRAMS = 40;
 
@@ -86,10 +92,26 @@ export const MANUAL_INTAKE = { grams: MANUAL_GRAMS };
  * What a click could turn up, likeliest first — the whole distribution rather
  * than a prediction, since the roll happens on the click. Shares are folded in,
  * so a hive that is nine parts city shows city food at the top.
+ *
+ * AS FAR AS THE HIVE KNOWS
+ * The true table is in here and the hive does not get to read it. Exactly the
+ * same discovery log the Territory tab works from decides what this list says:
+ * a thing it has never picked up is `???` at `?%`, finding it once anywhere
+ * names it here too, and the rate sharpens as the ground gets walked. Because
+ * both screens read `state.found` and nothing else, they can never disagree —
+ * naming a hazelnut by clicking names it in the territory table in the same
+ * frame.
+ *
+ * A click can land in any biome the hive holds, so its odds are a BLEND, and a
+ * blend is only as well understood as the worst-known ground in it. That is
+ * what `blendedConfidence` is for: a hive that knows its forest exactly still
+ * reports `?%` for anything that might instead have come out of ground it has
+ * never worked.
  */
 export function manualOdds(limit = 8) {
   const shares = biomeShares(state);
   const weights = {};
+  const sources = {}; // itemId -> biome ids that could produce it
   let total = 0;
   for (const [biomeId, share] of Object.entries(shares)) {
     const pool = [...poolFor('forager', biomeId), ...poolFor('scavenger', biomeId)];
@@ -98,13 +120,43 @@ export function manualOdds(limit = 8) {
     for (const { itemId, weight } of pool) {
       const p = share * (weight / sum);
       weights[itemId] = (weights[itemId] || 0) + p;
+      (sources[itemId] ||= new Set()).add(biomeId);
       total += p;
     }
   }
   return Object.entries(weights)
-    .map(([itemId, p]) => ({ itemId, name: ITEMS[itemId].name, chance: total > 0 ? p / total : 0 }))
+    .map(([itemId, p]) => {
+      const chance = total > 0 ? p / total : 0;
+      const biomeIds = [...(sources[itemId] || [])];
+      const named = isNamed(state, itemId);
+      const level = blendedConfidence(state, biomeIds, itemId);
+      return {
+        itemId,
+        name: ITEMS[itemId].name,
+        chance,
+        // What the interface is allowed to print.
+        label: named ? ITEMS[itemId].name : '???',
+        rate: labelForConfidence(level, chance),
+        named,
+        level,
+        biomeIds,
+        seen: timesFoundAnywhere(state, itemId),
+      };
+    })
+    // Still sorted by the TRUE chance: the order of the list is itself the
+    // weak hint, exactly as it is in the territory table.
     .sort((a, b) => b.chance - a.chance)
     .slice(0, limit);
+}
+
+/** How much of what a click could turn up the hive can actually read. */
+export function manualOddsSummary() {
+  const all = manualOdds(Infinity);
+  return {
+    total: all.length,
+    named: all.filter((o) => o.named).length,
+    exact: all.filter((o) => o.level === 'exact').length,
+  };
 }
 
 /* ----------------------------------------------------------------- structures */
@@ -123,9 +175,18 @@ export function buildStructure(id, count = 1) {
   const cost = structureCost(state, id, wanted);
   if (!canAfford(state, cost)) return 0;
 
+  const had = state.structures[id] || 0;
   for (const [n, amount] of Object.entries(cost)) state.nutrients[n] -= amount;
   state.structures[id] += wanted;
   state.stats.built += wanted;
+
+  // Something raised from nothing is raised lit, whatever the last one of its
+  // kind browned out to. Upgrading one that is already standing does NOT reset
+  // it: a dark Hivecore taken up a level is a bigger dark Hivecore.
+  if (had === 0) {
+    state.power ??= {};
+    state.power[id] = 1;
+  }
   pushLog(
     def.leveled
       ? `${def.name} raised to level ${state.structures[id]}.`

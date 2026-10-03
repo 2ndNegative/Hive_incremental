@@ -1681,6 +1681,37 @@ textarea.save-box {
   margin-bottom: 0.3rem;
 }
 
+/* A building that cannot get its watts, fading out — or climbing back. */
+.action-power {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  margin-bottom: 0.35rem;
+}
+
+.power-bar {
+  display: block;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 0.2rem;
+}
+
+.power-bar > span {
+  display: block;
+  height: 100%;
+  transition: width 0.12s linear;
+}
+
+.power-bar.failing > span {
+  background: var(--bad);
+}
+
+.power-bar.recovering > span {
+  background: var(--warn);
+}
+
 /* Ground the hive has not worked out yet. */
 .offer-unknown {
   color: var(--muted);

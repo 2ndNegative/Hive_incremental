@@ -3,7 +3,8 @@ import { computed, ref } from 'vue';
 import { state, derived, showInCodex } from '../game/useGame.js';
 import { NUTRIENTS, MACROS, MICROS, ASSAY_GROUPS, isRevealed } from '../game/definitions/nutrients.js';
 import { formatMass, formatMassFlow, formatEnergy } from '../game/units.js';
-import { consumeBiomass, MANUAL_INTAKE, manualOdds } from '../game/actions.js';
+import { consumeBiomass, MANUAL_INTAKE, manualOdds, manualOddsSummary } from '../game/actions.js';
+import { RANGE_AT } from '../game/discovery.js';
 import { ITEMS } from '../game/definitions/items/index.js';
 import { isPinned, pinHandlers } from '../game/tips.js';
 import { BIOMES, holdings, totalArea } from '../game/definitions/biomes.js';
@@ -57,8 +58,13 @@ const hiddenCount = computed(() => MICROS.filter((id) => !isRevealed(state, id))
  * within reach on the hive's own land, so the tooltip shows the distribution
  * rather than a result — and the last find is shown under the button, because
  * a log line per click would bury everything else in the log.
+ *
+ * The distribution is shown AS FAR AS THE HIVE KNOWS IT, off the same discovery
+ * log the Territory tab reads: a thing never picked up is ??? at ?%, and both
+ * screens sharpen in the same frame because both are reading `state.found`.
  */
 const odds = computed(() => manualOdds(6));
+const oddsKnown = computed(() => manualOddsSummary());
 const land = computed(() => holdings(state));
 const area = computed(() => totalArea(state));
 
@@ -92,11 +98,16 @@ const lastGather = computed(() => {
             ground.
           </span>
           <span v-for="o in odds" :key="o.itemId" class="tip-row">
-            <span>{{ o.name }}</span>
-            <span>{{ (o.chance * 100).toFixed(0) }}%</span>
+            <span :class="{ 'offer-unknown': !o.named }">{{ o.label }}</span>
+            <span :class="o.level === 'exact' ? '' : 'offer-vague'">{{ o.rate }}</span>
           </span>
           <span v-if="!odds.length" class="tip-row warn">
             <span>No land, nothing within reach</span><span>—</span>
+          </span>
+          <span v-else class="tip-hint">
+            {{ oddsKnown.named }} of {{ oddsKnown.total }} named,
+            {{ oddsKnown.exact }} pinned down. A rate stays vague while it could have come off
+            ground the hive has walked fewer than {{ RANGE_AT }} times.
           </span>
         </span>
       </span>

@@ -1,28 +1,38 @@
 // The simulation.
 //
 // THE ONE IDEA THIS GAME IS BUILT ON
-// There is no energy resource. The hive's energy is the energy held in the mass
-// it is standing on:
+// Energy is always destroyed matter. The chemical energy sitting in the hive's
+// stores is real —
 //
 //     storedEnergy(J) = Σ nutrient[n] (g) × kjPerGram[n] × 1000
 //
-// Spending energy is therefore always an act of destroying matter. A consumer
-// that wants 1 kW for a second must metabolise 27 mg of fat, or 59 mg of
-// carbohydrate, or — if you pointed it at sodium — an infinite amount of
-// sodium, because sodium carries no energy at all. That is what `preferred` and
-// `fallback` are choosing between.
+// — but it is not spendable. Nothing in the hive can touch it except a
+// Metabolic Generator, which takes mass at a fixed rate and converts it at that
+// mass's own energy density into `state.energyPool`, the only energy anything
+// can actually draw on. 1 kW for a second means 27 mg of fat, or 59 mg of
+// carbohydrate, or — if you pointed a generator at sodium — an infinite amount
+// of sodium, because sodium carries no energy at all. That is what `preferred`
+// and `fallback` are choosing between.
+//
+// A hive standing on a tonne of fat with no generator has no energy. That is
+// the whole shape of the early game.
 //
 // RESOLUTION ORDER
-//   1. multipliers, metabolic efficiencies and capacities
-//   2. energy demand: basal + caste work + structure upkeep
-//   3. throughput ceiling (structures cap how fast mass can be oxidised)
-//   4. fuel allocation: preferred store, then fallback, then starvation
-//   5. harvest, scaled by how much of the energy demand was actually met
-//   6. digestion: stored items broken down into nutrient inflow
+//   1. charge: how well each building is powered, carried over from last tick
+//   2. multipliers, efficiencies and capacities, every one scaled by charge
+//   3. energy demand: basal + caste work + structure upkeep, at full rate
+//   4. generation: generators convert mass into the pool
+//   5. allocation: the pool is spent down the priority list, drones first and
+//      then building band by band, so a shortfall lands on the bottom
+//   6. brownout: who got their watts, and therefore which way charge is moving
+//   7. harvest, scaled by how much of the energy demand was actually met
+//   8. digestion: stored items broken down into nutrient inflow
 //
-// Stages 4 and 5 are deliberately circular-free: harvest never feeds the energy
+// Stages 4 and 7 are deliberately circular-free: harvest never feeds the energy
 // that powers the harvest within the same tick. Mass arrives, and next tick it
-// is available to burn.
+// is available to burn. Stage 1 is what keeps stage 4 out of its own output —
+// a generator's charge was settled a tick ago, so it cannot be a function of
+// the supply it is itself producing.
 //
 // WHERE HARVEST GOES
 // Castes deliver whole matter into `state.items` — carcasses, grass, topsoil —
@@ -43,7 +53,12 @@ import {
   isUsableFuel,
   itemYield,
 } from './definitions/nutrients.js';
-import { STRUCTURES, STRUCTURE_ORDER, maxLevelOf } from './definitions/structures.js';
+import {
+  STRUCTURES,
+  STRUCTURE_ORDER,
+  powerPriority,
+  maxLevelOf,
+} from './definitions/structures.js';
 import {
   CASTES,
   CASTE_ORDER,
@@ -76,7 +91,58 @@ const DRONE_PROTEIN_COST = 180; // grams of protein per new drone
 const GROWTH_PER_SECOND = 0.04;
 const STARVE_SECONDS = 25; // at zero energy, how long until a drone is lost
 
+/**
+ * How long an unpowered building takes to fade out — and, run the other way,
+ * how long a re-powered one takes to come back.
+ *
+ * Deliberately short. Losing supply should be felt in seconds, not minutes,
+ * because the point of the brownout is to make a shortfall a thing that
+ * happens TO you rather than a number that goes slightly red.
+ */
+export const BROWNOUT_SECONDS = 30;
+
 const EPSILON = 1e-12;
+
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+/* ---------------------------------------------------------------- brownout */
+
+/**
+ * How well each structure is running right now, 0 to 1.
+ *
+ * Read straight out of `state.power`, never recomputed from this tick's supply:
+ * charge is a thing with momentum, and the only place it moves is tick(). That
+ * also keeps the whole of computeDerived free of circularity — the charge that
+ * scales a generator's output was settled last tick, so output never feeds the
+ * supply that decides the output inside one step.
+ *
+ * A structure nobody has built sits at 1, so the first one built starts lit
+ * instead of inheriting whatever its predecessor browned out to.
+ */
+export function computeCharges(state) {
+  const charges = {};
+  for (const id of STRUCTURE_ORDER) {
+    const count = state.structures?.[id] || 0;
+    if (count <= 0) {
+      charges[id] = 1;
+      continue;
+    }
+    const held = state.power?.[id];
+    charges[id] = held === undefined || held === null ? 1 : clamp01(held);
+  }
+  return charges;
+}
+
+/**
+ * How many units of a structure are effectively working.
+ *
+ * Six buildings at half charge do the work of three. This is the number every
+ * BENEFIT is scaled by; costs use the raw count instead, which is what lets a
+ * dark building keep asking for the watts that would bring it back.
+ */
+function working(state, charges, id) {
+  return (state.structures?.[id] || 0) * (charges[id] ?? 1);
+}
 
 /* ------------------------------------------------------------ capacity groups */
 
@@ -100,7 +166,7 @@ function capGroup(id) {
  *
  * Exported and pure so it can be reasoned about on its own.
  */
-export function computeCognition(state) {
+export function computeCognition(state, charges = computeCharges(state)) {
   const supply = [];
   const load = [];
   let capacity = BASE_COGIT_CAPACITY;
@@ -111,11 +177,22 @@ export function computeCognition(state) {
     if (!count) continue;
     const def = STRUCTURES[id];
     if (def.cogitCapacity) {
-      const amount = def.cogitCapacity * count;
+      // Bandwidth is a benefit, so it browns out with everything else: a
+      // Hivecore at a third charge holds a third of the thoughts.
+      const amount = def.cogitCapacity * working(state, charges, id);
       capacity += amount;
-      supply.push({ key: `structure:${id}`, label: `${def.name} ×${count}`, amount });
+      const charge = charges[id] ?? 1;
+      supply.push({
+        key: `structure:${id}`,
+        label: charge < 1 - 1e-9
+          ? `${def.name} ×${count} at ${Math.round(charge * 100)}%`
+          : `${def.name} ×${count}`,
+        amount,
+      });
     }
     if (def.cogitDraw) {
+      // A cost, so it does NOT scale: a dark building is still sitting in the
+      // hive's head taking up room.
       const amount = def.cogitDraw * count;
       used += amount;
       load.push({ key: `structure:${id}`, label: `${def.name} ×${count}`, amount });
@@ -164,15 +241,15 @@ export function computeCognition(state) {
 
 /* -------------------------------------------------------------------- derived */
 
-function computeMultipliers(state) {
+function computeMultipliers(state, charges) {
   const mult = {};
   for (const channel of MULTIPLIERS) mult[channel] = 0;
   for (const id of STRUCTURE_ORDER) {
-    const count = state.structures[id] || 0;
+    const units = working(state, charges, id);
     const bonuses = STRUCTURES[id].mult;
-    if (!count || !bonuses) continue;
+    if (!units || !bonuses) continue;
     for (const [channel, value] of Object.entries(bonuses)) {
-      mult[channel] = (mult[channel] || 0) + value * count;
+      mult[channel] = (mult[channel] || 0) + value * units;
     }
   }
   return mult;
@@ -191,13 +268,13 @@ function computeEfficiency(state) {
   return eff;
 }
 
-function computeCaps(state) {
+function computeCaps(state, charges) {
   const capMult = { bulk: 0, mineral: 0, vitamin: 0 };
   for (const id of STRUCTURE_ORDER) {
-    const count = state.structures[id] || 0;
+    const units = working(state, charges, id);
     const m = STRUCTURES[id].capMult;
-    if (!count || !m) continue;
-    for (const [group, value] of Object.entries(m)) capMult[group] += value * count;
+    if (!units || !m) continue;
+    for (const [group, value] of Object.entries(m)) capMult[group] += value * units;
   }
 
   const caps = {};
@@ -211,21 +288,32 @@ function computeCaps(state) {
   let digestion = BASE_DIGESTION;
   let itemCapMult = 0;
   for (const id of STRUCTURE_ORDER) {
-    const count = state.structures[id] || 0;
-    if (!count) continue;
+    const units = working(state, charges, id);
+    if (!units) continue;
     const def = STRUCTURES[id];
-    droneCap += (def.caps?.drones || 0) * count;
-    insightCap += (def.insightCap || 0) * count;
-    throughput += (def.throughput || 0) * count;
-    digestion += (def.digestion || 0) * count;
-    itemCapMult += (def.itemCapMult || 0) * count;
+    droneCap += (def.caps?.drones || 0) * units;
+    insightCap += (def.insightCap || 0) * units;
+    throughput += (def.throughput || 0) * units;
+    digestion += (def.digestion || 0) * units;
+    itemCapMult += (def.itemCapMult || 0) * units;
   }
   const itemCap = BASE_ITEM_CAP * (1 + itemCapMult);
 
-  return { caps, capMult, droneCap, insightCap, throughput, digestion, itemCap };
+  // A drone is a whole drone, so a browning-out nursery loses the capacity for
+  // one before it loses the capacity for half of one. Floored rather than
+  // rounded: the hive never gets a drone it cannot hold.
+  return {
+    caps,
+    capMult,
+    droneCap: Math.floor(droneCap),
+    insightCap,
+    throughput,
+    digestion,
+    itemCap,
+  };
 }
 
-function computeSlots(state) {
+function computeSlots(state, charges) {
   const slots = {};
   for (const id of CASTE_ORDER) {
     const def = CASTES[id];
@@ -235,11 +323,13 @@ function computeSlots(state) {
     }
     let total = 0;
     for (const sid of STRUCTURE_ORDER) {
-      const count = state.structures[sid] || 0;
+      const units = working(state, charges, sid);
       const provided = STRUCTURES[sid].slots?.[def.slots];
-      if (count && provided) total += provided * count;
+      if (units && provided) total += provided * units;
     }
-    slots[id] = total;
+    // Half a burrow is no burrow: a post a drone can stand at is a whole thing,
+    // so browning out closes positions rather than shrinking them.
+    slots[id] = Math.floor(total);
   }
   return slots;
 }
@@ -279,11 +369,21 @@ export function fuelChoiceFor(state, consumerKey) {
  * preferred fuel can still cover before the fallback takes the rest.
  */
 export function computeDerived(state, dt = TICK_SECONDS) {
-  const mult = computeMultipliers(state);
+  // Charge first: every benefit below is scaled by it, and it depends on
+  // nothing computed here.
+  const charges = computeCharges(state);
+  // The queue is derived, not stored, so a structure added to a band shows up
+  // in the right place in the ordering without anything having to be kept in
+  // step by hand.
+  const priority = powerPriority();
+  const mult = computeMultipliers(state, charges);
   const efficiency = computeEfficiency(state);
-  const { caps, capMult, droneCap, insightCap, throughput, digestion, itemCap } = computeCaps(state);
-  const slots = computeSlots(state);
-  const cognition = computeCognition(state);
+  const { caps, capMult, droneCap, insightCap, throughput, digestion, itemCap } = computeCaps(
+    state,
+    charges,
+  );
+  const slots = computeSlots(state, charges);
+  const cognition = computeCognition(state, charges);
 
   /* -- 2. energy demand ---------------------------------------------------- */
 
@@ -301,13 +401,23 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       watts: def.workWatts * assigned,
     });
   }
-  for (const id of STRUCTURE_ORDER) {
+  // Structures are billed in powerPriority() order — band by band down the Hive
+  // tab, left to right inside a band — because `perConsumer` below feeds this
+  // list in order out of what the pool could actually supply. The order of this
+  // array IS the priority rule: whatever the supply runs out on browns out, and
+  // everything after it goes dark.
+  //
+  // Basal metabolism and the castes stay ahead of all of it. A building going
+  // dark is recoverable; a drone that starves is gone.
+  for (const id of priority) {
     const count = state.structures[id] || 0;
     const def = STRUCTURES[id];
     if (!count || !def.upkeepWatts) continue;
     demands.push({
       key: `structure:${id}`,
       label: `${def.name} ×${count}`,
+      // Raw count, not charge: upkeep is a cost, and a building that stopped
+      // asking for power as it faded could never come back.
       watts: def.upkeepWatts * count,
     });
   }
@@ -325,11 +435,15 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // energy density, through the metabolic efficiency the tech tree has bought.
   // Which mass it takes is the preferred/fallback choice, which is now a
   // property of the generator rather than of every consumer separately.
+  //
+  // Generators brown out like everything else — but they have no upkeep, so
+  // nothing can starve them, which is what stops the hive from being able to
+  // dig itself into a hole it cannot climb out of.
   let massRate = 0; // grams per second the generators can process
   for (const id of STRUCTURE_ORDER) {
-    const count = state.structures[id] || 0;
+    const units = working(state, charges, id);
     const per = STRUCTURES[id].metabolism;
-    if (count && per) massRate += per * count;
+    if (units && per) massRate += per * units;
   }
 
   const burn = {}; // nutrient -> grams per second actually consumed
@@ -379,6 +493,40 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       delivered: dt > EPSILON ? got / dt : 0,
       ratio: wants > EPSILON ? got / wants : 1,
       from: {},
+    };
+  }
+
+  /* -- 4b. brownout ---------------------------------------------------------- */
+
+  // Who got what they asked for, and therefore which way their charge is about
+  // to move. tick() is what moves it; this only reports the direction, so the
+  // interface can say "fading" or "coming back" rather than just showing a
+  // number that happens to be going down.
+  const power = {};
+  let starved = 0;
+  let faded = 0;
+  for (const id of STRUCTURE_ORDER) {
+    const count = state.structures?.[id] || 0;
+    const fed = perConsumer[`structure:${id}`];
+    // Asking for nothing cannot fail. That is the generators' exemption, and
+    // it is the reason the lights can ever come back on.
+    const satisfied = !fed || fed.ratio >= 1 - 1e-9;
+    const charge = charges[id] ?? 1;
+    if (count > 0 && !satisfied) starved += 1;
+    if (count > 0 && charge < 1 - 1e-9) faded += 1;
+    power[id] = {
+      id,
+      count,
+      charge,
+      satisfied,
+      // 1-based place in the queue, so the interface can explain the ordering
+      // without knowing the rule.
+      priority: priority.indexOf(id) + 1,
+      watts: fed?.watts ?? 0,
+      delivered: fed?.delivered ?? 0,
+      // Where its charge is heading, and how long it has left to get there.
+      direction: satisfied ? (charge >= 1 - 1e-9 ? 'steady' : 'recovering') : 'failing',
+      secondsLeft: satisfied ? (1 - charge) * BROWNOUT_SECONDS : charge * BROWNOUT_SECONDS,
     };
   }
 
@@ -564,6 +712,13 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     cognition,
     demands,
     perConsumer,
+    charges,
+    power,
+    powerPriority: priority,
+    // How many standing buildings are losing their supply, and how many are
+    // already running at less than full output for any reason.
+    starvedCount: starved,
+    fadedCount: faded,
     energy: {
       demand: totalDemand,
       delivered: deliveredWatts,
@@ -705,6 +860,32 @@ export function tick(state, dt) {
   }
 
   state.energyPool = derived.energy.pool;
+
+  // Brownout. A building that could not get its watts slides towards dark at a
+  // constant rate, and a building that got them climbs back the same way, so
+  // thirty seconds without power costs everything and thirty seconds with it
+  // gives everything back. Linear in both directions on purpose: the player can
+  // count the seconds and know exactly where they stand.
+  state.power ??= {};
+  const chargeStep = dt / BROWNOUT_SECONDS;
+  for (const id of STRUCTURE_ORDER) {
+    const p = derived.power[id];
+    if (!p || p.count <= 0) {
+      // Nothing standing. Forget its charge so that the next one built starts
+      // lit rather than inheriting a dead predecessor's.
+      delete state.power[id];
+      continue;
+    }
+    // Snapped to the rails. Thirty seconds of hundred-millisecond steps leaves
+    // a few parts in 10^16 of rounding behind, and "dark" that is actually
+    // 4.7e-16 of a Hivecore is a thing that shows up later as a bug somewhere
+    // else entirely.
+    let next = clamp01(p.charge + (p.satisfied ? chargeStep : -chargeStep));
+    if (next < 1e-9) next = 0;
+    else if (next > 1 - 1e-9) next = 1;
+    state.power[id] = next;
+  }
+
   state.stats.metabolised += derived.energy.delivered * dt;
   state.stats.ingested += derived.ingestRate * dt;
 
