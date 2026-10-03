@@ -55,6 +55,7 @@ import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import { ORGANISMS } from './definitions/organisms.js';
 import { BIOMES } from './definitions/biomes.js';
+import { BASE_COGIT_CAPACITY, COGIT_PER_DRONE } from './definitions/cognition.js';
 import { advanceForage } from './forage.js';
 
 export const TICK_MS = 100;
@@ -84,6 +85,81 @@ function capGroup(id) {
   const def = NUTRIENTS[id];
   if (def.tier === 'macro') return 'bulk';
   return def.group === 'lipidAssay' || def.group === 'aqueousAssay' ? 'vitamin' : 'mineral';
+}
+
+/* ------------------------------------------------------------------ cognition */
+
+/**
+ * The hive's bandwidth: how much thinking it can hold in flight, and how much
+ * is in flight right now.
+ *
+ * Capacity comes from structures; load comes from drones, from structures that
+ * need running, and from whatever actions are holding a reservation. Nothing
+ * accumulates — this is recomputed from scratch every time, which is exactly
+ * what a width should be.
+ *
+ * Exported and pure so it can be reasoned about on its own.
+ */
+export function computeCognition(state) {
+  const supply = [];
+  const load = [];
+  let capacity = BASE_COGIT_CAPACITY;
+  let used = 0;
+
+  for (const id of STRUCTURE_ORDER) {
+    const count = state.structures?.[id] || 0;
+    if (!count) continue;
+    const def = STRUCTURES[id];
+    if (def.cogitCapacity) {
+      const amount = def.cogitCapacity * count;
+      capacity += amount;
+      supply.push({ key: `structure:${id}`, label: `${def.name} ×${count}`, amount });
+    }
+    if (def.cogitDraw) {
+      const amount = def.cogitDraw * count;
+      used += amount;
+      load.push({ key: `structure:${id}`, label: `${def.name} ×${count}`, amount });
+    }
+  }
+
+  // Every drone costs bandwidth simply by being coherent, working or not.
+  const drones = state.drones || 0;
+  if (drones > 0 && COGIT_PER_DRONE > 0) {
+    const amount = drones * COGIT_PER_DRONE;
+    used += amount;
+    load.push({ key: 'drones', label: `Drones ×${drones}`, amount });
+  }
+
+  // Castes that cost more than the baseline to run.
+  for (const id of CASTE_ORDER) {
+    const assigned = state.castes?.[id] || 0;
+    const per = CASTES[id]?.cogitPerDrone;
+    if (!assigned || !per) continue;
+    const amount = per * assigned;
+    used += amount;
+    load.push({ key: `caste:${id}`, label: `${CASTES[id].name} ×${assigned}`, amount });
+  }
+
+  // Blocks held by actions in progress.
+  for (const [key, held] of Object.entries(state.cognition?.reservations || {})) {
+    const amount = held?.amount || 0;
+    if (amount <= 0) continue;
+    used += amount;
+    load.push({ key: `action:${key}`, label: held.label || key, amount });
+  }
+
+  const free = capacity - used;
+  return {
+    capacity,
+    used,
+    free,
+    // How much of what is asked for can actually be thought. Nothing consumes
+    // this yet — the rebuild decides what being over budget costs.
+    ratio: used <= EPSILON ? 1 : Math.min(1, capacity / used),
+    over: used > capacity + EPSILON,
+    supply,
+    load,
+  };
 }
 
 /* -------------------------------------------------------------------- derived */
@@ -207,6 +283,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   const efficiency = computeEfficiency(state);
   const { caps, capMult, droneCap, insightCap, throughput, digestion, itemCap } = computeCaps(state);
   const slots = computeSlots(state);
+  const cognition = computeCognition(state);
 
   /* -- 2. energy demand ---------------------------------------------------- */
 
@@ -459,6 +536,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     droneCap,
     insightCap,
     slots,
+    cognition,
     demands,
     perConsumer,
     energy: {

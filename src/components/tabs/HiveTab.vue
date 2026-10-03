@@ -1,7 +1,11 @@
 <script setup>
 import { computed } from 'vue';
 import { state, derived } from '../../game/useGame.js';
-import { STRUCTURES } from '../../game/definitions/structures.js';
+import {
+  STRUCTURES,
+  BUILDING_CATEGORIES,
+  BUILDING_CATEGORY_ORDER,
+} from '../../game/definitions/structures.js';
 import { NUTRIENTS } from '../../game/definitions/nutrients.js';
 import { CASTES } from '../../game/definitions/castes.js';
 import { structureCost, canAfford, etaFor, affordableCount } from '../../game/engine.js';
@@ -51,6 +55,34 @@ const cards = computed(() =>
   }),
 );
 
+/**
+ * The Hive tab is banded by what a building is FOR, and each band folds. Bands
+ * show even when empty: an empty Cognition band answers "where does thinking
+ * come from" better than no band at all, and during the rebuild that is most
+ * of what this screen has to say.
+ */
+const bands = computed(() =>
+  BUILDING_CATEGORY_ORDER.map((id) => {
+    const def = BUILDING_CATEGORIES[id];
+    return {
+      id,
+      def,
+      cards: cards.value.filter((c) => c.def.category === id),
+      open: !state.ui.buildBands?.[id],
+    };
+  }),
+);
+
+function toggleBand(id) {
+  state.ui.buildBands ??= {};
+  state.ui.buildBands[id] = !state.ui.buildBands[id];
+}
+
+/** Buildings whose category is missing or unknown — a rebuild tripwire. */
+const unfiled = computed(() => cards.value.filter((c) => !BUILDING_CATEGORIES[c.def.category]));
+
+const nothingBuildable = computed(() => cards.value.length === 0);
+
 const starving = computed(() => derived.value.energy.ratio < 0.999);
 const throttled = computed(() => derived.value.energy.throughputRatio < 0.999);
 
@@ -81,7 +113,13 @@ const overCapacity = computed(() =>
       Grow a Gut Sac first.
     </div>
 
-    <div class="field-row">
+    <div v-if="nothingBuildable" class="notice">
+      <strong>Nothing can be built.</strong>
+      The building and drone systems are being rebuilt, so every structure and every caste is
+      parked. The bands below are where the new ones will appear.
+    </div>
+
+    <div v-else class="field-row">
       <span class="field-label">Build amount</span>
       <div class="stepper">
         <button
@@ -97,29 +135,57 @@ const overCapacity = computed(() =>
       </div>
     </div>
 
-    <div class="action-grid">
-      <button
-        v-for="card in cards"
-        :key="card.id"
-        class="action-card"
-        :class="{ 'is-affordable': card.affordable }"
-        :disabled="!card.affordable"
-        @click="buildStructure(card.id, state.ui.buyAmount)"
-      >
-        <span class="action-head">
-          <span class="action-name">
-            {{ card.def.name }}
-            <span v-if="card.count > 1" class="muted">×{{ card.count }}</span>
-          </span>
-          <span class="action-count">{{ card.owned }}</span>
-        </span>
-        <span class="action-desc">{{ card.def.desc }}</span>
-        <CostList :cost="card.cost" />
-        <span class="effect-list">{{ card.effects.join(' · ') }}</span>
-        <span v-if="card.eta" class="action-desc" style="margin-bottom: 0">
-          affordable in {{ card.eta }}
-        </span>
-      </button>
+    <div class="band-stack">
+      <section v-for="band in bands" :key="band.id" class="band">
+        <h2 class="band-head">
+          <button
+            class="band-toggle"
+            :aria-expanded="band.open ? 'true' : 'false'"
+            :aria-controls="`band-${band.id}`"
+            @click="toggleBand(band.id)"
+          >
+            <span class="band-arrow" aria-hidden="true">{{ band.open ? '▾' : '▸' }}</span>
+            <span class="band-name">{{ band.def.name }}</span>
+            <span class="band-desc">{{ band.def.desc }}</span>
+            <span class="band-count num">{{ band.cards.length || '—' }}</span>
+          </button>
+        </h2>
+
+        <div v-show="band.open" :id="`band-${band.id}`" class="band-body">
+          <div v-if="!band.cards.length" class="band-empty">Nothing here yet.</div>
+
+          <div v-else class="action-grid">
+            <button
+              v-for="card in band.cards"
+              :key="card.id"
+              class="action-card"
+              :class="{ 'is-affordable': card.affordable }"
+              :disabled="!card.affordable"
+              @click="buildStructure(card.id, state.ui.buyAmount)"
+            >
+              <span class="action-head">
+                <span class="action-name">
+                  {{ card.def.name }}
+                  <span v-if="card.count > 1" class="muted">×{{ card.count }}</span>
+                </span>
+                <span class="action-count">{{ card.owned }}</span>
+              </span>
+              <span class="action-desc">{{ card.def.desc }}</span>
+              <CostList :cost="card.cost" />
+              <span class="effect-list">{{ card.effects.join(' · ') }}</span>
+              <span v-if="card.eta" class="action-desc" style="margin-bottom: 0">
+                affordable in {{ card.eta }}
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="unfiled.length" class="notice is-warn">
+      <strong>Unfiled buildings.</strong>
+      {{ unfiled.map((c) => c.def.name).join(', ') }} name no band, so nothing lists them. Give
+      each a <code>category</code> from BUILDING_CATEGORIES.
     </div>
   </div>
 </template>

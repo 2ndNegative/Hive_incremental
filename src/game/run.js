@@ -16,6 +16,7 @@
 import { state, replaceState, createInitialState, pushLog } from './state.js';
 import { ORIGINS, originAvailability } from './definitions/origins.js';
 import { BIOMES } from './definitions/biomes.js';
+import { releaseAllCogits } from './actions.js';
 import { formatDuration } from './format.js';
 import { formatMass } from './units.js';
 
@@ -164,6 +165,9 @@ export function chooseOrigin(id) {
   state.drones += drones;
   state.castes.dormant += drones;
   state.stats.peakDrones = Math.max(state.stats.peakDrones, state.drones);
+
+  // Nothing carries a reservation across the start of a run.
+  releaseAllCogits();
 
   state.origin = id;
   pushLog(`Landed: ${def.name}. ${def.flavour}`, 'unlock');

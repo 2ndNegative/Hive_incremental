@@ -94,7 +94,14 @@ const growthPercent = computed(() => Math.floor((state.growth || 0) * 100));
       </div>
     </div>
 
-    <div class="panel-box">
+    <div v-if="!rows.length" class="notice">
+      <strong>No castes.</strong>
+      The drone system is being rebuilt, so every working caste is parked and drones have nowhere
+      to be assigned. They are not lost — a save keeps its assignments for whenever the new castes
+      land.
+    </div>
+
+    <div v-else class="panel-box">
       <div class="panel-head"><span>Castes</span></div>
       <div class="panel-body tight">
         <div v-for="r in rows" :key="r.id" class="job-row">

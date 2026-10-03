@@ -10,8 +10,8 @@
 
 import { reactive } from 'vue';
 import { NUTRIENT_IDS } from './definitions/nutrients.js';
-import { STRUCTURE_ORDER } from './definitions/structures.js';
-import { CASTE_ORDER } from './definitions/castes.js';
+import { STRUCTURE_ORDER, DEPRECATED_STRUCTURE_ORDER } from './definitions/structures.js';
+import { CASTE_ORDER, DEPRECATED_CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
 
 export const SAVE_VERSION = 5;
@@ -29,11 +29,14 @@ export function createInitialState() {
   // pre-choice state completely inert — no demand, no growth, no starvation —
   // so the chooser can sit open indefinitely without the hive dying behind it.
 
+  // Parked ids are seeded alongside live ones so that a save written before the
+  // rebuild keeps its counts through a load — mergeDefaults only carries keys
+  // the defaults declare, so leaving them out would quietly delete them.
   const structures = {};
-  for (const id of STRUCTURE_ORDER) structures[id] = 0;
+  for (const id of [...STRUCTURE_ORDER, ...DEPRECATED_STRUCTURE_ORDER]) structures[id] = 0;
 
   const castes = {};
-  for (const id of CASTE_ORDER) castes[id] = 0;
+  for (const id of [...CASTE_ORDER, ...DEPRECATED_CASTE_ORDER]) castes[id] = 0;
 
   const tech = {};
   for (const id of RESEARCH_ORDER) tech[id] = false;
@@ -68,6 +71,11 @@ export function createInitialState() {
     forage: {},
     insight: 0,
     drones: 0,
+
+    // Cognition is a width, not a stock, so nothing is stored here — only the
+    // blocks of bandwidth that actions are currently holding, keyed by whatever
+    // is holding them. Everything else is derived. See definitions/cognition.js.
+    cognition: { reservations: {} },
 
     // Which starting site this run began at. null = not chosen yet, which is
     // what makes the chooser appear.
@@ -142,6 +150,8 @@ export function createInitialState() {
       storageSort: 'mass',
       storageSearch: '',
       territoryGather: 'forager',
+      // Which building bands are folded shut. Absent = open.
+      buildBands: {},
       pinnedTip: null,
     },
 

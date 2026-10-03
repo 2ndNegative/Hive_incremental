@@ -1,5 +1,10 @@
 // Drone castes.
 //
+// ============================================================================
+// EVERY WORKING CASTE BELOW IS PARKED PENDING THE DRONE REBUILD — see
+// DEPRECATED_CASTE_ORDER at the foot of this file. Only `dormant` is live.
+// ============================================================================
+//
 // A caste is what a drone does. Every drone costs basal energy whether working
 // or not; a working drone costs more and returns item mass, which decomposes
 // into nutrient stores according to the item database.
@@ -105,7 +110,23 @@ export const CASTES = {
   },
 };
 
-export const CASTE_ORDER = ['dormant', 'siphon', 'forager', 'analyst', 'scavenger', 'excavator', 'hunter'];
+/**
+ * The castes the game actually runs. EMPTY of work during the rebuild: only
+ * `dormant` remains, because it is not a job — it is where a drone is when it
+ * has none, and the population invariants need somewhere to put one.
+ */
+export const CASTE_ORDER = ['dormant'];
+
+/**
+ * Parked pending the drone rebuild. Not assignable, not displayed, and not
+ * iterated by the engine, so they draw no energy and harvest nothing.
+ *
+ * Kept rather than deleted: the gather-route model (a caste names a forage
+ * route and a rate, and what it finds comes from the territory) is very likely
+ * to survive, and these are the worked examples of it. Still seeded into
+ * `state.castes` so a save round-trips its assignments.
+ */
+export const DEPRECATED_CASTE_ORDER = ['siphon', 'forager', 'analyst', 'scavenger', 'excavator', 'hunter'];
 
 /** Multiplier channels that castes and structures feed into. */
 export const MULTIPLIERS = ['forager', 'analyst', 'hunter', 'storage', 'mineralStorage', 'vitaminStorage'];

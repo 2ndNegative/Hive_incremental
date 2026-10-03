@@ -3,7 +3,7 @@ import './styles/bulma.scss';
 import './styles/theme.css';
 import App from './App.vue';
 import { state } from './game/state.js';
-import { startLoop, computeDerived, advance, canAfford } from './game/engine.js';
+import { startLoop, computeDerived, advance, canAfford, computeCognition } from './game/engine.js';
 import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS } from './game/save.js';
 import { runOfflineCatchup, offline, skipOffline } from './game/offline.js';
 import { NUTRIENTS, FUELS, itemYield, parentsOf } from './game/definitions/nutrients.js';
@@ -12,8 +12,13 @@ import { ORGANISMS, preyFor } from './game/definitions/organisms.js';
 import { BIOMES, BIOME_IDS, biomeShares, totalArea, holdings } from './game/definitions/biomes.js';
 import { FORAGE, poolFor } from './game/definitions/forage.js';
 import * as forage from './game/forage.js';
-import { research, ingestItem, consumeBiomass, manualOdds } from './game/actions.js';
-import { formatMass, formatEnergy, formatPower } from './game/units.js';
+import {
+  research, ingestItem, consumeBiomass, manualOdds,
+  reserveCogits, releaseCogits, releaseAllCogits,
+} from './game/actions.js';
+import { STRUCTURE_ORDER } from './game/definitions/structures.js';
+import { CASTES, CASTE_ORDER } from './game/definitions/castes.js';
+import { formatMass, formatEnergy, formatPower, formatCogits } from './game/units.js';
 import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
 import * as dev from './game/dev.js';
 import * as run from './game/run.js';
@@ -74,6 +79,11 @@ window.hive = {
   formatMass,
   formatEnergy,
   formatPower,
+  formatCogits,
+  cognition: () => computeCognition(state),
+  reserveCogits,
+  releaseCogits,
+  releaseAllCogits,
   save,
   load,
   wipe,
@@ -85,6 +95,11 @@ window.hive = {
   dev,
   run,
   tips: { pinned, unpinAll },
+  // How much of the game is actually live. The test suites read these to tell
+  // "parked for the rebuild" apart from "broken", so they flip back on by
+  // themselves once the new structures and castes land.
+  structuresLive: STRUCTURE_ORDER.length,
+  castesLive: CASTE_ORDER.filter((id) => CASTES[id].assignable).length,
 };
 
 // Best-effort save on the way out; also covers mobile tab suspension.

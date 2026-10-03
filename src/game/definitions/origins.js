@@ -31,14 +31,16 @@ export const ORIGINS = {
     unlock: () => true,
     effects: [
       '36 m² of temperate forest',
-      'Standard opening stores',
-      'Two drones wake immediately',
-      'No structures — build from nothing',
+      'No stores, no drones, nothing built',
     ],
+    // Zeroed for the building and drone rebuild. With nothing built and nobody
+    // awake there is no consumption either, so an empty hive simply sits there
+    // rather than starving — which is the right place to restart the economy
+    // from once the new structures exist.
     start: {
       territory: { temperateForest: 36 },
-      nutrients: { water: 400, protein: 300, fat: 250, carb: 200 },
-      drones: 2,
+      nutrients: {},
+      drones: 0,
       structures: {},
     },
     flavour: 'The colony does not understand what has happened to it. It goes on working.',

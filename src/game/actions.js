@@ -171,6 +171,41 @@ export function clearFuelOverride(consumerKey) {
   delete state.energy.overrides[consumerKey];
 }
 
+/* ------------------------------------------------------------------ cognition */
+
+/**
+ * Hold a block of bandwidth while something is under way.
+ *
+ * Cognition is a width, so an action does not spend cogits — it occupies them,
+ * and gives them back when it finishes. The key is whatever is holding it, so a
+ * second call with the same key replaces rather than stacks; that way an action
+ * that restarts cannot leak its own reservation.
+ *
+ * Returns false if the hive does not have the free bandwidth to hold it.
+ */
+export function reserveCogits(key, amount, label) {
+  if (!key || !(amount > 0)) return false;
+  state.cognition ??= { reservations: {} };
+  state.cognition.reservations ??= {};
+
+  const existing = state.cognition.reservations[key]?.amount || 0;
+  const { free } = computeDerived(state).cognition;
+  if (amount - existing > free) return false;
+
+  state.cognition.reservations[key] = { amount, label: label || key };
+  return true;
+}
+
+/** Give a block of bandwidth back. */
+export function releaseCogits(key) {
+  if (state.cognition?.reservations) delete state.cognition.reservations[key];
+}
+
+/** Give all of it back — used when a run ends or an origin is chosen. */
+export function releaseAllCogits() {
+  state.cognition = { reservations: {} };
+}
+
 /* ------------------------------------------------------------------- research */
 
 export function research(id) {

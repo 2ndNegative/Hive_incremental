@@ -1,5 +1,22 @@
 // Hive structures.
 //
+// ============================================================================
+// THE WHOLE OF `STRUCTURES` BELOW IS PARKED PENDING THE BUILDING REBUILD.
+//
+// None of it is referenced by the game any more: `STRUCTURE_ORDER` is empty, so
+// the engine computes no capacity, no upkeep, no slots and no multipliers from
+// any of it, and the Hive tab lists none of it. It is kept, rather than
+// deleted, because much of it is probably adaptable — the geometric cost curve,
+// the capMult/slots/throughput shape and several of the buildings themselves
+// are likely to survive the rebuild in some form.
+//
+// `DEPRECATED_STRUCTURE_ORDER` still seeds `state.structures`, so an existing
+// save round-trips its counts instead of silently losing them.
+//
+// When the rebuild lands: give each surviving structure a `category` from
+// BUILDING_CATEGORIES and move its id into STRUCTURE_ORDER.
+// ============================================================================
+//
 // Built out of nutrient mass, not an abstract currency — a Nerve Node costs
 // actual protein and fat off the stores, which is why an early hive has to
 // choose between growing and eating.
@@ -111,7 +128,60 @@ export const STRUCTURES = {
   },
 };
 
-export const STRUCTURE_ORDER = [
+/**
+ * The bands the Hive tab is organised into, in display order.
+ *
+ * Every structure the rebuild produces names one of these in its `category`.
+ * A band with nothing in it still shows — an empty Cognition band is a better
+ * answer to "where does thinking come from" than no band at all.
+ */
+export const BUILDING_CATEGORIES = {
+  core: {
+    id: 'core',
+    name: 'Core',
+    desc: 'The hive itself. What everything else is grown onto, and what dies if it does.',
+  },
+  cognition: {
+    id: 'cognition',
+    name: 'Cognition',
+    desc: 'Thinking mass. How much the hivemind can hold coherent at once, and how fast it works anything out.',
+  },
+  gathering: {
+    id: 'gathering',
+    name: 'Gathering',
+    desc: 'Reaching matter where it lies — and holding the ground it lies on.',
+  },
+  production: {
+    id: 'production',
+    name: 'Production',
+    desc: 'Turning what the hive has into something it would rather have.',
+  },
+  digestion: {
+    id: 'digestion',
+    name: 'Digestion',
+    desc: 'Breaking whole matter down into the nutrients it was made of.',
+  },
+  storage: {
+    id: 'storage',
+    name: 'Storage',
+    desc: 'Holding it. Nothing the hive cannot keep is worth the energy of fetching.',
+  },
+};
+
+export const BUILDING_CATEGORY_ORDER = ['core', 'cognition', 'gathering', 'production', 'digestion', 'storage'];
+
+/**
+ * Buildable structures. EMPTY during the rebuild — see the header.
+ * Everything the engine and the interface iterate comes from here.
+ */
+export const STRUCTURE_ORDER = [];
+
+/**
+ * Parked. Not built, not displayed, not computed — but still seeded into
+ * `state.structures` so an existing save keeps its counts for whenever one of
+ * these comes back.
+ */
+export const DEPRECATED_STRUCTURE_ORDER = [
   'nodeCluster',
   'caecum',
   'crop',

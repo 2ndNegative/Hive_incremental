@@ -86,6 +86,16 @@ export function formatMass(grams, opts = {}) {
   return formatSI(grams, 'g', { minExp: -6, maxExp: 3, ...opts });
 }
 
+/**
+ * Cogits, auto-prefixed: 420 Cg, 4.2 kCg, 1.1 MCg.
+ *
+ * Never goes below the base unit — a third of a cogit is not a thing the hive
+ * can hold a thought in, so millicogits would be noise.
+ */
+export function formatCogits(cogits, opts) {
+  return formatSI(cogits, 'Cg', { minExp: 0, ...opts });
+}
+
 /** Watts, auto-prefixed. */
 export function formatPower(watts, opts) {
   return formatSI(watts, 'W', { minExp: -3, ...opts });
