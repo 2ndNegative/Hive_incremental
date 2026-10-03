@@ -22,11 +22,28 @@
 //
 // MASS ACCOUNTING
 //   Macros partition an item's mass and sum to ~100 g per 100 g. Micros are a
-//   *breakdown of what is already inside those macros* (the minerals inside the
-//   ash fraction, the vitamins dissolved through the rest), not extra mass.
-//   Totalling every store would therefore double-count — which is harmless,
-//   because nothing does, and because every micro carries 0 kJ/g so the energy
-//   sum above stays exactly right.
+//   *breakdown of what is already inside those macros*, not extra mass — the
+//   minerals are part of the ash fraction, the fat-soluble vitamins are
+//   dissolved in the fat, the water-soluble ones in the water. Each micro
+//   therefore names its `parent` macro, and mass is conserved:
+//
+//     unresolved  the micro's grams are tracked in its own store AND still
+//                 counted inside the parent, because the hive genuinely cannot
+//                 tell them apart yet. Nothing in the interface shows either.
+//     at reveal   the assay separates them, so the balance that was riding
+//                 along is drawn back out of the parent in one lump. Resolving
+//                 the bulk minerals visibly costs mineral mass.
+//     resolved    every later intake routes the micro's grams out of the
+//                 parent fraction at the moment they arrive.
+//
+//   A micro can only ever take grams the parent actually supplied, so the
+//   stores can never go negative and nothing appears out of nowhere.
+//   `tools/validate-items.mjs` checks children against parents across the
+//   whole database.
+//
+//   Sulfur is the one nutrient with two homes: in rock it is sulfate and reads
+//   as ash, in tissue it sits inside cystine and methionine and reads as
+//   protein. It names both, in that order.
 
 export const NUTRIENTS = {
   /* ------------------------------------------------------------- macros -- */
@@ -98,7 +115,7 @@ export const NUTRIENTS = {
     group: 'bulk',
     kjPerGram: 0,
     baseCap: 40_000,
-    desc: 'Total incombustible residue. You can weigh it from the first bite; telling apart what is in it takes assay work.',
+    desc: 'Total incombustible residue. You can weigh it from the first bite; telling apart what is in it takes assay work, and every element you learn to name is drawn out of this.',
   },
 
   /* ------------------------------------------------- minerals (micro) ---- */
@@ -109,7 +126,7 @@ export const NUTRIENTS = {
   magnesium: m('magnesium', 'Magnesium', 'bulkMineralAssay', 100, 'Enzyme cofactor. Concentrated in seeds and chlorophyll.'),
   phosphorus: m('phosphorus', 'Phosphorus', 'bulkMineralAssay', 300, 'Energy transfer and bone. The bottleneck mineral of this biosphere.'),
   chloride: m('chloride', 'Chloride', 'bulkMineralAssay', 200, 'Travels with sodium. Seawater is swimming in it.'),
-  sulfur: m('sulfur', 'Sulfur', 'bulkMineralAssay', 100, 'Sits inside two amino acids, so protein mass carries it along.'),
+  sulfur: m('sulfur', 'Sulfur', 'bulkMineralAssay', 100, 'Sits inside two amino acids, so protein mass carries it along.', ['ash', 'protein']),
 
   iron: m('iron', 'Iron', 'traceMetalAssay', 20, 'Oxygen carrier. Blood and liver are the richest biological sources.'),
   zinc: m('zinc', 'Zinc', 'traceMetalAssay', 20, 'Catalytic metal. Oysters are an absurd outlier.'),
@@ -139,8 +156,14 @@ export const NUTRIENTS = {
   vitaminB12: m('vitaminB12', 'Cobalamin (B12)', 'aqueousAssay', 0.2, 'Cobalt-cored. Produced only by microbes; found only in animal tissue.'),
 };
 
-/** Shorthand for a micronutrient entry. Caps are in grams. */
-function m(id, name, revealedBy, baseCap, desc) {
+/**
+ * Shorthand for a micronutrient entry. Caps are in grams.
+ *
+ * `parents` lists the macro fractions this micro's mass is physically part of,
+ * most likely first. It defaults from the assay group: minerals come out of the
+ * ash, fat-soluble vitamins out of the fat, water-soluble out of the water.
+ */
+function m(id, name, revealedBy, baseCap, desc, parents) {
   return {
     id,
     name,
@@ -150,7 +173,14 @@ function m(id, name, revealedBy, baseCap, desc) {
     baseCap,
     revealedBy,
     desc,
+    parents: parents ?? [defaultParent(revealedBy)],
   };
+}
+
+function defaultParent(group) {
+  if (group === 'lipidAssay') return 'fat';
+  if (group === 'aqueousAssay') return 'water';
+  return 'ash';
 }
 
 export const NUTRIENT_IDS = Object.keys(NUTRIENTS);
@@ -194,3 +224,76 @@ export function isUsableFuel(state, id) {
   if (def.fuelRequires && !state.tech[def.fuelRequires]) return false;
   return true;
 }
+
+/* ------------------------------------------------------------ mass accounting */
+
+/** The macro fractions a micro's mass is part of, most likely first. */
+export function parentsOf(id) {
+  return NUTRIENTS[id]?.parents ?? [];
+}
+
+/**
+ * What ingesting `grams` of an item actually adds to each store.
+ *
+ * Macros come straight off the composition. A micro the hive has resolved is
+ * drawn out of the parent fraction that was carrying it, so the same gram is
+ * never counted twice; a micro it has not resolved yet is tracked in its own
+ * store while its mass stays inside the parent, because the hive cannot tell
+ * the two apart until the assay is done.
+ *
+ * The draw is limited to what this item's own parent fraction supplied, so no
+ * store can be pushed below zero by a composition that does not add up.
+ */
+export function itemYield(state, per100g, grams) {
+  const scale = grams / 100;
+  const add = {};
+  for (const [id, per100] of Object.entries(per100g)) {
+    if (per100) add[id] = per100 * scale;
+  }
+
+  for (const id of MICROS) {
+    const amount = add[id];
+    if (!amount || !isRevealed(state, id)) continue;
+    let owed = amount;
+    for (const parent of parentsOf(id)) {
+      if (owed <= EPS) break;
+      const available = add[parent] || 0;
+      if (available <= EPS) continue;
+      const taken = Math.min(owed, available);
+      add[parent] = available - taken;
+      owed -= taken;
+    }
+    // Any remainder had no parent fraction to come out of, which means the
+    // item's composition does not account for it. validate-items.mjs is what
+    // catches that; here it simply arrives as mass of its own.
+  }
+
+  return add;
+}
+
+/**
+ * Settle the balance that has been riding inside the macros, at the moment an
+ * assay makes it visible. Mutates `state.nutrients` and returns how much came
+ * out of each parent, so the reveal can say what it cost.
+ */
+export function settleReveal(state, ids) {
+  const drawn = {};
+  for (const id of ids) {
+    let owed = state.nutrients[id] || 0;
+    if (owed <= EPS) continue;
+    for (const parent of parentsOf(id)) {
+      if (owed <= EPS) break;
+      const available = state.nutrients[parent] || 0;
+      if (available <= EPS) continue;
+      const taken = Math.min(owed, available);
+      state.nutrients[parent] = available - taken;
+      drawn[parent] = (drawn[parent] || 0) + taken;
+      owed -= taken;
+    }
+    // Whatever is left was spent as macro mass long ago, or spilled. The hive
+    // keeps the named grams it is holding; the books simply do not go negative.
+  }
+  return drawn;
+}
+
+const EPS = 1e-12;

@@ -10,6 +10,7 @@ import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ASSAY_GROUPS } from './definitions/nutrients.js';
 import { computeDerived, advance } from './engine.js';
 import { ingestItem } from './actions.js';
+import { ITEMS } from './definitions/items/index.js';
 import { formatMass } from './units.js';
 import { formatDuration } from './format.js';
 
@@ -77,6 +78,35 @@ export function grantItem(itemId, grams) {
   ingestItem(itemId, grams);
   touch();
   pushLog(`Ingested ${formatMass(grams)} of ${itemId.replace(/_/g, ' ')}.`, 'info');
+}
+
+/* ------------------------------------------------------------------ storage */
+
+/** Fill every item the hive is currently gathering to its storage cap. */
+export function fillStorage() {
+  const d = computeDerived(state);
+  const ids = new Set([...Object.keys(state.items || {}), ...Object.keys(d.itemFlow)]);
+  state.items ??= {};
+  for (const id of ids) {
+    if (ITEMS[id]) state.items[id] = d.itemCap;
+  }
+  touch();
+  pushLog(`Storage filled: ${ids.size} item${ids.size === 1 ? '' : 's'} at ${formatMass(d.itemCap)}.`, 'info');
+}
+
+/** Drop matter into storage without digesting it, to watch the backlog behave. */
+export function stockStorage(itemId, grams) {
+  if (!ITEMS[itemId]) return;
+  state.items ??= {};
+  state.items[itemId] = (state.items[itemId] || 0) + grams;
+  touch();
+  pushLog(`Stored ${formatMass(grams)} of ${itemId.replace(/_/g, ' ')} whole.`, 'info');
+}
+
+export function emptyStorage() {
+  state.items = {};
+  touch();
+  pushLog('Storage emptied.', 'info');
 }
 
 /* ------------------------------------------------- insight, drones, research */

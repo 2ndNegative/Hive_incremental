@@ -89,6 +89,19 @@ const SKIP_PRESETS = [
           </select>
           <input class="dev-number num" type="number" v-model.number="itemGrams" min="0" />
           <button class="btn" @click="dev.grantItem(itemId, itemGrams)">Ingest grams</button>
+          <button class="btn" @click="dev.stockStorage(itemId, itemGrams)">Store whole</button>
+        </div>
+
+        <div class="field-row">
+          <span class="field-label">
+            Storage
+            <span class="field-help">
+              Fill every item currently being gathered up to its cap, to watch the backlog and the
+              spoilage behave without waiting for the gut to fall behind.
+            </span>
+          </span>
+          <button class="btn is-primary" @click="dev.fillStorage()">Fill storage</button>
+          <button class="btn is-danger" @click="dev.emptyStorage()">Empty storage</button>
         </div>
       </div>
     </div>

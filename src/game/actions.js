@@ -1,7 +1,15 @@
 // Player actions. Every mutation the player can cause goes through here.
 
 import { state, pushLog } from './state.js';
-import { NUTRIENTS, NUTRIENT_IDS, MICROS, isRevealed, isUsableFuel } from './definitions/nutrients.js';
+import {
+  NUTRIENTS,
+  NUTRIENT_IDS,
+  MICROS,
+  isRevealed,
+  isUsableFuel,
+  itemYield,
+  settleReveal,
+} from './definitions/nutrients.js';
 import { STRUCTURES } from './definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH } from './definitions/research.js';
@@ -21,10 +29,8 @@ export function ingestItem(itemId, grams) {
   const item = ITEMS[itemId];
   if (!item || grams <= 0) return 0;
   const derived = computeDerived(state);
-  const scale = grams / 100;
-  for (const [nutrient, per100] of Object.entries(item.per100g)) {
-    if (!per100) continue;
-    const amount = per100 * scale;
+  for (const [nutrient, amount] of Object.entries(itemYield(state, item.per100g, grams))) {
+    if (amount <= 0) continue;
     const cap = derived.caps[nutrient];
     const next = (state.nutrients[nutrient] || 0) + amount;
     if (next > cap) {
@@ -147,6 +153,18 @@ export function research(id) {
         .map((n) => `${formatMass(state.nutrients[n])} ${NUTRIENTS[n].name.toLowerCase()}`)
         .join(', ');
       pushLog(`Already in store, uncounted until now: ${top}.`, 'reveal');
+
+      // Those grams were never extra mass — they have been riding inside the
+      // macros all along. Now that the hive can tell them apart, they come out.
+      const drawn = settleReveal(state, revealed);
+      const bill = Object.entries(drawn)
+        .filter(([, grams]) => grams > 0.001)
+        .sort((a, b) => b[1] - a[1])
+        .map(([n, grams]) => `${formatMass(grams)} off the ${NUTRIENTS[n].name.toLowerCase()}`);
+      if (bill.length) {
+        pushLog(`Separating it out draws ${bill.join(' and ')}. The mass was always the same mass.`, 'reveal');
+      }
+
       const lost = revealed.reduce((sum, n) => sum + (state.spilled[n] || 0), 0);
       if (lost > 0.001) {
         pushLog(`Records show ${formatMass(lost)} of it was discarded as overflow.`, 'reveal');

@@ -276,6 +276,16 @@ function migrate(raw) {
   if ((raw.version ?? 0) < 3 && !raw.origin) {
     raw.origin = 'anthill';
   }
+
+  // Saves from before item storage existed decomposed every harvest on arrival,
+  // so there is no backlog to restore — an empty store is exactly right. The
+  // digestion structures start at zero and the base gut rate covers what those
+  // hives were already producing, so nothing stalls on load.
+  if ((raw.version ?? 0) < 4) {
+    raw.items ??= {};
+    raw.spilledItems ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

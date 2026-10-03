@@ -1,10 +1,11 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { state, derived } from '../game/useGame.js';
+import { state, derived, showInCodex } from '../game/useGame.js';
 import { NUTRIENTS, MACROS, MICROS, ASSAY_GROUPS, isRevealed } from '../game/definitions/nutrients.js';
 import { formatMass, formatMassFlow, formatEnergy } from '../game/units.js';
 import { consumeBiomass, MANUAL_INTAKE } from '../game/actions.js';
 import { ITEMS } from '../game/definitions/items/index.js';
+import { isPinned, pinHandlers } from '../game/tips.js';
 
 const collapsed = ref({});
 function toggle(key) {
@@ -25,7 +26,13 @@ function row(id) {
     full: cap > 0 && amount >= cap - 1e-9,
     fill: cap > 0 ? Math.min(100, (amount / cap) * 100) : 0,
     energy: amount * def.kjPerGram * 1000,
-    sources: derived.value.flowSources[id] ?? [],
+    sources: (derived.value.flowSources[id] ?? []).map((s) => ({
+      ...s,
+      // Who is bringing this item in. This is the second link of the chain:
+      // protein came from beef, and the beef came from eleven hunters working
+      // deer. Without it the player can see the what but never the who.
+      from: s.itemId ? derived.value.itemSources[s.itemId] ?? [] : [],
+    })),
     spilled: state.spilled[id] ?? 0,
   };
 }
@@ -99,7 +106,13 @@ const manualYield = computed(() => {
       </button>
 
       <div v-show="!collapsed[group.key]" class="panel-body tight">
-        <div v-for="r in group.rows" :key="r.id" class="res-row tip tip-side">
+        <div
+          v-for="r in group.rows"
+          :key="r.id"
+          class="res-row tip tip-side"
+          :class="{ 'is-pinned': isPinned(`nutrient:${r.id}`) }"
+          v-on="pinHandlers(`nutrient:${r.id}`)"
+        >
           <span class="res-name">{{ r.def.name }}</span>
 
           <span class="res-amount num">
@@ -135,12 +148,45 @@ const manualYield = computed(() => {
             </span>
             <hr style="border-color: var(--border); margin: 0.3rem 0" />
             <span v-for="(s, i) in r.sources" :key="i" class="tip-row">
-              <span>{{ s.label }}</span>
+              <!-- An item source nests a tooltip of its own, naming the castes
+                   behind it. Reachable only once this tooltip is pinned, which
+                   is what makes it hoverable. -->
+              <span v-if="s.itemId" class="tip">
+                <span class="tip-link">{{ s.label }}</span>
+                <span class="tip-body">
+                  <span class="tip-title">{{ s.label }}</span>
+                  <span class="muted" style="display: block; margin-bottom: 0.3rem">
+                    {{ formatMassFlow(s.amount) }} of {{ NUTRIENTS[r.id].name.toLowerCase() }} comes
+                    out of this.
+                  </span>
+                  <span v-for="(f, j) in s.from" :key="j" class="tip-row">
+                    <span>{{ f.label }}</span>
+                    <span class="good">{{ formatMassFlow(f.amount) }}</span>
+                  </span>
+                  <span v-if="!s.from.length" class="tip-row muted">
+                    <span>Drawn from storage, not being gathered</span><span>—</span>
+                  </span>
+                  <span class="tip-row" style="margin-top: 0.25rem">
+                    <span>
+                      <button class="codex-link" @click="showInCodex(s.itemId)">Open in Codex</button>
+                    </span>
+                    <span />
+                  </span>
+                </span>
+              </span>
+              <span v-else>{{ s.label }}</span>
               <span :class="s.amount > 0 ? 'good' : 'bad'">{{ formatMassFlow(s.amount) }}</span>
             </span>
             <span v-if="!r.sources.length" class="tip-row muted"><span>No flow</span><span>—</span></span>
             <span v-if="r.spilled > 0.001" class="tip-row warn">
               <span>Lost to overflow</span><span>{{ formatMass(r.spilled) }}</span>
+            </span>
+            <span v-if="r.sources.some((s) => s.itemId)" class="tip-hint">
+              {{
+                isPinned(`nutrient:${r.id}`)
+                  ? 'Pinned — hover a source for its own sources, Escape to release'
+                  : 'Middle-click to pin, then hover a source to see where it comes from'
+              }}
             </span>
           </span>
         </div>

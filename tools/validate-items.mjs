@@ -14,10 +14,9 @@
  *   1. Macro mass balance — macros must sum to 100 g per 100 g (±2 g).
  *   2. Energy cross-check — energy recomputed from macros must match the
  *      published figure where one is given.
- *   3. Mineral containment — for minerals and metals, identified minerals
- *      cannot outweigh the ash fraction. Elsewhere this is a warning, and
- *      sulfur and phosphorus are exempt because both have major organic forms
- *      (cysteine, phospholipids) that do not appear in ash.
+ *   3. Parent containment — every micronutrient must fit inside the macro
+ *      fraction it is declared to be part of, because the engine draws its
+ *      mass back out of that fraction once the assay resolves it.
  *   4. Plausibility — no negative values, no micronutrient exceeding 1% of mass
  *      unless the item is a mineral or is flagged as an outlier.
  *   5. Referential integrity — organism parts must name real items.
@@ -25,7 +24,7 @@
 
 import { ITEMS, ITEM_IDS, itemJoulesPerGram } from '../src/game/definitions/items/index.js';
 import { ORGANISMS, ORGANISM_IDS } from '../src/game/definitions/organisms.js';
-import { NUTRIENTS, MACROS, MICROS } from '../src/game/definitions/nutrients.js';
+import { NUTRIENTS, MACROS, MICROS, parentsOf } from '../src/game/definitions/nutrients.js';
 import { formatEnergy } from '../src/game/units.js';
 
 const verbose = process.argv.includes('--verbose');
@@ -35,8 +34,6 @@ const warnings = [];
 const err = (id, msg) => errors.push(`${id}: ${msg}`);
 const warn = (id, msg) => warnings.push(`${id}: ${msg}`);
 
-const MINERALS = MICROS.filter((id) => NUTRIENTS[id].group.endsWith('MineralAssay') || ['traceMetalAssay', 'rareElementAssay'].includes(NUTRIENTS[id].group));
-const ORGANIC_MINERALS = new Set(['sulfur', 'phosphorus']); // also bound in protein and lipid
 
 for (const id of ITEM_IDS) {
   const item = ITEMS[id];
@@ -54,17 +51,30 @@ for (const id of ITEM_IDS) {
     if (v < 0) err(id, `negative ${n}: ${v}`);
   }
 
-  /* 3. mineral containment */
-  const ash = item.per100g.ash || 0;
-  const mineralMass = MINERALS.filter((n) => !ORGANIC_MINERALS.has(n)).reduce(
-    (s, n) => s + (item.per100g[n] || 0),
-    0,
-  );
-  const strict = item.category === 'mineral' || item.category === 'metal';
-  if (mineralMass > ash + 0.01) {
-    const msg = `identified minerals (${mineralMass.toFixed(2)} g) exceed ash (${ash.toFixed(2)} g)`;
-    if (strict) err(id, msg);
-    else if (mineralMass > ash * 1.2 + 0.05) warn(id, msg);
+  /* 3. parent containment.
+     The engine draws a resolved micronutrient's mass out of the macro fraction
+     that was carrying it (nutrients.js, MASS ACCOUNTING). That only conserves
+     mass if the parent fraction is actually big enough to hold its children,
+     so this checks exactly the claim the engine relies on: for each parent, the
+     children that name it first must fit inside it. Sulfur names ash then
+     protein, and is allowed to spill into protein the way the engine lets it. */
+  const claims = {}; // parent -> grams claimed by its children
+  for (const n of MICROS) {
+    const grams = item.per100g[n] || 0;
+    if (grams <= 0) continue;
+    let owed = grams;
+    for (const parent of parentsOf(n)) {
+      if (owed <= 1e-12) break;
+      const room = (item.per100g[parent] || 0) - (claims[parent] || 0);
+      if (room <= 1e-12) continue;
+      const taken = Math.min(owed, room);
+      claims[parent] = (claims[parent] || 0) + taken;
+      owed -= taken;
+    }
+    if (owed > 0.01) {
+      const where = parentsOf(n).map((p) => `${p} ${(item.per100g[p] || 0).toFixed(2)} g`).join(' / ');
+      err(id, `${n} ${grams.toFixed(3)} g does not fit inside ${where} — ${owed.toFixed(3)} g would arrive as mass from nowhere`);
+    }
   }
 
   /* 4b. micronutrient plausibility

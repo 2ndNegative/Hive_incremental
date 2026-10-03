@@ -11,6 +11,8 @@
 //   upkeepWatts  continuous energy draw per unit
 //   slots        caste capacity added per unit
 //   mult         multiplier channel bonuses per unit
+//   digestion    grams of stored item mass broken down per second, per unit
+//   itemCapMult  multiplicative bonus to every item's storage, per unit
 
 const geo = (base, growth) => (n) => base * growth ** n;
 
@@ -32,6 +34,24 @@ export const STRUCTURES = {
     cost: (n) => ({ protein: geo(400, 1.32)(n) }),
     capMult: { bulk: 0.5 },
     upkeepWatts: 5,
+  },
+  caecum: {
+    id: 'caecum',
+    name: 'Digestive Caecum',
+    desc: 'A blind fermenting gut. Breaks whole harvest down into the nutrients it was made of — without enough of them, matter just piles up in storage.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(220, 1.28)(n), water: geo(500, 1.28)(n) }),
+    digestion: 150,
+    upkeepWatts: 10,
+  },
+  crop: {
+    id: 'crop',
+    name: 'Crop Chamber',
+    desc: 'A muscular holding sac for matter the hive has gathered but not yet broken down. Harvest in excess of this spoils where it lies.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(260, 1.3)(n), fiber: geo(200, 1.3)(n) }),
+    itemCapMult: 0.75,
+    upkeepWatts: 4,
   },
   thermalVent: {
     id: 'thermalVent',
@@ -93,6 +113,8 @@ export const STRUCTURES = {
 
 export const STRUCTURE_ORDER = [
   'nodeCluster',
+  'caecum',
+  'crop',
   'gutSac',
   'thermalVent',
   'assayChamber',

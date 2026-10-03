@@ -14,7 +14,7 @@ import { STRUCTURE_ORDER } from './definitions/structures.js';
 import { CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -46,6 +46,11 @@ export function createInitialState() {
 
     nutrients,
     spilled, // lifetime mass lost to full stores, per nutrient
+
+    // Harvested matter, still whole. Castes deliver here and digestion draws
+    // from here; a hive that cannot digest fast enough visibly backs up.
+    items: {},
+    spilledItems: {}, // lifetime item mass lost to full storage, per item
     insight: 0,
     drones: 0,
 
@@ -119,6 +124,9 @@ export function createInitialState() {
       codexSearch: '',
       codexSort: 'name',
       selectedItem: null,
+      storageSort: 'mass',
+      storageSearch: '',
+      pinnedTip: null,
     },
 
     log: [],

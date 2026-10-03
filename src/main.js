@@ -6,11 +6,12 @@ import { state } from './game/state.js';
 import { startLoop, computeDerived, advance, canAfford } from './game/engine.js';
 import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS } from './game/save.js';
 import { runOfflineCatchup, offline, skipOffline } from './game/offline.js';
-import { NUTRIENTS, FUELS } from './game/definitions/nutrients.js';
+import { NUTRIENTS, FUELS, itemYield, parentsOf } from './game/definitions/nutrients.js';
 import { ITEMS } from './game/definitions/items/index.js';
 import { ORGANISMS } from './game/definitions/organisms.js';
 import { research, ingestItem } from './game/actions.js';
 import { formatMass, formatEnergy, formatPower } from './game/units.js';
+import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
 import * as dev from './game/dev.js';
 import * as run from './game/run.js';
 
@@ -20,6 +21,9 @@ const { offlineSeconds } = load();
 document.documentElement.dataset.theme = state.settings.theme;
 
 createApp(App).mount('#app');
+
+// Escape, or a click outside, releases a pinned tooltip.
+installTipDismiss();
 
 /**
  * Catch up on time away, then start the live loop. The catch-up runs in chunks
@@ -49,6 +53,8 @@ window.hive = {
   items: ITEMS,
   organisms: ORGANISMS,
   canAfford,
+  itemYield,
+  parentsOf,
   research,
   ingestItem,
   formatMass,
@@ -64,6 +70,7 @@ window.hive = {
   skipOffline,
   dev,
   run,
+  tips: { pinned, unpinAll },
 };
 
 // Best-effort save on the way out; also covers mobile tab suspension.

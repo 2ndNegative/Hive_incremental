@@ -9,6 +9,7 @@ import MessageLog from './components/MessageLog.vue';
 import TabBar from './components/TabBar.vue';
 import HiveTab from './components/tabs/HiveTab.vue';
 import DronesTab from './components/tabs/DronesTab.vue';
+import StorageTab from './components/tabs/StorageTab.vue';
 import MetabolismTab from './components/tabs/MetabolismTab.vue';
 import ResearchTab from './components/tabs/ResearchTab.vue';
 import CodexTab from './components/tabs/CodexTab.vue';
@@ -21,6 +22,7 @@ import OriginChooser from './components/OriginChooser.vue';
 const TABS = {
   hive: HiveTab,
   drones: DronesTab,
+  storage: StorageTab,
   metabolism: MetabolismTab,
   research: ResearchTab,
   codex: CodexTab,

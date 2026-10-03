@@ -18,11 +18,20 @@
 //   3. throughput ceiling (structures cap how fast mass can be oxidised)
 //   4. fuel allocation: preferred store, then fallback, then starvation
 //   5. harvest, scaled by how much of the energy demand was actually met
-//   6. item mass decomposed into nutrient inflow
+//   6. digestion: stored items broken down into nutrient inflow
 //
 // Stages 4 and 5 are deliberately circular-free: harvest never feeds the energy
 // that powers the harvest within the same tick. Mass arrives, and next tick it
 // is available to burn.
+//
+// WHERE HARVEST GOES
+// Castes deliver whole matter into `state.items` — carcasses, grass, topsoil —
+// and digestion draws it back out at a rate the hive's gut tissue sets. The
+// hive is born with a little of that tissue (BASE_DIGESTION_WATTS' sibling
+// below), so a new hive behaves exactly as it did before storage existed; a
+// hive that outgrows its gut watches the backlog climb instead. The click is
+// the exception: a drone chewing a mouthful needs no organ, so manual intake
+// still goes straight to the nutrient stores.
 
 import {
   NUTRIENTS,
@@ -32,6 +41,7 @@ import {
   joulesPerGram,
   isRevealed,
   isUsableFuel,
+  itemYield,
 } from './definitions/nutrients.js';
 import { STRUCTURES, STRUCTURE_ORDER } from './definitions/structures.js';
 import {
@@ -52,6 +62,11 @@ const MAX_CATCHUP_SECONDS = 5;
 // work stays bounded however long the player has been away.
 
 const BASE_THROUGHPUT_WATTS = 2_000;
+// The gut the hive lands with. Set to 0 to make the Digestive Caecum a hard
+// gate rather than an upgrade; at 80 g/s a starting hive digests everything it
+// can gather and a hive past about four harvesters starts to back up.
+const BASE_DIGESTION = 80; // grams of stored item mass per second
+const BASE_ITEM_CAP = 2_000; // grams, per item
 const BASE_INSIGHT_CAP = 200;
 const BASE_DRONE_CAP = 3;
 const DRONE_PROTEIN_COST = 180; // grams of protein per new drone
@@ -115,6 +130,8 @@ function computeCaps(state) {
   let droneCap = BASE_DRONE_CAP;
   let insightCap = BASE_INSIGHT_CAP;
   let throughput = BASE_THROUGHPUT_WATTS;
+  let digestion = BASE_DIGESTION;
+  let itemCapMult = 0;
   for (const id of STRUCTURE_ORDER) {
     const count = state.structures[id] || 0;
     if (!count) continue;
@@ -122,9 +139,12 @@ function computeCaps(state) {
     droneCap += (def.caps?.drones || 0) * count;
     insightCap += (def.insightCap || 0) * count;
     throughput += (def.throughput || 0) * count;
+    digestion += (def.digestion || 0) * count;
+    itemCapMult += (def.itemCapMult || 0) * count;
   }
+  const itemCap = BASE_ITEM_CAP * (1 + itemCapMult);
 
-  return { caps, capMult, droneCap, insightCap, throughput };
+  return { caps, capMult, droneCap, insightCap, throughput, digestion, itemCap };
 }
 
 function computeSlots(state) {
@@ -183,7 +203,7 @@ export function fuelChoiceFor(state, consumerKey) {
 export function computeDerived(state, dt = TICK_SECONDS) {
   const mult = computeMultipliers(state);
   const efficiency = computeEfficiency(state);
-  const { caps, capMult, droneCap, insightCap, throughput } = computeCaps(state);
+  const { caps, capMult, droneCap, insightCap, throughput, digestion, itemCap } = computeCaps(state);
   const slots = computeSlots(state);
 
   /* -- 2. energy demand ---------------------------------------------------- */
@@ -270,7 +290,11 @@ export function computeDerived(state, dt = TICK_SECONDS) {
 
   /* -- 5 & 6. harvest and nutrient inflow ----------------------------------- */
 
-  const itemFlow = {}; // itemId -> grams per second
+  const itemFlow = {}; // itemId -> grams per second harvested
+  // Who is bringing each item in. This is what lets the interface answer "where
+  // is all this beef coming from" without the player having to work it out from
+  // the caste table.
+  const itemSources = {}; // itemId -> [{ label, amount, casteId, organism }]
   let insightRate = 0;
 
   for (const id of CASTE_ORDER) {
@@ -280,7 +304,13 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     const scale = (1 + (def.mult ? mult[def.mult] || 0 : 0)) * energyRatio;
 
     for (const [itemId, perDrone] of Object.entries(def.harvest || {})) {
-      itemFlow[itemId] = (itemFlow[itemId] || 0) + perDrone * assigned * scale;
+      const amount = perDrone * assigned * scale;
+      itemFlow[itemId] = (itemFlow[itemId] || 0) + amount;
+      (itemSources[itemId] ||= []).push({
+        label: `${def.name} ×${assigned}`,
+        amount,
+        casteId: id,
+      });
     }
 
     // Hunters butcher a whole organism; the yield table does the rest.
@@ -288,28 +318,80 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       const org = ORGANISMS[def.organism];
       const liveGrams = def.harvestRate * assigned * scale;
       for (const [itemId, fraction] of Object.entries(org.parts)) {
-        itemFlow[itemId] = (itemFlow[itemId] || 0) + liveGrams * fraction;
+        const amount = liveGrams * fraction;
+        itemFlow[itemId] = (itemFlow[itemId] || 0) + amount;
+        (itemSources[itemId] ||= []).push({
+          label: `${def.name} ×${assigned} working ${org.name}`,
+          amount,
+          casteId: id,
+          organism: def.organism,
+        });
       }
     }
 
     if (def.insight) insightRate += def.insight * assigned * scale;
   }
 
+  /* -- 6. digestion --------------------------------------------------------- */
+
+  // Digestion reaches what is already stored plus what is arriving this step,
+  // and takes the same fraction of every pile, so nothing sits at the back of
+  // the queue starving while something else drains. Whatever it cannot get
+  // through stays in storage, and storage spoils at its cap.
+  const reachable = {};
+  let reachableTotal = 0;
+  for (const itemId of new Set([...Object.keys(state.items || {}), ...Object.keys(itemFlow)])) {
+    if (!ITEMS[itemId]) continue;
+    const amount = (state.items?.[itemId] || 0) + (itemFlow[itemId] || 0) * dt;
+    if (amount <= EPSILON) continue;
+    reachable[itemId] = amount;
+    reachableTotal += amount;
+  }
+
+  const digestCapacity = digestion * dt;
+  const digestShare = reachableTotal > EPSILON ? Math.min(1, digestCapacity / reachableTotal) : 0;
+  const digestRatio = digestShare; // 1 = the gut keeps up with everything
+
+  const digestFlow = {}; // itemId -> grams per second broken down
+  const itemNet = {}; // itemId -> grams per second change in storage
+  const itemSpill = {}; // itemId -> grams per second spoiling at the cap
+  let harvestRate = 0;
+  let digestRate = 0;
+
+  for (const itemId of Object.keys(reachable)) {
+    const held = state.items?.[itemId] || 0;
+    const arriving = itemFlow[itemId] || 0;
+    const taken = reachable[itemId] * digestShare;
+    harvestRate += arriving;
+    if (taken > EPSILON) {
+      digestFlow[itemId] = taken / dt;
+      digestRate += taken / dt;
+    }
+
+    let after = held + arriving * dt - taken;
+    if (after > itemCap) {
+      itemSpill[itemId] = (after - itemCap) / dt;
+      after = itemCap;
+    }
+    if (after < 0) after = 0;
+    itemNet[itemId] = (after - held) / dt;
+  }
+
   const inflow = {};
-  const flowSources = {}; // nutrient -> [{ label, amount }]
-  let ingestRate = 0;
-  for (const [itemId, gramsPerSecond] of Object.entries(itemFlow)) {
+  const flowSources = {}; // nutrient -> [{ label, amount, itemId }]
+  for (const [itemId, gramsPerSecond] of Object.entries(digestFlow)) {
     const item = ITEMS[itemId];
     if (!item || gramsPerSecond <= EPSILON) continue;
-    ingestRate += gramsPerSecond;
-    const scale = gramsPerSecond / 100;
-    for (const [nutrient, per100] of Object.entries(item.per100g)) {
-      if (!per100) continue;
-      const amount = per100 * scale;
+    // itemYield carves resolved micronutrients out of the macro fraction that
+    // was carrying them, so a gram of potassium arriving in the ash is counted
+    // once, as potassium, and the ash figure drops to match.
+    for (const [nutrient, amount] of Object.entries(itemYield(state, item.per100g, gramsPerSecond))) {
+      if (amount <= EPSILON) continue;
       inflow[nutrient] = (inflow[nutrient] || 0) + amount;
-      (flowSources[nutrient] ||= []).push({ label: item.name, amount });
+      (flowSources[nutrient] ||= []).push({ label: item.name, amount, itemId });
     }
   }
+  const ingestRate = digestRate;
   for (const [nutrient, grams] of Object.entries(burn)) {
     (flowSources[nutrient] ||= []).push({ label: 'Metabolised', amount: -grams });
   }
@@ -369,6 +451,15 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     net,
     flowSources,
     itemFlow,
+    itemSources,
+    itemNet,
+    itemSpill,
+    itemCap,
+    digestFlow,
+    digestion,
+    digestRatio,
+    harvestRate,
+    digestRate,
     ingestRate,
     insightRate,
     growthRate,
@@ -441,6 +532,19 @@ export function etaFor(state, derived, cost) {
 
 export function tick(state, dt) {
   const derived = computeDerived(state, dt);
+
+  // Storage first: `itemNet` already has the cap and the spoilage folded in,
+  // because the amount digestion could reach depended on both.
+  state.items ??= {};
+  state.spilledItems ??= {};
+  for (const [itemId, rate] of Object.entries(derived.itemNet)) {
+    const next = (state.items[itemId] || 0) + rate * dt;
+    if (next > EPSILON) state.items[itemId] = next;
+    else delete state.items[itemId];
+  }
+  for (const [itemId, rate] of Object.entries(derived.itemSpill)) {
+    state.spilledItems[itemId] = (state.spilledItems[itemId] || 0) + rate * dt;
+  }
 
   for (const id of NUTRIENT_IDS) {
     const cap = derived.caps[id];

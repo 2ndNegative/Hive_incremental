@@ -1239,3 +1239,180 @@ textarea.save-box {
   font-family: var(--mono);
   font-size: 0.74rem;
 }
+
+/* ------------------------------------------------------------ pinned tooltips */
+
+/* Middle-clicking a tooltip pins it. A pinned tooltip stays put and, crucially,
+   accepts the pointer — which is what lets the rows inside it have tooltips of
+   their own. Unpinned bodies keep pointer-events:none so they never swallow a
+   click meant for whatever is underneath. */
+.tip.is-pinned > .tip-body,
+.tip.is-pinned:hover > .tip-body {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  border-color: var(--accent, var(--border-bright));
+  z-index: 80;
+  /* Pinned tooltips are read, not glanced at, and they have a nested panel
+     opening beside them — give the rows room so nothing has to be guessed. */
+  min-width: 300px;
+}
+
+.tip.is-pinned {
+  z-index: 80;
+}
+
+/* A tooltip opened from inside a pinned one has to clear its parent — both in
+   paint order and in space. Dropping the inner .tip back to position:static
+   makes the enclosing .tip-body the containing block, so "left: 100%" means
+   past the right edge of the whole tooltip rather than past the few characters
+   of text that were hovered, which is what put the child on top of its parent. */
+.tip-body .tip {
+  position: static;
+}
+
+.tip-body .tip > .tip-body {
+  z-index: 95;
+  left: calc(100% + 8px);
+  top: 0;
+  min-width: 260px;
+}
+
+@media (max-width: 980px) {
+  /* No room to the side inside an already-narrow panel tooltip. */
+  .tip-body .tip > .tip-body {
+    left: 0;
+    top: calc(100% + 100%);
+  }
+}
+
+/* Something hoverable inside a tooltip needs to look hoverable. */
+.tip-body .tip-link {
+  border-bottom: 1px dotted var(--border-bright);
+  cursor: help;
+}
+
+.tip-hint {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.68rem;
+  color: var(--text-dim, var(--text));
+  opacity: 0.6;
+}
+
+.tip.is-pinned .tip-hint {
+  color: var(--accent, inherit);
+  opacity: 0.9;
+}
+
+/* ----------------------------------------------------------------- codex links */
+
+/* A name in prose that jumps to its codex entry. Underlined rather than
+   coloured, so a paragraph full of them still reads as a paragraph. */
+.codex-link {
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--border-bright);
+}
+
+.codex-link:hover {
+  color: var(--text-strong);
+  border-bottom-color: currentColor;
+}
+
+/* ------------------------------------------------------------------- storage */
+
+.store-row {
+  display: grid;
+  /* Fixed tracks rather than auto: content-sized columns all crowd against the
+     right edge and the three numbers run into one another. */
+  grid-template-columns: minmax(7rem, 1fr) 9.5rem 6.5rem 11rem;
+  align-items: baseline;
+  gap: 0.1rem 0.9rem;
+  padding: 0.26rem 0.6rem;
+}
+
+/* The sidebar's .res-rate pins itself to grid-column 2, which would drop a
+   second rate column onto a row of its own. Storage rows carry their own
+   classes rather than borrowing those. */
+.store-row .store-amount {
+  font-size: 0.86rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.store-row .store-amount .cap {
+  color: var(--muted);
+}
+
+.store-row .store-rate {
+  font-size: 0.75rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.store-row .store-net {
+  text-align: right;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+@media (max-width: 900px) {
+  .store-row {
+    grid-template-columns: minmax(6rem, 1.4fr) auto auto;
+  }
+  .store-row .store-net {
+    grid-column: 2 / -1;
+  }
+}
+
+.store-row:hover {
+  background: var(--bg-raise, rgba(255, 255, 255, 0.03));
+}
+
+.store-row .store-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-bar {
+  grid-column: 1 / -1;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.store-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent, #6cf);
+}
+
+.store-bar.is-full > span {
+  background: var(--warn, #e8a33d);
+}
+
+.gut-meter {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 0.35rem;
+}
+
+.gut-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--accent, #6cf);
+}
+
+.gut-meter.is-behind > span {
+  background: var(--bad, #d9534f);
+}

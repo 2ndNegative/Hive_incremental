@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { state, derived } from '../../game/useGame.js';
+import { state, derived, showInCodex } from '../../game/useGame.js';
 import { CASTES, BASAL_WATTS } from '../../game/definitions/castes.js';
 import { NUTRIENTS } from '../../game/definitions/nutrients.js';
 import { ITEMS } from '../../game/definitions/items/index.js';
@@ -8,18 +8,38 @@ import { ORGANISMS } from '../../game/definitions/organisms.js';
 import { assignCaste, clearCastes } from '../../game/actions.js';
 import { DRONE_PROTEIN_COST } from '../../game/engine.js';
 import { formatMass, formatMassFlow, formatPower, formatEnergy } from '../../game/units.js';
+import { isPinned, pinHandlers } from '../../game/tips.js';
 
-/** What one drone in this caste brings in per second. */
-function harvestLine(def) {
+/**
+ * What one drone in this caste brings in per second, as parts rather than a
+ * string, so every name it mentions can link to its codex entry. A caste's
+ * yields are the one place the player meets these items by name, and following
+ * them to the full composition should not mean searching the Codex by hand.
+ */
+function harvestParts(def) {
   const parts = [];
   for (const [itemId, grams] of Object.entries(def.harvest || {})) {
-    parts.push(`${formatMassFlow(grams)} ${ITEMS[itemId].name.toLowerCase()}`);
+    parts.push({ kind: 'item', itemId, name: ITEMS[itemId].name, rate: formatMassFlow(grams) });
   }
   if (def.organism && def.harvestRate) {
-    parts.push(`${formatMassFlow(def.harvestRate)} live ${ORGANISMS[def.organism].name.toLowerCase()}`);
+    const org = ORGANISMS[def.organism];
+    parts.push({
+      kind: 'organism',
+      organism: def.organism,
+      name: org.name,
+      rate: formatMassFlow(def.harvestRate),
+      // Prey is not a codex entry of its own; the cuts it butchers into are.
+      cuts: Object.entries(org.parts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([itemId, fraction]) => ({
+          itemId,
+          name: ITEMS[itemId].name,
+          grams: def.harvestRate * fraction,
+        })),
+    });
   }
-  if (def.insight) parts.push(`+${def.insight}/s insight`);
-  return parts.join(' · ') || 'nothing';
+  if (def.insight) parts.push({ kind: 'insight', name: `+${def.insight}/s insight` });
+  return parts;
 }
 
 /** Energy value of what one drone brings in, minus what it costs to run. */
@@ -59,7 +79,7 @@ const rows = computed(() =>
         limited: Number.isFinite(slots),
         canAdd: state.castes.dormant > 0 && assigned < slots,
         canRemove: assigned > 0,
-        harvest: harvestLine(def),
+        harvest: harvestParts(def),
         net: netLine(def),
         watts: def.workWatts + BASAL_WATTS,
       };
@@ -122,7 +142,44 @@ const growthPercent = computed(() => Math.floor((state.growth || 0) * 100));
               · net {{ formatPower(r.net) }}
             </span>
             <br />
-            <span class="job-desc">{{ r.def.desc }} <em>Yields:</em> {{ r.harvest }}</span>
+            <span class="job-desc">
+              {{ r.def.desc }}
+              <em>Yields:</em>&nbsp;
+              <template v-if="!r.harvest.length">nothing</template>
+              <template v-for="(part, i) in r.harvest" :key="i">
+                <span v-if="i" class="muted"> · </span>
+                <template v-if="part.kind === 'item'">
+                  {{ part.rate }}
+                  <button class="codex-link" @click="showInCodex(part.itemId)">{{ part.name }}</button>
+                </template>
+                <template v-else-if="part.kind === 'organism'">
+                  {{ part.rate }} live
+                  <span
+                    class="tip"
+                    :class="{ 'is-pinned': isPinned(`prey:${r.id}`) }"
+                    v-on="pinHandlers(`prey:${r.id}`)"
+                  >
+                    <span class="tip-link">{{ part.name }}</span>
+                    <span class="tip-body">
+                      <span class="tip-title">{{ part.name }}, butchered</span>
+                      <span class="muted" style="display: block; margin-bottom: 0.3rem">
+                        What one drone recovers per second. Any of these opens in the Codex.
+                      </span>
+                      <span v-for="cut in part.cuts" :key="cut.itemId" class="tip-row">
+                        <span>
+                          <button class="codex-link" @click="showInCodex(cut.itemId)">{{ cut.name }}</button>
+                        </span>
+                        <span>{{ formatMassFlow(cut.grams) }}</span>
+                      </span>
+                      <span class="tip-hint">
+                        {{ isPinned(`prey:${r.id}`) ? 'Pinned — Escape to release' : 'Middle-click to pin' }}
+                      </span>
+                    </span>
+                  </span>
+                </template>
+                <template v-else>{{ part.name }}</template>
+              </template>
+            </span>
           </span>
 
           <span class="job-count">

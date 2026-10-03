@@ -16,6 +16,7 @@
 import { state } from '../src/game/state.js';
 import { computeDerived, tick } from '../src/game/engine.js';
 import { buildStructure, assignCaste, research, consumeBiomass } from '../src/game/actions.js';
+import { chooseOrigin, originsFor } from '../src/game/run.js';
 import { RESEARCH, RESEARCH_ORDER } from '../src/game/definitions/research.js';
 import { STRUCTURE_ORDER, STRUCTURES } from '../src/game/definitions/structures.js';
 import { CASTE_ORDER, CASTES } from '../src/game/definitions/castes.js';
@@ -29,6 +30,8 @@ const STEP = 1;
 const TOTAL = hours * 3600;
 
 const BUILD_PRIORITY = [
+  'caecum',
+  'crop',
   'thermalVent',
   'gutSac',
   'nodeCluster',
@@ -71,12 +74,33 @@ function botAct() {
   // Keep the metabolic ceiling ahead of demand, or everything throttles.
   if (derived.energy.throughputRatio < 1 && buildStructure('thermalVent', 1)) return;
 
+  // Gut and storage are demand-driven, the way a player reading the Storage tab
+  // would do it. Building either before there is pressure burns seed protein the
+  // hive needs for its first drones — which is itself worth knowing.
+  const backlogPressure = Object.values(state.items || {}).some((g) => g > derived.itemCap * 0.6);
+  const spoiling = Object.values(derived.itemSpill).some((r) => r > 0);
+
   for (const id of BUILD_PRIORITY) {
     if (!derived.unlocked.structures.includes(id)) continue;
     // Do not add drone capacity the hive cannot feed.
     if (id === 'nodeCluster' && derived.energy.ratio < 0.95) continue;
+    if (id === 'caecum' && derived.digestRatio > 0.98) continue;
+    if (id === 'crop' && !backlogPressure && !spoiling) continue;
     if (buildStructure(id, 1)) return;
   }
+}
+
+// A run with no landing site has no drones and no starting mass, and the engine
+// correctly refuses to tick it. Land on the first site available to a fresh
+// save, the same way a new player would.
+if (!state.origin) {
+  const site = originsFor().unlocked[0];
+  if (!site) {
+    console.log('no landing site is available to a fresh save — nothing to simulate');
+    process.exit(1);
+  }
+  chooseOrigin(site.id);
+  if (!quiet) console.log(`landed at ${site.name}\n`);
 }
 
 const milestones = [];
@@ -126,6 +150,24 @@ console.log(
 console.log(`intake          ${formatMassFlow(derived.ingestRate)}  (lifetime ${formatMass(state.stats.ingested)})`);
 console.log(`insight         ${Math.floor(state.insight)} / ${derived.insightCap}  (+${derived.insightRate.toFixed(2)}/s)`);
 console.log(`starving        ${((starvedTicks / TOTAL) * 100).toFixed(1)}% of ticks, ${state.stats.dronesLost} drones lost`);
+
+{
+  const d = computeDerived(state);
+  const backlog = Object.values(state.items || {}).reduce((a, b) => a + b, 0);
+  const spoiled = Object.values(state.spilledItems || {}).reduce((a, b) => a + b, 0);
+  console.log(
+    `digestion       ${formatMassFlow(d.digestRate)} of ${formatMassFlow(d.digestion)} gut, ` +
+      `harvest ${formatMassFlow(d.harvestRate)} (${(d.digestRatio * 100).toFixed(0)}% kept up with)`,
+  );
+  console.log(`storage         ${formatMass(backlog)} held, cap ${formatMass(d.itemCap)} each, ${formatMass(spoiled)} spoiled`);
+  const queued = Object.entries(state.items || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (!quiet && queued.length) {
+    for (const [id, grams] of queued) {
+      const pct = (grams / d.itemCap) * 100;
+      console.log(`  ${id.padEnd(20)} ${formatMass(grams).padStart(9)}  ${pct.toFixed(0)}% full`);
+    }
+  }
+}
 
 console.log('\nmacronutrients');
 for (const n of MACROS) {
