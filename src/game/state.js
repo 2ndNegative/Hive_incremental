@@ -14,7 +14,7 @@ import { STRUCTURE_ORDER, DEPRECATED_STRUCTURE_ORDER } from './definitions/struc
 import { CASTE_ORDER, DEPRECATED_CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -71,6 +71,17 @@ export function createInitialState() {
     forage: {},
     insight: 0,
     drones: 0,
+
+    // Usable energy, in joules. Separate from the chemical energy locked in the
+    // nutrient stores: nothing converts one into the other except a Metabolic
+    // Generator, so this is what the hive can actually spend.
+    energyPool: 0,
+
+    // What the hive has learned about its own ground: how many times each item
+    // (and each prey species, keyed by discovery.preyKey) has been found in
+    // each biome. See discovery.js — names are learned globally, rates per
+    // biome, and the forage table stays hidden until it is.
+    found: {},
 
     // Cognition is a width, not a stock, so nothing is stored here — only the
     // blocks of bandwidth that actions are currently holding, keyed by whatever

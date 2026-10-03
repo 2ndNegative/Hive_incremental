@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { state, derived } from './game/useGame.js';
 import { formatDuration, formatNumber } from './game/format.js';
-import { formatEnergy, formatPower, formatCogits } from './game/units.js';
+import { formatEnergy, formatPower, formatCogits, formatMassFlow } from './game/units.js';
 import { save, saveStatus } from './game/save.js';
 import NutrientPanel from './components/NutrientPanel.vue';
 import MessageLog from './components/MessageLog.vue';
@@ -67,16 +67,34 @@ const savedAgo = computed(() => {
         <span class="tip">
           <span>
             Energy
-            <strong class="num">{{ formatEnergy(derived.energy.usable) }}</strong>
+            <strong class="num" :class="derived.energy.pool > 0 ? 'good' : 'muted'">
+              {{ formatEnergy(derived.energy.pool) }}
+            </strong>
           </span>
           <span class="tip-body">
-            <span class="tip-title">Stored energy</span>
+            <span class="tip-title">Usable energy</span>
             <span class="muted" style="display: block; margin-bottom: 0.3rem">
-              The sum of the energy held in every nutrient the hive is carrying. There is no
-              separate energy resource — this is the mass, valued as fuel.
+              Energy the hive can actually spend. Nothing turns stored matter into this except a
+              Metabolic Generator — a hive standing on a tonne of fat with no generator has no
+              energy at all.
             </span>
-            <span class="tip-row"><span>Total in store</span><span>{{ formatEnergy(derived.energy.stored) }}</span></span>
-            <span class="tip-row"><span>Burnable now</span><span>{{ formatEnergy(derived.energy.usable) }}</span></span>
+            <span class="tip-row"><span>Banked</span><span>{{ formatEnergy(derived.energy.pool) }}</span></span>
+            <span class="tip-row">
+              <span>Being generated</span>
+              <span :class="derived.energy.generated > 0 ? 'good' : 'muted'">
+                {{ formatPower(derived.energy.generated) }}
+              </span>
+            </span>
+            <span class="tip-row">
+              <span>Processing</span><span>{{ formatMassFlow(derived.energy.massRate) }}</span>
+            </span>
+            <hr style="border-color: var(--border); margin: 0.3rem 0" />
+            <span class="tip-row muted">
+              <span>Chemical energy in store</span><span>{{ formatEnergy(derived.energy.stored) }}</span>
+            </span>
+            <span class="tip-row muted">
+              <span>…of it in fuels it can open</span><span>{{ formatEnergy(derived.energy.locked) }}</span>
+            </span>
           </span>
         </span>
 

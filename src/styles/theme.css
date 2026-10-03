@@ -1671,3 +1671,22 @@ textarea.save-box {
     display: none;
   }
 }
+
+/* A levelled building says what it would become, not how many you would have. */
+.action-upgrade {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+
+/* Ground the hive has not worked out yet. */
+.offer-unknown {
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+.offer-vague {
+  color: var(--warn);
+}

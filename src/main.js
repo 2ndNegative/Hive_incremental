@@ -12,11 +12,12 @@ import { ORGANISMS, preyFor } from './game/definitions/organisms.js';
 import { BIOMES, BIOME_IDS, biomeShares, totalArea, holdings } from './game/definitions/biomes.js';
 import { FORAGE, poolFor } from './game/definitions/forage.js';
 import * as forage from './game/forage.js';
+import * as discovery from './game/discovery.js';
 import {
   research, ingestItem, consumeBiomass, manualOdds,
-  reserveCogits, releaseCogits, releaseAllCogits,
+  reserveCogits, releaseCogits, releaseAllCogits, buildStructure,
 } from './game/actions.js';
-import { STRUCTURE_ORDER } from './game/definitions/structures.js';
+import { STRUCTURES, STRUCTURE_ORDER, maxLevelOf } from './game/definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './game/definitions/castes.js';
 import { formatMass, formatEnergy, formatPower, formatCogits } from './game/units.js';
 import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
@@ -98,6 +99,11 @@ window.hive = {
   // How much of the game is actually live. The test suites read these to tell
   // "parked for the rebuild" apart from "broken", so they flip back on by
   // themselves once the new structures and castes land.
+  discovery,
+  structureDefs: STRUCTURES,
+  structureOrder: STRUCTURE_ORDER,
+  maxLevelOf,
+  build: (id, n) => buildStructure(id, n),
   structuresLive: STRUCTURE_ORDER.length,
   castesLive: CASTE_ORDER.filter((id) => CASTES[id].assignable).length,
 };

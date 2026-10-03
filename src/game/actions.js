@@ -10,7 +10,7 @@ import {
   itemYield,
   settleReveal,
 } from './definitions/nutrients.js';
-import { STRUCTURES } from './definitions/structures.js';
+import { STRUCTURES, maxLevelOf } from './definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
@@ -19,6 +19,7 @@ import { formatMass } from './units.js';
 import { biomeShares } from './definitions/biomes.js';
 import { poolFor } from './definitions/forage.js';
 import { pickWeighted } from './forage.js';
+import { recordFind } from './discovery.js';
 
 const MANUAL_GRAMS = 40;
 
@@ -75,6 +76,7 @@ export function consumeBiomass() {
   }
 
   state.lastGather = { itemId: found.itemId, biomeId: biome.id, grams: MANUAL_GRAMS };
+  recordFind(state, biome.id, found.itemId);
   return ingestItem(found.itemId, MANUAL_GRAMS);
 }
 
@@ -111,7 +113,11 @@ export function buildStructure(id, count = 1) {
   const def = STRUCTURES[id];
   if (!def || !def.unlock(state)) return 0;
 
-  const wanted = count === 'max' ? affordableCount(state, id) : count;
+  let wanted = count === 'max' ? affordableCount(state, id) : count;
+  // A levelled structure is one thing you upgrade, so "build 5" means "take it
+  // five levels higher" and it stops at its cap rather than quietly overshooting.
+  const headroom = maxLevelOf(id) - (state.structures[id] || 0);
+  wanted = Math.min(wanted, headroom);
   if (wanted <= 0) return 0;
 
   const cost = structureCost(state, id, wanted);
@@ -120,7 +126,12 @@ export function buildStructure(id, count = 1) {
   for (const [n, amount] of Object.entries(cost)) state.nutrients[n] -= amount;
   state.structures[id] += wanted;
   state.stats.built += wanted;
-  pushLog(`Grew ${wanted > 1 ? `${def.name} ×${wanted}` : def.name}.`, 'build');
+  pushLog(
+    def.leveled
+      ? `${def.name} raised to level ${state.structures[id]}.`
+      : `Grew ${wanted > 1 ? `${def.name} ×${wanted}` : def.name}.`,
+    'build',
+  );
   return wanted;
 }
 

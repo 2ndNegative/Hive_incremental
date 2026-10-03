@@ -23,6 +23,7 @@ import { BIOMES, biomeShares } from './definitions/biomes.js';
 import { poolFor } from './definitions/forage.js';
 import { preyFor, ORGANISMS } from './definitions/organisms.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
+import { recordFind, preyKey } from './discovery.js';
 import { ITEMS } from './definitions/items/index.js';
 
 
@@ -71,13 +72,23 @@ export function rollForage(state, casteId, random = Math.random) {
     // or a single lanternfish is just the thing itself, and giving every small
     // species its own butchery table would say nothing the item does not.
     const caught = pickWeighted([...preyFor(biome.id), ...poolFor('hunter', biome.id)], random);
-    if (caught?.organismId) slot.organismId = caught.organismId;
-    else if (caught?.itemId) slot.itemId = caught.itemId;
+    if (caught?.organismId) {
+      slot.organismId = caught.organismId;
+      recordFind(state, biome.id, preyKey(caught.organismId));
+    } else if (caught?.itemId) {
+      slot.itemId = caught.itemId;
+      recordFind(state, biome.id, caught.itemId);
+    }
     return slot;
   }
 
   const found = pickWeighted(poolFor(def.gather, biome.id), random);
-  if (found) slot.itemId = found.itemId;
+  if (found) {
+    slot.itemId = found.itemId;
+    // One roll is one observation of this ground, whatever the caste then
+    // spends twelve seconds carrying back.
+    recordFind(state, biome.id, found.itemId);
+  }
   return slot;
 }
 

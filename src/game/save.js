@@ -297,6 +297,15 @@ function migrate(raw) {
     }
   }
 
+  // Before v6 the hive could see the whole forage table and metabolised straight
+  // out of its stores. A save from then has learned nothing it can prove, so it
+  // starts the discovery log empty; and its energy pool starts empty too,
+  // because nothing had generated any.
+  if ((raw.version ?? 0) < 6) {
+    raw.found ??= {};
+    raw.energyPool ??= 0;
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

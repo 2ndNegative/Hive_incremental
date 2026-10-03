@@ -30,10 +30,57 @@
 //   mult         multiplier channel bonuses per unit
 //   digestion    grams of stored item mass broken down per second, per unit
 //   itemCapMult  multiplicative bonus to every item's storage, per unit
+//   cogitCapacity  cogits of cognitive bandwidth supplied per unit
+//   cogitDraw      cogits occupied per unit while it stands
+//   metabolism     grams per second this converts into usable energy
+//
+// COUNTED OR LEVELLED
+//   By default a structure is COUNTED: you grow more of them and the effects
+//   add up. A structure with `leveled: true` is instead a single thing you
+//   UPGRADE — `state.structures[id]` holds its level rather than how many you
+//   have, 0 meaning not built. Effects still scale with that number, and
+//   `cost(n)` is still the price of going from n to n+1, so the arithmetic is
+//   identical; what changes is what the interface says and the fact that you
+//   cannot have two. `maxLevel` caps it.
 
 const geo = (base, growth) => (n) => base * growth ** n;
 
 export const STRUCTURES = {
+  /* ------------------------------------------------------------------ live -- */
+
+  hivecore: {
+    id: 'hivecore',
+    name: 'Hivecore',
+    category: 'core',
+    leveled: true,
+    maxLevel: 20,
+    desc:
+      'The mind itself: a dense knot of nervous tissue the rest of the hive is grown around. ' +
+      'Every level widens what the hivemind can hold in flight at once — and costs a great deal ' +
+      'to keep lit.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(150, 1.6)(n), fat: geo(60, 1.6)(n) }),
+    cogitCapacity: 5,
+    // 1 MJ every second. Nothing else in the game is close, and nothing in the
+    // game can pay for it without generators.
+    upkeepWatts: 1_000_000,
+  },
+
+  metabolicGenerator: {
+    id: 'metabolicGenerator',
+    name: 'Metabolic Generator',
+    category: 'digestion',
+    desc:
+      'An oxidation bed. Draws on the nutrient stores and turns their mass into energy the hive ' +
+      'can actually spend — the only thing in the hive that can. Without one, stored matter is ' +
+      'just matter.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(120, 1.25)(n), ash: geo(60, 1.25)(n) }),
+    metabolism: 10, // grams per second
+  },
+
+  /* ------------------------------------------------------------- parked -- */
+
   nodeCluster: {
     id: 'nodeCluster',
     name: 'Nerve Node',
@@ -174,7 +221,17 @@ export const BUILDING_CATEGORY_ORDER = ['core', 'cognition', 'gathering', 'produ
  * Buildable structures. EMPTY during the rebuild — see the header.
  * Everything the engine and the interface iterate comes from here.
  */
-export const STRUCTURE_ORDER = [];
+export const STRUCTURE_ORDER = ['hivecore', 'metabolicGenerator'];
+
+/** Is this one thing you upgrade, rather than many things you grow? */
+export function isLeveled(id) {
+  return Boolean(STRUCTURES[id]?.leveled);
+}
+
+/** The cap on a levelled structure; counted ones have none. */
+export function maxLevelOf(id) {
+  return STRUCTURES[id]?.maxLevel ?? Infinity;
+}
 
 /**
  * Parked. Not built, not displayed, not computed — but still seeded into

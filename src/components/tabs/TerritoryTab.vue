@@ -22,6 +22,9 @@ import { CASTES, CASTE_ORDER } from '../../game/definitions/castes.js';
 import { describeFind } from '../../game/forage.js';
 import { formatMass, formatMassFlow } from '../../game/units.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
+import {
+  isNamed, rateLabel, rateConfidence, timesFound, preyKey, RANGE_AT, EXACT_AT,
+} from '../../game/discovery.js';
 
 const area = computed(() => totalArea(state));
 const land = computed(() => holdings(state)); // already sorted largest first
@@ -82,22 +85,71 @@ const gather = computed({
 });
 
 /** What each held biome offers for the selected gather type, likeliest first. */
+/**
+ * What the ground offers — as far as the hive knows.
+ *
+ * The real table is complete from the first tick and the hive does not get to
+ * see it. An entry it has never found shows as ??? at ?%: the player can see
+ * that SOMETHING is there, and how many somethings, but not what or how often.
+ * Finding it once names it everywhere; finding it ten times in this biome
+ * brackets the rate; twenty-five resolves it.
+ *
+ * Deliberately still sorted by the TRUE rate, so the list order is itself a
+ * weak hint — the hive can tell that the top of the list is commoner than the
+ * bottom long before it can say by how much.
+ */
 const offerings = computed(() =>
   land.value.map((h) => {
     const raw =
       gather.value === 'hunter'
-        ? preyFor(h.id).map((p) => ({ id: p.organismId, name: ORGANISMS[p.organismId].name, weight: p.weight, prey: true }))
-        : poolFor(gather.value, h.id).map((p) => ({ id: p.itemId, name: ITEMS[p.itemId].name, weight: p.weight }));
+        ? preyFor(h.id).map((p) => ({
+          id: p.organismId, key: preyKey(p.organismId),
+          name: ORGANISMS[p.organismId].name, weight: p.weight, prey: true,
+        }))
+        : poolFor(gather.value, h.id).map((p) => ({
+          id: p.itemId, key: p.itemId, name: ITEMS[p.itemId].name, weight: p.weight,
+        }));
     const total = raw.reduce((a, e) => a + e.weight, 0);
     return {
       ...h,
       share: shares.value[h.id] || 0,
       entries: raw
-        .map((e) => ({ ...e, chance: total > 0 ? e.weight / total : 0 }))
+        .map((e) => {
+          const chance = total > 0 ? e.weight / total : 0;
+          const named = isNamed(state, e.key);
+          const seen = timesFound(state, h.id, e.key);
+          const level = rateConfidence(state, h.id, e.key);
+          return {
+            ...e,
+            chance,
+            named,
+            seen,
+            level,
+            label: named ? e.name : '???',
+            rate: rateLabel(state, h.id, e.key, chance),
+            // How much more work would sharpen the figure.
+            toNext: level === 'unknown' ? RANGE_AT - seen : level === 'range' ? EXACT_AT - seen : 0,
+          };
+        })
         .sort((a, b) => b.chance - a.chance),
     };
   }),
 );
+
+/** How much of the selected ground the hive has actually worked out. */
+const learned = computed(() => {
+  let known = 0;
+  let exact = 0;
+  let total = 0;
+  for (const o of offerings.value) {
+    for (const e of o.entries) {
+      total += 1;
+      if (e.named) known += 1;
+      if (e.level === 'exact') exact += 1;
+    }
+  }
+  return { known, exact, total };
+});
 
 /** What every gathering caste is on right now. */
 const working = computed(() =>
@@ -241,6 +293,12 @@ const working = computed(() =>
           </select>
           <span class="muted" style="font-size: 0.76rem">{{ GATHER_TYPES[gather].desc }}</span>
         </div>
+        <p class="muted" style="font-size: 0.76rem; margin: 0.4rem 0 0">
+          The hive knows {{ learned.known }} of {{ learned.total }} of these by name and has the
+          exact rate for {{ learned.exact }}. Everything else it has to find out by going and
+          looking — a thing is named the first time it turns up anywhere, bracketed after
+          {{ RANGE_AT }} finds on the same ground, and pinned down after {{ EXACT_AT }}.
+        </p>
       </div>
 
       <div v-for="o in offerings" :key="o.id" class="panel-body tight">
@@ -262,19 +320,32 @@ const working = computed(() =>
             :class="{ 'is-pinned': isPinned(`offer:${o.id}:${e.id}`) }"
             v-on="pinHandlers(`offer:${o.id}:${e.id}`)"
           >
-            <button v-if="!e.prey" class="codex-link" @click="showInCodex(e.id)">{{ e.name }}</button>
-            <span v-else>{{ e.name }}</span>
-            <span class="muted offer-pct">{{ (e.chance * 100).toFixed(0) }}%</span>
+            <button
+              v-if="!e.prey && e.named"
+              class="codex-link"
+              @click="showInCodex(e.id)"
+            >{{ e.label }}</button>
+            <span v-else :class="{ 'offer-unknown': !e.named }">{{ e.label }}</span>
+            <span class="offer-pct" :class="e.level === 'exact' ? 'muted' : 'offer-vague'">
+              {{ e.rate }}
+            </span>
 
             <span class="tip-body">
-              <span class="tip-title">{{ e.name }}</span>
+              <span class="tip-title">{{ e.label }}</span>
               <span class="tip-row">
-                <span>Chance per roll here</span>
-                <span>{{ (e.chance * 100).toFixed(1) }}%</span>
+                <span>Found here</span>
+                <span>{{ e.seen }}×</span>
               </span>
               <span class="tip-row">
+                <span>Chance per roll here</span><span>{{ e.rate }}</span>
+              </span>
+              <span v-if="e.level === 'exact'" class="tip-row">
                 <span>Across the whole hive</span>
                 <span>{{ (e.chance * o.share * 100).toFixed(1) }}%</span>
+              </span>
+              <span v-if="e.toNext > 0" class="tip-row muted" style="margin-top: 0.25rem">
+                <span>{{ e.level === 'unknown' ? 'Bracket the rate in' : 'Pin it down in' }}</span>
+                <span>{{ e.toNext }} more</span>
               </span>
               <template v-if="e.prey">
                 <hr style="border-color: var(--border); margin: 0.3rem 0" />

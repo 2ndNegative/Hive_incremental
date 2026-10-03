@@ -5,12 +5,13 @@ import {
   STRUCTURES,
   BUILDING_CATEGORIES,
   BUILDING_CATEGORY_ORDER,
+  maxLevelOf,
 } from '../../game/definitions/structures.js';
 import { NUTRIENTS } from '../../game/definitions/nutrients.js';
 import { CASTES } from '../../game/definitions/castes.js';
 import { structureCost, canAfford, etaFor, affordableCount } from '../../game/engine.js';
 import { buildStructure } from '../../game/actions.js';
-import { formatMass, formatPower } from '../../game/units.js';
+import { formatMass, formatMassFlow, formatPower, formatCogits } from '../../game/units.js';
 import { formatEta } from '../../game/format.js';
 import CostList from '../CostList.vue';
 
@@ -25,6 +26,9 @@ function effectLines(def) {
   }
   if (def.throughput) lines.push(`+${formatPower(def.throughput)} metabolic ceiling`);
   if (def.insightCap) lines.push(`+${def.insightCap} insight storage`);
+  if (def.cogitCapacity) lines.push(`+${formatCogits(def.cogitCapacity)} cognition`);
+  if (def.cogitDraw) lines.push(`${formatCogits(def.cogitDraw)} cognition occupied`);
+  if (def.metabolism) lines.push(`metabolises ${formatMassFlow(def.metabolism)} into energy`);
   for (const [caste, value] of Object.entries(def.slots || {})) {
     lines.push(`+${value} ${CASTES[caste]?.name ?? caste} slot`);
   }
@@ -39,13 +43,26 @@ const cards = computed(() =>
   derived.value.unlocked.structures.map((id) => {
     const def = STRUCTURES[id];
     const want = state.ui.buyAmount;
-    const count = want === 'max' ? Math.max(1, affordableCount(state, id)) : want;
+    const owned = state.structures[id] || 0;
+    const headroom = maxLevelOf(id) - owned;
+    const count = Math.max(
+      1,
+      Math.min(headroom, want === 'max' ? Math.max(1, affordableCount(state, id)) : want),
+    );
     const cost = structureCost(state, id, count);
-    const affordable = canAfford(state, cost);
+    const maxed = headroom <= 0;
+    const affordable = !maxed && canAfford(state, cost);
     return {
       id,
       def,
-      owned: state.structures[id] || 0,
+      owned,
+      leveled: Boolean(def.leveled),
+      maxed,
+      // A levelled structure reads as what it would become, not how many of it
+      // you would end up with.
+      action: def.leveled
+        ? (maxed ? 'At maximum level' : `Upgrade to level ${owned + count}`)
+        : null,
       count,
       cost,
       affordable,
@@ -99,11 +116,13 @@ const overCapacity = computed(() =>
       <strong class="bad">Energy deficit.</strong>
       The hive is running at {{ Math.floor(derived.energy.ratio * 100) }}% of demand
       <template v-if="throttled">
-        — the metabolic ceiling is {{ formatPower(derived.energy.throughput) }} against
-        {{ formatPower(derived.energy.demand) }} of demand. Grow a Metabolic Core.
+        — the generators are making {{ formatPower(derived.energy.generated) }} against
+        {{ formatPower(derived.energy.demand) }} of demand. Grow more Metabolic Generators, or
+        the pool will run dry.
       </template>
       <template v-else>
-        — it has run out of fuel it can burn. Check your energy sources, or put drones on intake.
+        — the pool is empty. Nothing converts stored matter into usable energy except a Metabolic
+        Generator.
       </template>
     </div>
 
@@ -166,11 +185,17 @@ const overCapacity = computed(() =>
               <span class="action-head">
                 <span class="action-name">
                   {{ card.def.name }}
-                  <span v-if="card.count > 1" class="muted">×{{ card.count }}</span>
+                  <span v-if="!card.leveled && card.count > 1" class="muted">×{{ card.count }}</span>
                 </span>
-                <span class="action-count">{{ card.owned }}</span>
+                <span class="action-count">
+                  <template v-if="card.leveled">Lv {{ card.owned }}</template>
+                  <template v-else>{{ card.owned }}</template>
+                </span>
               </span>
               <span class="action-desc">{{ card.def.desc }}</span>
+              <span v-if="card.action" class="action-upgrade" :class="{ muted: card.maxed }">
+                {{ card.action }}
+              </span>
               <CostList :cost="card.cost" />
               <span class="effect-list">{{ card.effects.join(' · ') }}</span>
               <span v-if="card.eta" class="action-desc" style="margin-bottom: 0">

@@ -43,7 +43,7 @@ import {
   isUsableFuel,
   itemYield,
 } from './definitions/nutrients.js';
-import { STRUCTURES, STRUCTURE_ORDER } from './definitions/structures.js';
+import { STRUCTURES, STRUCTURE_ORDER, maxLevelOf } from './definitions/structures.js';
 import {
   CASTES,
   CASTE_ORDER,
@@ -314,58 +314,83 @@ export function computeDerived(state, dt = TICK_SECONDS) {
 
   const totalDemand = demands.reduce((sum, d) => sum + d.watts, 0);
 
-  /* -- 3. throughput ceiling ----------------------------------------------- */
+  /* -- 3. generation --------------------------------------------------------- */
 
-  const throughputRatio = totalDemand > EPSILON ? Math.min(1, throughput / totalDemand) : 1;
+  // NOTHING metabolises its own fuel any more. A building that wants a watt
+  // draws it from the pool, and the pool is filled by Metabolic Generators and
+  // by nothing else — so a hive with demand and no generator simply stops,
+  // however many tonnes of fat it is standing on.
+  //
+  // The generator takes mass at a fixed rate and converts it at that mass's own
+  // energy density, through the metabolic efficiency the tech tree has bought.
+  // Which mass it takes is the preferred/fallback choice, which is now a
+  // property of the generator rather than of every consumer separately.
+  let massRate = 0; // grams per second the generators can process
+  for (const id of STRUCTURE_ORDER) {
+    const count = state.structures[id] || 0;
+    const per = STRUCTURES[id].metabolism;
+    if (count && per) massRate += per * count;
+  }
 
-  /* -- 4. fuel allocation --------------------------------------------------- */
-
-  // Plan against a virtual budget so two consumers cannot each spend the last
-  // gram of fat. Order follows `demands`, so basal metabolism is fed first —
-  // the hive keeps itself alive before it powers its workforce.
-  const budget = {};
-  for (const id of NUTRIENT_IDS) budget[id] = state.nutrients[id] || 0;
-
-  const burn = {}; // nutrient -> grams per second
-  let deliveredWatts = 0;
-  const perConsumer = {}; // key -> { watts, delivered, ratio, from: {nutrient: g/s} }
-
-  for (const demand of demands) {
-    const wanted = demand.watts * throughputRatio;
-    const { preferred, fallback } = fuelChoiceFor(state, demand.key);
+  const burn = {}; // nutrient -> grams per second actually consumed
+  let generatedWatts = 0;
+  {
+    const { preferred, fallback } = fuelChoiceFor(state, 'generator');
     const order = [preferred, fallback].filter(
       (n, i, arr) => n && arr.indexOf(n) === i && isUsableFuel(state, n),
     );
-
-    let remainingJoules = wanted * dt;
-    const from = {};
+    let gramsLeft = massRate * dt;
     for (const nutrient of order) {
-      if (remainingJoules <= EPSILON) break;
+      if (gramsLeft <= EPSILON) break;
       const perGram = joulesPerGram(nutrient) * efficiency[nutrient];
-      if (perGram <= EPSILON) continue; // a zero-energy "fuel" can never pay
-      const gramsWanted = remainingJoules / perGram;
-      const gramsTaken = Math.min(gramsWanted, budget[nutrient]);
-      if (gramsTaken <= EPSILON) continue;
-      budget[nutrient] -= gramsTaken;
-      burn[nutrient] = (burn[nutrient] || 0) + gramsTaken / dt;
-      from[nutrient] = (from[nutrient] || 0) + gramsTaken / dt;
-      remainingJoules -= gramsTaken * perGram;
+      if (perGram <= EPSILON) continue; // a zero-energy store is not fuel
+      const taken = Math.min(gramsLeft, state.nutrients[nutrient] || 0);
+      if (taken <= EPSILON) continue;
+      burn[nutrient] = (burn[nutrient] || 0) + taken / dt;
+      generatedWatts += (taken * perGram) / dt;
+      gramsLeft -= taken;
     }
+  }
 
-    const deliveredJoules = wanted * dt - remainingJoules;
-    deliveredWatts += deliveredJoules / dt;
+  /* -- 4. drawing on the pool ------------------------------------------------ */
+
+  // What is on hand this step: whatever was banked, plus whatever the
+  // generators made during it.
+  const banked = state.energyPool || 0;
+  const availableJoules = banked + generatedWatts * dt;
+
+  const wantedJoules = totalDemand * dt;
+  const drawnJoules = Math.min(wantedJoules, availableJoules);
+  const deliveredWatts = dt > EPSILON ? drawnJoules / dt : 0;
+  const poolAfter = availableJoules - drawnJoules;
+
+  // Consumers are fed in `demands` order out of what was drawn, so basal
+  // metabolism is satisfied before the workforce — the hive keeps itself alive
+  // first.
+  const perConsumer = {};
+  let remaining = drawnJoules;
+  for (const demand of demands) {
+    const wants = demand.watts * dt;
+    const got = Math.min(wants, Math.max(0, remaining));
+    remaining -= got;
     perConsumer[demand.key] = {
       label: demand.label,
       watts: demand.watts,
-      delivered: deliveredJoules / dt,
-      ratio: wanted > EPSILON ? deliveredJoules / (wanted * dt) : 1,
-      from,
+      delivered: dt > EPSILON ? got / dt : 0,
+      ratio: wants > EPSILON ? got / wants : 1,
+      from: {},
     };
   }
 
   // How much of what the hive asked for it actually got. Everything that does
-  // work is scaled by this, so a starving hive visibly slows down.
+  // work is scaled by this, so a hive that has outrun its generators visibly
+  // slows down.
   const energyRatio = totalDemand > EPSILON ? deliveredWatts / totalDemand : 1;
+
+  // Kept under its old name so the interface and the save keep working: it now
+  // means "how much the generators can supply against what is being asked",
+  // which is the ceiling that actually bites.
+  const throughputRatio = totalDemand > EPSILON ? Math.min(1, generatedWatts / totalDemand) : 1;
 
   /* -- 5 & 6. harvest and nutrient inflow ----------------------------------- */
 
@@ -543,10 +568,21 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       demand: totalDemand,
       delivered: deliveredWatts,
       ratio: energyRatio,
-      throughput,
+      // What the generators are making, and what they could make if the stores
+      // could keep up with them.
+      generated: generatedWatts,
+      massRate,
+      throughput: generatedWatts,
       throughputRatio,
+      // Usable energy banked, after this step's generation and draw.
+      pool: poolAfter,
+      // Chemical energy still locked in the stores. Not spendable: only a
+      // generator can turn any of it into the pool above.
       stored: storedEnergy(state),
-      usable: usableEnergy(state),
+      locked: usableEnergy(state),
+      // `usable` used to mean "chemical energy in fuels the hive can open".
+      // It now means what it says: energy the hive can actually spend.
+      usable: poolAfter,
     },
     burn,
     inflow,
@@ -603,7 +639,9 @@ export function affordableCount(state, id, max = 1000) {
   let count = 0;
   const spent = {};
   const owned = state.structures[id] || 0;
-  while (count < max) {
+  // A levelled structure cannot go past its cap, so "max" means "up to the cap".
+  const ceiling = Math.min(max, maxLevelOf(id) - owned);
+  while (count < ceiling) {
     const next = STRUCTURES[id].cost(owned + count);
     const ok = Object.entries(next).every(([n, amount]) => {
       if (!isRevealed(state, n)) return false;
@@ -666,6 +704,7 @@ export function tick(state, dt) {
     state.nutrients[id] = next < 0 ? 0 : next;
   }
 
+  state.energyPool = derived.energy.pool;
   state.stats.metabolised += derived.energy.delivered * dt;
   state.stats.ingested += derived.ingestRate * dt;
 
