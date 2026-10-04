@@ -29,6 +29,7 @@ import {
   research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary, MANUAL_INTAKE,
   reserveCogits, releaseCogits, releaseAllCogits, buildStructure,
   setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
+  togglePinned, resetPinned,
 } from './game/actions.js';
 import {
   STRUCTURES,
@@ -40,6 +41,12 @@ import {
 import { CASTES, CASTE_ORDER } from './game/definitions/castes.js';
 import { formatMass, formatEnergy, formatPower, formatCogits, formatLarvae } from './game/units.js';
 import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
+import {
+  DRONE_CASTES, DRONE_CASTE_ORDER, DRONE_TYPES, DRONE_TYPE_ORDER, typesInCaste, unfiledTypes,
+} from './game/definitions/drones.js';
+import {
+  TOPBAR, TOPBAR_ORDER, TOPBAR_SLOTS, DEFAULT_PINNED, topbarLayout, urgencyRank,
+} from './game/definitions/topbar.js';
 import * as dev from './game/dev.js';
 import * as run from './game/run.js';
 
@@ -125,6 +132,24 @@ window.hive = {
   dev,
   run,
   tips: { pinned, unpinAll },
+  drones: {
+    castes: DRONE_CASTES,
+    casteOrder: DRONE_CASTE_ORDER,
+    types: DRONE_TYPES,
+    typeOrder: DRONE_TYPE_ORDER,
+    typesInCaste,
+    unfiled: unfiledTypes,
+  },
+  topbar: {
+    defs: TOPBAR,
+    order: TOPBAR_ORDER,
+    slots: TOPBAR_SLOTS,
+    defaultPinned: DEFAULT_PINNED,
+    urgencyRank,
+    layout: () => topbarLayout(state, computeDerived(state)),
+    toggle: togglePinned,
+    reset: resetPinned,
+  },
   // How much of the game is actually live. The test suites read these to tell
   // "parked for the rebuild" apart from "broken", so they flip back on by
   // themselves once the new structures and castes land.

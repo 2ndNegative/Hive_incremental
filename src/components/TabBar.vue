@@ -11,6 +11,7 @@ const affordableResearch = computed(
 const tabs = computed(() => [
   { id: 'hive', label: 'Hive' },
   { id: 'drones', label: 'Drones', badge: state.castes.dormant || 0 },
+  { id: 'genetics', label: 'Genetics' },
   // The alert is the one thing the player needs to notice without looking:
   // matter is spoiling because the gut cannot keep up with the harvest.
   { id: 'territory', label: 'Territory' },

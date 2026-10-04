@@ -147,6 +147,20 @@ export const STRUCTURES = {
     upkeepWatts: 250_000,
   },
 
+  moldingChamber: {
+    id: 'moldingChamber',
+    name: 'Molding Chamber',
+    category: 'production',
+    desc:
+      'A press of living cartilage. Whatever the hive decides it wants a shape of, it will be ' +
+      'pushed into shape here. Nothing is asking for a shape yet.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(180, 1.35)(n), ash: geo(90, 1.35)(n) }),
+    upkeepWatts: 100_000,
+    // No function yet, deliberately. It stands, it draws its watts, and that is
+    // the whole of it until production has something to make.
+  },
+
   vacuole: {
     id: 'vacuole',
     name: 'Vacuole',
@@ -330,6 +344,7 @@ export const BUILDING_CATEGORY_ORDER = ['core', 'cognition', 'gathering', 'produ
 export const STRUCTURE_ORDER = [
   'hivecore',
   'broodChamber',
+  'moldingChamber',
   'metabolicGenerator',
   'proteinGranule',
   'vacuole',

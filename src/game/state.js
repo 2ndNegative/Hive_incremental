@@ -13,6 +13,8 @@ import { NUTRIENT_IDS } from './definitions/nutrients.js';
 import { STRUCTURE_ORDER, DEPRECATED_STRUCTURE_ORDER } from './definitions/structures.js';
 import { CASTE_ORDER, DEPRECATED_CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
+import { DEFAULT_PINNED } from './definitions/topbar.js';
+import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
 export const SAVE_VERSION = 11;
 export const LOG_LIMIT = 60;
@@ -37,6 +39,11 @@ export function createInitialState() {
 
   const castes = {};
   for (const id of [...CASTE_ORDER, ...DEPRECATED_CASTE_ORDER]) castes[id] = 0;
+
+  // How many of each drone type the hive holds. Skeleton: nothing grows one yet
+  // and nothing reads these but the Drones tab. See definitions/drones.js.
+  const droneTypes = {};
+  for (const id of DRONE_TYPE_ORDER) droneTypes[id] = 0;
 
   const tech = {};
   for (const id of RESEARCH_ORDER) tech[id] = false;
@@ -121,6 +128,8 @@ export function createInitialState() {
     growth: 0,
     starvation: 0,
 
+    droneTypes,
+
     structures,
 
     // How many of each structure are switched OFF their full count. Sparse on
@@ -201,6 +210,13 @@ export function createInitialState() {
       territoryGather: 'forager',
       // Which building bands are folded shut. Absent = open.
       buildBands: {},
+      // The same, for the caste bands on the Drones tab.
+      droneBands: {},
+
+      // Top-bar resources the player has nailed down. These are always shown,
+      // in declared order; everything else competes for the room left over.
+      // See definitions/topbar.js.
+      pinned: [...DEFAULT_PINNED],
       pinnedTip: null,
     },
 

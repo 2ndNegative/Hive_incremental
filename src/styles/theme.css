@@ -1774,3 +1774,130 @@ textarea.save-box {
 .offer-vague {
   color: var(--warn);
 }
+
+
+/* ---------------------------------------------------------------- top bar */
+
+/* The whole resource strip is the handle for the picker. */
+.topbar-resources {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0 0.2rem;
+}
+
+.topbar-resources:hover {
+  background: var(--panel-hover);
+}
+
+.topbar-resources:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A chip tooltip hanging over the open picker helps nobody. */
+.topbar-resources.is-picking .tip-body {
+  display: none !important;
+}
+
+/* How many resources did not fit. */
+.topbar-more {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  padding: 0 0.25rem;
+}
+
+.picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 3rem 1rem 1rem;
+  z-index: 40;
+}
+
+.picker {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: min(760px, 100%);
+  max-height: calc(100vh - 5rem);
+  overflow: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.picker-note {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.picker-table {
+  margin: 0;
+}
+
+.picker-table tr.is-pinned-row td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.picker-desc {
+  display: block;
+  font-size: 0.72rem;
+}
+
+.picker-note-inline {
+  display: block;
+  font-size: 0.7rem;
+}
+
+.pin-btn {
+  width: auto;
+  height: auto;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.72rem;
+}
+
+.picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.78rem;
+}
+
+
+/* A band whose contents are a list rather than a grid of cards. The rows draw
+   their own padding and dividers, so the band must not add its own. */
+.band-body.is-list {
+  padding: 0;
+}
+
+.band-body.is-list .band-empty {
+  padding: 0.5rem 0.6rem;
+}
+
+/* The right-hand column of a job row, where a control will eventually sit. */
+.job-note {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  text-align: right;
+}

@@ -1,154 +1,102 @@
 <script setup>
+// The Drones tab, banded by caste.
+//
+// The old version of this file drove the flat caste-assignment panel — a row
+// per job with +/- buttons. Every one of those castes is parked (see
+// definitions/castes.js) and the model they belonged to is being replaced, so
+// the panel went with them rather than sitting here rendering nothing. The
+// caste DEFINITIONS survive untouched; only the screen was rewritten.
+//
+// What is here now takes the band from the Hive tab and the ROW from the old
+// drone panel: a band per caste that folds the same way, and inside it a list
+// rather than a grid of cards. A drone type is a line with a count and a
+// control on the end of it — the same thing the old caste rows were — and the
+// third column is left empty for the +/- that will go there.
 import { computed } from 'vue';
-import { state, derived, showInCodex } from '../../game/useGame.js';
-import { CASTES, BASAL_WATTS } from '../../game/definitions/castes.js';
-import { NUTRIENTS } from '../../game/definitions/nutrients.js';
-import { ITEMS } from '../../game/definitions/items/index.js';
-import { ORGANISMS } from '../../game/definitions/organisms.js';
-import { assignCaste, clearCastes } from '../../game/actions.js';
-import { DRONE_PROTEIN_COST } from '../../game/engine.js';
-import { formatMass, formatMassFlow, formatPower, formatEnergy } from '../../game/units.js';
-import { describeFind, expectedYield } from '../../game/forage.js';
-import { GATHER_TYPES } from '../../game/definitions/forage.js';
-import { isPinned, pinHandlers } from '../../game/tips.js';
+import { state } from '../../game/useGame.js';
+import {
+  DRONE_CASTES,
+  DRONE_CASTE_ORDER,
+  DRONE_TYPES,
+  typesInCaste,
+  unfiledTypes,
+} from '../../game/definitions/drones.js';
 
-/**
- * What a caste is currently on. There is no fixed yield any more — a forager
- * finds whatever the ground it rolled had — so the row shows the find rather
- * than a promise, and the energy figure beside it is an average over everything
- * it could have rolled instead.
- */
-function findFor(id) {
-  return describeFind(state, id);
-}
-
-/** Expected energy return per drone, averaged across the hive's territory. */
-function netLine(id) {
-  const def = CASTES[id];
-  const gained = expectedYield(state, id, NUTRIENTS, state.tech, derived.value.efficiency);
-  return gained - (def.workWatts + BASAL_WATTS);
-}
-
-const rows = computed(() =>
-  derived.value.unlocked.castes
-    .filter((id) => CASTES[id].assignable)
-    .map((id) => {
-      const def = CASTES[id];
-      const assigned = state.castes[id] || 0;
-      const slots = derived.value.slots[id];
-      return {
-        id,
-        def,
-        assigned,
-        slots,
-        limited: Number.isFinite(slots),
-        canAdd: state.castes.dormant > 0 && assigned < slots,
-        canRemove: assigned > 0,
-        gathers: Boolean(def.gather),
-        found: def.gather ? findFor(id) : null,
-        net: netLine(id),
-        watts: def.workWatts + BASAL_WATTS,
-      };
-    }),
+const bands = computed(() =>
+  DRONE_CASTE_ORDER.map((id) => {
+    const def = DRONE_CASTES[id];
+    const types = typesInCaste(id)
+      .filter((tid) => DRONE_TYPES[tid].unlock(state))
+      .map((tid) => ({
+        id: tid,
+        def: DRONE_TYPES[tid],
+        count: state.droneTypes?.[tid] || 0,
+      }));
+    return {
+      id,
+      def,
+      types,
+      held: types.reduce((sum, t) => sum + t.count, 0),
+      open: !state.ui.droneBands?.[id],
+    };
+  }),
 );
 
-const dormant = computed(() => state.castes.dormant || 0);
-const growthPercent = computed(() => Math.floor((state.growth || 0) * 100));
+function toggleBand(id) {
+  state.ui.droneBands ??= {};
+  state.ui.droneBands[id] = !state.ui.droneBands[id];
+}
+
+const unfiled = computed(() => unfiledTypes());
+const total = computed(() => bands.value.reduce((sum, b) => sum + b.held, 0));
 </script>
 
 <template>
   <div>
-    <div class="panel-box" style="margin-bottom: 0.75rem">
-      <div class="panel-head">
-        <span>Population</span>
-        <span class="muted num">{{ state.drones }} / {{ derived.droneCap }}</span>
-      </div>
-      <div class="panel-body">
-        <div class="field-row">
-          <span class="field-label">
-            Dormant <strong class="num" :class="dormant ? 'warn' : 'muted'">{{ dormant }}</strong>
-            <span class="field-help">
-              Every drone draws {{ formatPower(BASAL_WATTS) }} whether it works or not. Idle drones
-              are a pure loss.
-            </span>
-          </span>
-          <button class="btn is-danger" :disabled="!rows.some((r) => r.assigned)" @click="clearCastes()">
-            Recall all
+    <div class="notice">
+      <strong>The drone system is being rebuilt.</strong>
+      Castes and the types inside them are listed below, but nothing grows one yet and nothing
+      they do is wired up. The hive is holding {{ total }} of them.
+    </div>
+
+    <div class="band-stack">
+      <section v-for="band in bands" :key="band.id" class="band">
+        <h2 class="band-head">
+          <button
+            class="band-toggle"
+            :aria-expanded="band.open ? 'true' : 'false'"
+            :aria-controls="`caste-${band.id}`"
+            @click="toggleBand(band.id)"
+          >
+            <span class="band-arrow" aria-hidden="true">{{ band.open ? '▾' : '▸' }}</span>
+            <span class="band-name">{{ band.def.name }}</span>
+            <span class="band-desc">{{ band.def.desc }}</span>
+            <span class="band-count num">{{ band.held || '—' }}</span>
           </button>
+        </h2>
+
+        <div v-show="band.open" :id="`caste-${band.id}`" class="band-body is-list">
+          <div v-if="!band.types.length" class="band-empty">Nothing here yet.</div>
+
+          <template v-else>
+            <div v-for="t in band.types" :key="t.id" class="job-row">
+              <span>
+                <span class="job-name">{{ t.def.name }}</span>
+                <span class="job-desc" style="display: block">{{ t.def.desc }}</span>
+              </span>
+              <span class="job-count" :class="t.count > 0 ? '' : 'muted'">{{ t.count }}</span>
+              <!-- Where the grow / assign controls will go. -->
+              <span class="job-note muted">No way to grow these yet.</span>
+            </div>
+          </template>
         </div>
-        <div class="field-row">
-          <span class="field-label">
-            Next drone
-            <span class="field-help">
-              Grown from {{ formatMass(DRONE_PROTEIN_COST) }} of protein.
-              <template v-if="derived.growthRate > 0">{{ growthPercent }}% complete.</template>
-              <template v-else-if="state.drones >= derived.droneCap">Capacity reached — grow a Nerve Node.</template>
-              <template v-else-if="(state.nutrients.protein || 0) < DRONE_PROTEIN_COST">Not enough protein.</template>
-              <template v-else>Stalled: energy demand is not being met.</template>
-            </span>
-          </span>
-          <span class="res-bar" style="width: 120px">
-            <span :style="{ width: `${growthPercent}%` }" />
-          </span>
-        </div>
-      </div>
+      </section>
     </div>
 
-    <div v-if="!rows.length" class="notice">
-      <strong>No castes.</strong>
-      The drone system is being rebuilt, so every working caste is parked and drones have nowhere
-      to be assigned. They are not lost — a save keeps its assignments for whenever the new castes
-      land.
-    </div>
-
-    <div v-else class="panel-box">
-      <div class="panel-head"><span>Castes</span></div>
-      <div class="panel-body tight">
-        <div v-for="r in rows" :key="r.id" class="job-row">
-          <span>
-            <span class="job-name">{{ r.def.name }}</span>
-            <span class="muted" style="font-size: 0.74rem"> · {{ formatPower(r.watts) }}/drone</span>
-            <span v-if="r.net > 0" class="good" style="font-size: 0.74rem">
-              · net {{ formatPower(r.net) }}<span class="muted"> avg</span>
-            </span>
-            <span v-else-if="r.gathers" class="bad" style="font-size: 0.74rem">
-              · net {{ formatPower(r.net) }}<span class="muted"> avg</span>
-            </span>
-            <br />
-            <span class="job-desc">
-              {{ r.def.desc }}
-              <template v-if="r.gathers">
-                <em>{{ GATHER_TYPES[r.def.gather].name }}</em>,
-                {{ formatMassFlow(r.def.harvestRate) }} per drone.
-                <template v-if="r.found.empty">
-                  <span class="warn">{{ r.found.label }}.</span>
-                </template>
-                <template v-else>
-                  Currently on
-                  <button
-                    v-if="r.found.itemId"
-                    class="codex-link"
-                    @click="showInCodex(r.found.itemId)"
-                  >{{ r.found.label.toLowerCase() }}</button>
-                  <strong v-else>{{ r.found.label.toLowerCase() }}</strong>
-                  in {{ r.found.biome.name.toLowerCase() }}.
-                </template>
-              </template>
-              <template v-else-if="r.def.insight">Yields +{{ r.def.insight }}/s insight.</template>
-            </span>
-          </span>
-
-          <span class="job-count">
-            {{ r.assigned }}<span class="muted" v-if="r.limited"> / {{ r.slots }}</span>
-          </span>
-
-          <span class="stepper">
-            <button :disabled="!r.canRemove" @click="assignCaste(r.id, -1)">&minus;</button>
-            <button :disabled="!r.canAdd" @click="assignCaste(r.id, 1)">+</button>
-            <button :disabled="!r.canAdd" @click="assignCaste(r.id, 10)">++</button>
-          </span>
-        </div>
-      </div>
+    <div v-if="unfiled.length" class="notice is-warn">
+      <strong>Unfiled drone types.</strong>
+      {{ unfiled.map((id) => DRONE_TYPES[id].name).join(', ') }} name no caste, so nothing lists
+      them. Give each a <code>caste</code> from DRONE_CASTES.
     </div>
   </div>
 </template>

@@ -19,6 +19,7 @@ import { formatMass } from './units.js';
 import { biomeShares } from './definitions/biomes.js';
 import { poolFor } from './definitions/forage.js';
 import { pickWeighted } from './forage.js';
+import { TOPBAR, TOPBAR_ORDER, DEFAULT_PINNED } from './definitions/topbar.js';
 import {
   recordFind,
   isNamed,
@@ -310,6 +311,35 @@ export function setFuelOverride(consumerKey, preferred, fallback) {
 
 export function clearFuelOverride(consumerKey) {
   delete state.energy.overrides[consumerKey];
+}
+
+/* -------------------------------------------------------------------- top bar */
+
+/**
+ * Nail a resource to the top bar, or let it go.
+ *
+ * An unpinned resource is not hidden — it competes for whatever room is left,
+ * and wins that room by being the one that is moving. Pinning is how the player
+ * says "I want to see this whether or not it is interesting".
+ */
+export function togglePinned(id) {
+  if (!TOPBAR[id]) return false;
+  state.ui.pinned = Array.isArray(state.ui.pinned) ? state.ui.pinned : [...DEFAULT_PINNED];
+  const at = state.ui.pinned.indexOf(id);
+  if (at >= 0) state.ui.pinned.splice(at, 1);
+  else {
+    // Kept in declared order rather than in the order they were clicked, so the
+    // bar reads the same however the player got there.
+    state.ui.pinned.push(id);
+    state.ui.pinned.sort((a, b) => TOPBAR_ORDER.indexOf(a) - TOPBAR_ORDER.indexOf(b));
+  }
+  return state.ui.pinned.includes(id);
+}
+
+/** Back to the five the hive starts with. */
+export function resetPinned() {
+  state.ui.pinned = [...DEFAULT_PINNED];
+  return state.ui.pinned;
 }
 
 /* ------------------------------------------------------------------ cognition */
