@@ -104,6 +104,18 @@ const GROWTH_PER_SECOND = 0.04;
 const AUTOMATIC_DRONE_GROWTH = false;
 const STARVE_SECONDS = 25; // at zero energy, how long until a drone is lost
 
+/** What one larva eats, every second it exists. */
+export const LARVA_CARB_PER_SECOND = 0.5;
+
+/**
+ * How long a brood can go unfed before it starts dying, and how fast it then
+ * goes. Five seconds of grace is not much — and it is not meant to be. A larva
+ * is a thing that only eats; the moment the sugar stops it is the first thing
+ * in the hive with nothing to live on.
+ */
+export const LARVA_STARVE_GRACE = 5; // seconds unfed before the first death
+export const LARVA_DEATH_SECONDS = 2; // seconds per death after that
+
 /**
  * How long an unpowered building takes to fade out — and, run the other way,
  * how long a re-powered one takes to come back.
@@ -117,6 +129,19 @@ export const BROWNOUT_SECONDS = 30;
 const EPSILON = 1e-12;
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+/**
+ * Put a line in the message log of the state being ticked.
+ *
+ * Deliberately not state.js's `pushLog`: that one writes to the module's single
+ * live state, and `tick` takes whichever state it is handed. A test ticking a
+ * scratch hive must not post into the real one's log.
+ */
+function log(state, text, type = 'info') {
+  if (!Array.isArray(state.log)) return;
+  state.log.unshift({ text, type, at: Date.now(), playtime: state.playtime });
+  if (state.log.length > 60) state.log.length = 60; // mirrors LOG_LIMIT
+}
 
 /* ---------------------------------------------------------------- brownout */
 
@@ -720,6 +745,27 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     };
   }
 
+  // WHAT THE GENERATORS CAN ACTUALLY REACH.
+  //
+  // Not every fuel in the stores — only the ones something is currently pointed
+  // at. A hive sitting on forty kilos of fat with every generator set to
+  // carbohydrate has, as far as it is concerned, no fat: nothing in the hive is
+  // reaching for it. Change the setting and the figure changes with it.
+  const fuelled = new Set();
+  for (const g of generators) {
+    if (g.running <= 0) continue;
+    for (const n of [g.preferred, g.fallback]) {
+      if (n && isUsableFuel(state, n)) fuelled.add(n);
+    }
+  }
+  let fuelEnergy = 0; // chemical energy sitting in those stores
+  let fuelYield = 0; // …and what the generators would get out of it
+  for (const n of fuelled) {
+    const grams = state.nutrients[n] || 0;
+    fuelEnergy += grams * joulesPerGram(n);
+    fuelYield += grams * joulesPerGram(n) * efficiency[n];
+  }
+
   // How much of what the hive asked for it actually got. Everything that does
   // work is scaled by this, so a hive that has outrun its generators visibly
   // slows down.
@@ -729,6 +775,38 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // means "how much the generators can supply against what is being asked",
   // which is the ceiling that actually bites.
   const throughputRatio = totalDemand > EPSILON ? Math.min(1, generatedWatts / totalDemand) : 1;
+
+  /* -- 4c. the brood --------------------------------------------------------- */
+
+  // What is working towards a larva, and how fast. The protein is not taken
+  // here — tick() takes it when a cycle actually completes, because a cycle is
+  // an attempt that can fail rather than a steady drain.
+  const brood = [];
+  for (const id of STRUCTURE_ORDER) {
+    const def = STRUCTURES[id].brood;
+    if (!def) continue;
+    const units = working(state, charges, id);
+    brood.push({
+      id,
+      name: STRUCTURES[id].name,
+      // How many are standing, and how much of one they add up to once the
+      // power is accounted for. A chamber on a tenth of its watts works a tenth
+      // as fast, which is why these two differ.
+      count: activeCount(state, id),
+      charge: charges[id] ?? 1,
+      units,
+      seconds: def.seconds,
+      cost: def.cost,
+      yield: def.yield ?? 1,
+      progress: state.brood?.[id] || 0,
+      // Larvae per second at this many chambers, at this charge.
+      rate: (units * (def.yield ?? 1)) / def.seconds,
+      affordable: Object.entries(def.cost).every(
+        ([n, g]) => (state.nutrients[n] || 0) >= g - EPSILON,
+      ),
+    });
+  }
+  const broodRate = brood.reduce((sum, b) => sum + b.rate, 0);
 
   /* -- 5 & 6. harvest and nutrient inflow ----------------------------------- */
 
@@ -860,6 +938,29 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     (flowSources[nutrient] ||= []).push({ label: 'Metabolised', amount: -grams });
   }
 
+  // The brood eats. A larva is not a consumer of ENERGY — it is a consumer of
+  // sugar, directly, the way the water loss below is a loss of water, so it is
+  // drawn straight off the store rather than going through the pool.
+  const larvaeCount = Math.floor(state.larvae || 0);
+  const larvaeWant = larvaeCount * LARVA_CARB_PER_SECOND;
+  const larvaeDrain = Math.min(larvaeWant, (state.nutrients.carb || 0) / Math.max(dt, EPSILON));
+  const larvaeStarving = larvaeCount > 0 && larvaeWant - larvaeDrain > EPSILON;
+  const hunger = larvaeStarving ? state.larvaeHunger || 0 : 0;
+  if (larvaeWant > EPSILON) {
+    // Burn what there is, but SHOW what they want. A brood eating nothing
+    // because the sugar ran out has to read as a brood going unfed, not as a
+    // brood that costs nothing — the second is how a player ends up with a
+    // thousand larvae and no idea why the carbohydrate never moves.
+    burn.carb = (burn.carb || 0) + larvaeDrain;
+    (flowSources.carb ||= []).push({
+      label:
+        larvaeWant - larvaeDrain > EPSILON
+          ? `Larvae ×${larvaeCount} (unfed)`
+          : `Larvae ×${larvaeCount}`,
+      amount: -larvaeWant,
+    });
+  }
+
   // Water is lost continuously and is not an energy source, so it is drawn
   // directly rather than going through the fuel allocation above.
   const waterLoss = Math.min(
@@ -935,9 +1036,34 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       // generator can turn any of it into the pool above.
       stored: storedEnergy(state),
       locked: usableEnergy(state),
-      // `usable` used to mean "chemical energy in fuels the hive can open".
-      // It now means what it says: energy the hive can actually spend.
-      usable: poolAfter,
+      // The stores the generators are POINTED AT, and what is in them. Not the
+      // pool and not every fuel in the hive: the fuel it is actually working.
+      usable: fuelEnergy,
+      reachableYield: fuelYield,
+      fuels: [...fuelled],
+    },
+    brood,
+    broodRate,
+    larvae: {
+      count: larvaeCount,
+      want: larvaeWant,
+      drain: larvaeDrain,
+      starving: larvaeStarving,
+      // How long the brood has gone without, and what that is about to cost.
+      hunger,
+      grace: LARVA_STARVE_GRACE,
+      dying: larvaeStarving && hunger >= LARVA_STARVE_GRACE,
+      // Seconds until the next one dies — the grace period first, then the
+      // gap between deaths.
+      // null rather than Infinity: a brood that is eating has no clock on it,
+      // and Infinity does not survive a JSON round trip.
+      secondsToNext: !larvaeStarving
+        ? null
+        : hunger < LARVA_STARVE_GRACE
+          ? LARVA_STARVE_GRACE - hunger
+          : Math.max(0, (1 - (state.larvaeDying || 0)) * LARVA_DEATH_SECONDS),
+      deathRate: larvaeStarving && hunger >= LARVA_STARVE_GRACE ? 1 / LARVA_DEATH_SECONDS : 0,
+      lost: state.stats?.larvaeLost || 0,
     },
     burn,
     inflow,
@@ -1221,6 +1347,72 @@ export function tick(state, dt) {
 
   state.stats.metabolised += derived.energy.delivered * dt;
   state.stats.ingested += derived.ingestRate * dt;
+
+  // The brood. Each chamber works towards one larva at its own charge; when a
+  // cycle completes it ATTEMPTS to pay for it, and an attempt that cannot be
+  // paid for is simply lost — the chamber starts the next one rather than
+  // banking the failure and laying a backlog the moment protein arrives.
+  state.brood ??= {};
+  if (derived.brood.length) {
+    const broodStore = openStore(state, derived.storage);
+    for (const b of derived.brood) {
+      let progress = b.progress;
+      if (b.units > 0) progress += (b.units * dt) / b.seconds;
+      while (progress >= 1) {
+        progress -= 1;
+        const canPay = Object.entries(b.cost).every(
+          ([n, grams]) => (state.nutrients[n] || 0) >= grams - 1e-12,
+        );
+        if (!canPay) break;
+        for (const [n, grams] of Object.entries(b.cost)) broodStore.apply(n, -grams);
+        state.larvae = (state.larvae || 0) + b.yield;
+      }
+      state.brood[b.id] = progress;
+    }
+  }
+
+  // STARVATION. A brood that cannot get its sugar has five seconds, and then it
+  // starts dying at one every two. Feeding is not an optimisation.
+  if (derived.larvae.starving && state.larvae > 0) {
+    const before = state.larvaeHunger || 0;
+    const after = before + dt;
+    state.larvaeHunger = after;
+
+    if (before < LARVA_STARVE_GRACE && after >= LARVA_STARVE_GRACE) {
+      log(state, 'The brood is going unfed. Larvae will start dying.', 'error');
+    }
+
+    const past = Math.max(0, after - LARVA_STARVE_GRACE);
+    const pastBefore = Math.max(0, before - LARVA_STARVE_GRACE);
+    state.larvaeDying = (state.larvaeDying || 0) + (past - pastBefore) / LARVA_DEATH_SECONDS;
+
+    let lost = 0;
+    while (state.larvaeDying >= 1 && state.larvae > 0) {
+      state.larvaeDying -= 1;
+      state.larvae -= 1;
+      lost += 1;
+    }
+    if (lost > 0) {
+      state.stats.larvaeLost = (state.stats.larvaeLost || 0) + lost;
+      // Once per episode, not once per death: a line every two seconds would
+      // bury everything else in the log.
+      if (pastBefore < LARVA_DEATH_SECONDS) {
+        log(state, 'Larvae are dying of hunger, one every two seconds.', 'error');
+      }
+    }
+    if (state.larvae <= 0) {
+      state.larvae = 0;
+      state.larvaeHunger = 0;
+      state.larvaeDying = 0;
+      if (lost > 0) log(state, 'The brood is gone.', 'error');
+    }
+  } else if (state.larvaeHunger || state.larvaeDying) {
+    if ((state.larvaeHunger || 0) >= LARVA_STARVE_GRACE && state.larvae > 0) {
+      log(state, `The brood is feeding again. ${state.larvae} left.`, 'info');
+    }
+    state.larvaeHunger = 0;
+    state.larvaeDying = 0;
+  }
 
   state.insight = Math.min(derived.insightCap, state.insight + derived.insightRate * dt);
 

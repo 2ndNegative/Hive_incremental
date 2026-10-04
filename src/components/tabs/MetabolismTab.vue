@@ -72,10 +72,12 @@ function setFallback(key, value) {
   }
 }
 
+// How long the generators can keep going on what they are pointed at — the
+// figure that matters, rather than how long the banked pool would last.
 const reserveSeconds = computed(() => {
-  const burn = derived.value.energy.delivered;
-  if (burn <= 0) return Infinity;
-  return derived.value.energy.usable / burn;
+  const making = derived.value.energy.generated;
+  if (making <= 0) return Infinity;
+  return derived.value.energy.reachableYield / making;
 });
 
 function formatReserve(seconds) {
@@ -99,7 +101,9 @@ function formatReserve(seconds) {
         <div class="value" :class="derived.energy.usable < derived.energy.stored ? 'warn' : ''">
           {{ formatEnergy(derived.energy.usable) }}
         </div>
-        <div class="muted" style="font-size: 0.72rem">excludes fuels not yet unlocked</div>
+        <div class="muted" style="font-size: 0.72rem">
+          only the stores a generator is pointed at
+        </div>
       </div>
       <div class="stat-tile">
         <div class="label">Demand</div>
@@ -121,7 +125,7 @@ function formatReserve(seconds) {
       <div class="stat-tile">
         <div class="label">Reserve</div>
         <div class="value">{{ formatReserve(reserveSeconds) }}</div>
-        <div class="muted" style="font-size: 0.72rem">at the current burn rate</div>
+        <div class="muted" style="font-size: 0.72rem">until the generators run dry</div>
       </div>
     </div>
 

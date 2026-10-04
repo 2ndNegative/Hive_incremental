@@ -37,6 +37,9 @@
 //                ONE thing however tall it is, so taking a Hivecore from level 1
 //                to level 9 adds no room at all.
 //   itemStorage  the same, in grams per item, for whole matter in the larder.
+//   brood        { seconds, cost, yield } — a cycle this structure works through
+//                at its own charge. When it completes it ATTEMPTS to pay `cost`
+//                and lay `yield` larvae; an attempt it cannot pay for is lost.
 //   generalStorage  flat grams of SHARED room, which anything may use. Last in,
 //                first out: matter only reaches it once its own dedicated room
 //                is full, and it is the first thing drawn back out. It is a
@@ -128,6 +131,20 @@ export const STRUCTURES = {
     // 1 MJ every second. Nothing else in the game is close, and nothing in the
     // game can pay for it without generators.
     upkeepWatts: 1_000_000,
+  },
+
+  broodChamber: {
+    id: 'broodChamber',
+    name: 'Brood Chamber',
+    category: 'core',
+    desc:
+      'A warm blind cell the hive packs with protein and leaves to do what protein does. What ' +
+      'comes out is not yet anything — it only eats, and waits to be told what it is for. Stop ' +
+      'feeding it and it stops being anything at all, quickly.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(260, 1.4)(n), fat: geo(90, 1.4)(n) }),
+    brood: { seconds: 20, cost: { protein: 120 }, yield: 1 },
+    upkeepWatts: 250_000,
   },
 
   vacuole: {
@@ -310,7 +327,13 @@ export const BUILDING_CATEGORY_ORDER = ['core', 'cognition', 'gathering', 'produ
  * Buildable structures. EMPTY during the rebuild — see the header.
  * Everything the engine and the interface iterate comes from here.
  */
-export const STRUCTURE_ORDER = ['hivecore', 'metabolicGenerator', 'proteinGranule', 'vacuole'];
+export const STRUCTURE_ORDER = [
+  'hivecore',
+  'broodChamber',
+  'metabolicGenerator',
+  'proteinGranule',
+  'vacuole',
+];
 
 /**
  * The order energy is handed out in when there is not enough of it.

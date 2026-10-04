@@ -14,7 +14,7 @@ import { STRUCTURE_ORDER, DEPRECATED_STRUCTURE_ORDER } from './definitions/struc
 import { CASTE_ORDER, DEPRECATED_CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 11;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -83,6 +83,16 @@ export function createInitialState() {
     // spends them yet — the drone rebuild is what will.
     larvae: 0,
 
+    // How far each brood structure is through its current cycle, 0 to 1, keyed
+    // by structure id. Sparse — no entry means it has not started one.
+    brood: {},
+
+    // Seconds the brood has gone unfed, and how far through the next death
+    // that has carried it. Both reset the moment it eats. See engine.js
+    // LARVA_STARVE_GRACE.
+    larvaeHunger: 0,
+    larvaeDying: 0,
+
     // Usable energy, in joules. Separate from the chemical energy locked in the
     // nutrient stores: nothing converts one into the other except a Metabolic
     // Generator, so this is what the hive can actually spend.
@@ -141,6 +151,7 @@ export function createInitialState() {
       built: 0,
       researched: 0,
       dronesLost: 0,
+      larvaeLost: 0,
       peakDrones: 0,
       ticks: 0,
       devUsed: false,

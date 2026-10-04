@@ -29,6 +29,14 @@ function effectLines(def) {
   if (def.cogitCapacity) lines.push(`+${formatCogits(def.cogitCapacity)} cognition`);
   if (def.cogitDraw) lines.push(`${formatCogits(def.cogitDraw)} cognition occupied`);
   if (def.metabolism) lines.push(`metabolises ${formatMassFlow(def.metabolism)} into energy`);
+  if (def.brood) {
+    const cost = Object.entries(def.brood.cost)
+      .map(([n, g]) => `${formatMass(g)} ${NUTRIENTS[n]?.name.toLowerCase() ?? n}`)
+      .join(' + ');
+    lines.push(
+      `${def.brood.yield ?? 1} larva every ${def.brood.seconds}s, for ${cost} an attempt`,
+    );
+  }
   // Only a building in the Storage band says what it holds. Everywhere else
   // room is a quiet side effect of having grown something — the Hivecore
   // bringing a body with it is not what the player is choosing to build it for.

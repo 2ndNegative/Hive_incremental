@@ -16,6 +16,7 @@ import {
   BROWNOUT_SECONDS,
 } from './game/engine.js';
 import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS } from './game/save.js';
+import { SAVE_VERSION } from './game/state.js';
 import { runOfflineCatchup, offline, skipOffline } from './game/offline.js';
 import { NUTRIENTS, FUELS, itemYield, parentsOf } from './game/definitions/nutrients.js';
 import { ITEMS } from './game/definitions/items/index.js';
@@ -112,6 +113,7 @@ window.hive = {
   save,
   load,
   wipe,
+  saveVersion: SAVE_VERSION,
   saveStatus,
   measureStorageHeadroom,
   tick: (seconds) => advance(state, seconds),

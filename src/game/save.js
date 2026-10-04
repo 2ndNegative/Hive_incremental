@@ -335,6 +335,19 @@ function migrate(raw) {
     raw.general ??= {};
   }
 
+  // Before v10 there was no brood, so nothing is part-way through a cycle.
+  if ((raw.version ?? 0) < 10) {
+    raw.brood ??= {};
+    raw.larvae ??= 0;
+  }
+
+  // Before v11 a larva could go hungry indefinitely. A loaded save starts fed;
+  // if it is not, the first few seconds of play will say so.
+  if ((raw.version ?? 0) < 11) {
+    raw.larvaeHunger = 0;
+    raw.larvaeDying = 0;
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

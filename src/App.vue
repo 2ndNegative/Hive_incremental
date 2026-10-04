@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { state, derived } from './game/useGame.js';
 import { formatDuration, formatNumber } from './game/format.js';
+import { NUTRIENTS } from './game/definitions/nutrients.js';
 import { formatEnergy, formatPower, formatCogits, formatMassFlow, formatLarvae } from './game/units.js';
 import { save, saveStatus } from './game/save.js';
 import NutrientPanel from './components/NutrientPanel.vue';
@@ -67,33 +68,44 @@ const savedAgo = computed(() => {
         <span class="tip">
           <span>
             Energy
-            <strong class="num" :class="derived.energy.pool > 0 ? 'good' : 'muted'">
-              {{ formatEnergy(derived.energy.pool) }}
+            <strong class="num" :class="derived.energy.generated > 0 ? 'good' : 'muted'">
+              {{ formatPower(derived.energy.generated) }}
             </strong>
           </span>
           <span class="tip-body">
-            <span class="tip-title">Usable energy</span>
+            <span class="tip-title">Energy being made</span>
             <span class="muted" style="display: block; margin-bottom: 0.3rem">
-              Energy the hive can actually spend. Nothing turns stored matter into this except a
-              Metabolic Generator — a hive standing on a tonne of fat with no generator has no
-              energy at all.
-            </span>
-            <span class="tip-row"><span>Banked</span><span>{{ formatEnergy(derived.energy.pool) }}</span></span>
-            <span class="tip-row">
-              <span>Being generated</span>
-              <span :class="derived.energy.generated > 0 ? 'good' : 'muted'">
-                {{ formatPower(derived.energy.generated) }}
-              </span>
+              What the generators are producing, second by second. Nothing else in the hive turns
+              stored matter into spendable energy — a hive standing on a tonne of fat with no
+              generator makes nothing at all.
             </span>
             <span class="tip-row">
               <span>Processing</span><span>{{ formatMassFlow(derived.energy.massRate) }}</span>
             </span>
+            <span class="tip-row"><span>Banked</span><span>{{ formatEnergy(derived.energy.pool) }}</span></span>
+            <hr style="border-color: var(--border); margin: 0.3rem 0" />
+            <span class="tip-title" style="font-size: 0.72rem">Usable energy</span>
+            <span class="muted" style="display: block; margin-bottom: 0.3rem">
+              What is in the stores the generators are actually pointed at. Change what one of
+              them burns and this changes with it: a store nothing is reaching for is not fuel.
+            </span>
+            <span class="tip-row">
+              <span>In reach</span>
+              <span :class="derived.energy.usable > 0 ? 'good' : 'bad'">
+                {{ formatEnergy(derived.energy.usable) }}
+              </span>
+            </span>
+            <span v-for="f in derived.energy.fuels" :key="f" class="tip-row muted">
+              <span>· {{ NUTRIENTS[f].name }}</span>
+              <span>{{ formatEnergy((state.nutrients[f] || 0) * NUTRIENTS[f].kjPerGram * 1000) }}</span>
+            </span>
+            <span v-if="!derived.energy.fuels.length" class="tip-row bad">
+              <span>No generator is pointed at anything</span><span>—</span>
+            </span>
             <hr style="border-color: var(--border); margin: 0.3rem 0" />
             <span class="tip-row muted">
-              <span>Chemical energy in store</span><span>{{ formatEnergy(derived.energy.stored) }}</span>
-            </span>
-            <span class="tip-row muted">
-              <span>…of it in fuels it can open</span><span>{{ formatEnergy(derived.energy.locked) }}</span>
+              <span>Chemical energy in store, all of it</span>
+              <span>{{ formatEnergy(derived.energy.stored) }}</span>
             </span>
           </span>
         </span>
@@ -167,16 +179,64 @@ const savedAgo = computed(() => {
         <span class="tip">
           <span>
             Larvae
-            <strong class="num" :class="state.larvae > 0 ? 'good' : 'muted'">
+            <strong
+              class="num"
+              :class="derived.larvae.dying ? 'bad' : derived.larvae.starving ? 'warn' : state.larvae > 0 ? 'good' : 'muted'"
+            >
               {{ Math.floor(state.larvae) }}
             </strong>
+            <span v-if="derived.larvae.dying" class="bad" style="font-size: 0.72rem">
+              &nbsp;· dying
+            </span>
+            <span v-else-if="derived.larvae.starving" class="warn" style="font-size: 0.72rem">
+              &nbsp;· {{ Math.ceil(derived.larvae.secondsToNext) }}s
+            </span>
           </span>
           <span class="tip-body">
             <span class="tip-title">{{ formatLarvae(state.larvae) }} in the brood</span>
-            <span class="muted" style="display: block">
-              A store, not a width: these are things the hive is holding, and it holds as many as
-              it has. Nothing lays them and nothing spends them yet — the drone rebuild is what
-              will.
+            <span class="muted" style="display: block; margin-bottom: 0.3rem">
+              A store, not a width. Brood Chambers lay them out of protein; nothing spends them
+              yet, and they eat the whole time they are waiting.
+            </span>
+            <span class="tip-row">
+              <span>Eating</span>
+              <span :class="derived.larvae.starving ? 'bad' : 'muted'">
+                {{ formatMassFlow(-derived.larvae.want) }} carbohydrate
+              </span>
+            </span>
+            <template v-if="derived.larvae.starving">
+              <span class="tip-row bad">
+                <span>Going unfed</span>
+                <span>{{ formatMassFlow(-(derived.larvae.want - derived.larvae.drain)) }} short</span>
+              </span>
+              <span class="tip-row bad">
+                <span>{{ derived.larvae.dying ? 'Next one dies in' : 'Dying starts in' }}</span>
+                <span>{{ Math.ceil(derived.larvae.secondsToNext) }}s</span>
+              </span>
+              <span v-if="derived.larvae.dying" class="tip-row bad">
+                <span>Dying at</span><span>one every {{ 1 / derived.larvae.deathRate }}s</span>
+              </span>
+              <span v-else class="tip-row muted">
+                <span>Grace</span><span>{{ derived.larvae.grace }}s unfed, then one every 2s</span>
+              </span>
+            </template>
+            <span v-if="derived.larvae.lost > 0" class="tip-row muted">
+              <span>Starved this run</span><span>{{ derived.larvae.lost }}</span>
+            </span>
+            <span class="tip-row">
+              <span>Being laid</span>
+              <span :class="derived.broodRate > 0 ? 'good' : 'muted'">
+                {{ derived.broodRate > 0 ? `${(derived.broodRate * 60).toFixed(1)}/min` : 'none' }}
+              </span>
+            </span>
+            <span v-for="b in derived.brood" :key="b.id" class="tip-row muted">
+              <span>
+                · {{ b.name }} ×{{ b.count }}
+                <span v-if="b.charge < 0.999" class="warn">at {{ Math.round(b.charge * 100) }}%</span>
+              </span>
+              <span :class="b.affordable ? '' : 'bad'">
+                {{ Math.round(b.progress * 100) }}%{{ b.affordable ? '' : ' · cannot pay' }}
+              </span>
             </span>
           </span>
         </span>
