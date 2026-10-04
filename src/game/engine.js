@@ -57,6 +57,7 @@ import {
   STRUCTURES,
   STRUCTURE_ORDER,
   powerPriority,
+  isLeveled,
   maxLevelOf,
 } from './definitions/structures.js';
 import {
@@ -84,11 +85,23 @@ const BASE_THROUGHPUT_WATTS = 2_000;
 // gate rather than an upgrade; at 80 g/s a starting hive digests everything it
 // can gather and a hive past about four harvesters starts to back up.
 const BASE_DIGESTION = 80; // grams of stored item mass per second
-const BASE_ITEM_CAP = 2_000; // grams, per item
+/**
+ * What a hive can hold before it builds anything: nothing, of anything. Every
+ * nutrient's baseCap is zero too. All storage comes from a structure's
+ * `storage` map, and the Hivecore is where the first of it comes from.
+ */
+const BASE_ITEM_CAP = 0; // grams, per item
 const BASE_INSIGHT_CAP = 200;
 const BASE_DRONE_CAP = 3;
 const DRONE_PROTEIN_COST = 180; // grams of protein per new drone
 const GROWTH_PER_SECOND = 0.04;
+
+/**
+ * Does the hive grow drones by itself? No — parked for the drone rebuild, which
+ * replaces spontaneous growth with larvae. Flip this back on and the old
+ * behaviour returns exactly as it was.
+ */
+const AUTOMATIC_DRONE_GROWTH = false;
 const STARVE_SECONDS = 25; // at zero energy, how long until a drone is lost
 
 /**
@@ -134,14 +147,52 @@ export function computeCharges(state) {
 }
 
 /**
+ * How many of a structure are switched ON.
+ *
+ * A building can be idled from the Hive tab, which is the only way back out of
+ * having built something that eats more than the hive can feed it. An idle
+ * building costs nothing and does nothing: it is not billed for upkeep, it
+ * metabolises nothing, it occupies no bandwidth, and it holds nothing.
+ *
+ * An absent entry means all of them, so a save written before idling existed —
+ * and any code path that forgets to set it — behaves exactly as it used to.
+ */
+export function activeCount(state, id) {
+  const built = state.structures?.[id] || 0;
+  const on = state.active?.[id];
+  if (on === undefined || on === null) return built;
+  // A levelled structure is ONE thing. Its entry is a flag, not a count, so a
+  // Hivecore taken from level 1 to level 8 is a level 8 Hivecore running —
+  // never a level 8 Hivecore running at one.
+  if (isLeveled(id)) return on > 0 ? built : 0;
+  return Math.max(0, Math.min(built, on));
+}
+
+/**
+ * How many separate THINGS of a structure are standing and switched on.
+ *
+ * The difference from activeCount is levelled buildings: a Hivecore at level 9
+ * is one Hivecore, not nine. This is the number for anything granted per thing
+ * rather than per level — storage, above all, which is why taking the core up a
+ * level widens what it can think and not what it can hold.
+ */
+function instances(state, id) {
+  const on = activeCount(state, id);
+  if (!on) return 0;
+  return isLeveled(id) ? 1 : on;
+}
+
+/**
  * How many units of a structure are effectively working.
  *
  * Six buildings at half charge do the work of three. This is the number every
- * BENEFIT is scaled by; costs use the raw count instead, which is what lets a
- * dark building keep asking for the watts that would bring it back.
+ * benefit that is a RATE or a PROCESS is scaled by. Costs use the active count
+ * without the charge, which is what lets a dark building keep asking for the
+ * watts that would bring it back. Storage capacity uses it without the charge
+ * too — see computeCaps.
  */
 function working(state, charges, id) {
-  return (state.structures?.[id] || 0) * (charges[id] ?? 1);
+  return activeCount(state, id) * (charges[id] ?? 1);
 }
 
 /* ------------------------------------------------------------ capacity groups */
@@ -173,7 +224,8 @@ export function computeCognition(state, charges = computeCharges(state)) {
   let used = 0;
 
   for (const id of STRUCTURE_ORDER) {
-    const count = state.structures?.[id] || 0;
+    // Idled buildings neither think nor take up room to think in.
+    const count = activeCount(state, id);
     if (!count) continue;
     const def = STRUCTURES[id];
     if (def.cogitCapacity) {
@@ -191,8 +243,8 @@ export function computeCognition(state, charges = computeCharges(state)) {
       });
     }
     if (def.cogitDraw) {
-      // A cost, so it does NOT scale: a dark building is still sitting in the
-      // hive's head taking up room.
+      // A cost, so it does not shrink with charge: a dark building is still
+      // sitting in the hive's head taking up room. An idled one is not.
       const amount = def.cogitDraw * count;
       used += amount;
       load.push({ key: `structure:${id}`, label: `${def.name} ×${count}`, amount });
@@ -268,18 +320,46 @@ function computeEfficiency(state) {
   return eff;
 }
 
+/**
+ * STORAGE IS STRUCTURE, NOT PROCESS.
+ *
+ * Capacity is the one benefit that does NOT scale with charge: a sac is a sac
+ * whether it is lit or not. It still respects being switched off, because an
+ * idle building is not part of the hive's working body — but a browning-out
+ * hive keeps everything it was already holding.
+ *
+ * That is not only flavour. The Anthill's only storage is its Hivecore, and the
+ * Hivecore is the first thing to brown out; if capacity faded with charge, a
+ * new hive would spill the very mass it needs to build the generator that would
+ * have saved it, within thirty seconds of landing, every time.
+ */
 function computeCaps(state, charges) {
   const capMult = { bulk: 0, mineral: 0, vitamin: 0 };
   for (const id of STRUCTURE_ORDER) {
-    const units = working(state, charges, id);
+    const units = activeCount(state, id);
     const m = STRUCTURES[id].capMult;
     if (!units || !m) continue;
     for (const [group, value] of Object.entries(m)) capMult[group] += value * units;
   }
 
+  // The hive holds NOTHING on its own — every nutrient's baseCap is zero. Room
+  // is a flat sum of what each standing structure declares, and only then do
+  // the multiplicative bonuses apply to it.
+  const room = {};
+  for (const id of NUTRIENT_IDS) room[id] = NUTRIENTS[id].baseCap;
+  for (const id of STRUCTURE_ORDER) {
+    const store = STRUCTURES[id].storage;
+    if (!store) continue;
+    const count = instances(state, id);
+    if (!count) continue;
+    for (const [nutrient, grams] of Object.entries(store)) {
+      room[nutrient] = (room[nutrient] || 0) + grams * count;
+    }
+  }
+
   const caps = {};
   for (const id of NUTRIENT_IDS) {
-    caps[id] = NUTRIENTS[id].baseCap * (1 + capMult[capGroup(id)]);
+    caps[id] = (room[id] || 0) * (1 + capMult[capGroup(id)]);
   }
 
   let droneCap = BASE_DRONE_CAP;
@@ -297,7 +377,15 @@ function computeCaps(state, charges) {
     digestion += (def.digestion || 0) * units;
     itemCapMult += (def.itemCapMult || 0) * units;
   }
-  const itemCap = BASE_ITEM_CAP * (1 + itemCapMult);
+  // Whole matter obeys the same rule: nowhere to put it until something is
+  // built that can hold it.
+  const itemRoom =
+    BASE_ITEM_CAP +
+    STRUCTURE_ORDER.reduce(
+      (sum, id) => sum + (STRUCTURES[id].itemStorage || 0) * instances(state, id),
+      0,
+    );
+  const itemCap = itemRoom * (1 + itemCapMult);
 
   // A drone is a whole drone, so a browning-out nursery loses the capacity for
   // one before it loses the capacity for half of one. Floored rather than
@@ -410,15 +498,16 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // Basal metabolism and the castes stay ahead of all of it. A building going
   // dark is recoverable; a drone that starves is gone.
   for (const id of priority) {
-    const count = state.structures[id] || 0;
+    const running = activeCount(state, id);
     const def = STRUCTURES[id];
-    if (!count || !def.upkeepWatts) continue;
+    if (!running || !def.upkeepWatts) continue;
     demands.push({
       key: `structure:${id}`,
-      label: `${def.name} ×${count}`,
-      // Raw count, not charge: upkeep is a cost, and a building that stopped
-      // asking for power as it faded could never come back.
-      watts: def.upkeepWatts * count,
+      label: `${def.name} ×${running}`,
+      // Active count, un-scaled by charge: upkeep is a cost, and a building
+      // that stopped asking for power as it faded could never come back. An
+      // idled one is not billed at all, which is the whole point of idling it.
+      watts: def.upkeepWatts * running,
     });
   }
 
@@ -456,8 +545,9 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       const per = STRUCTURES[id].metabolism;
       if (!per) continue;
       const count = state.structures?.[id] || 0;
+      const running = activeCount(state, id);
       const units = working(state, charges, id);
-      const rate = per * units;
+      const rate = per * units; // what it can process right now
       massRate += rate;
 
       const key = `structure:${id}`;
@@ -488,8 +578,13 @@ export function computeDerived(state, dt = TICK_SECONDS) {
         key,
         name: STRUCTURES[id].name,
         count,
+        running,
+        idle: count - running,
         charge: charges[id] ?? 1,
-        // What it could process, and what it managed to find to process.
+        // owned: what this many of it could ever process
+        // capacity: what the ones switched on, at their charge, can process now
+        // rate: what they actually found to process
+        owned: per * count,
         capacity: rate,
         rate: rate - gramsLeft / Math.max(dt, EPSILON),
         watts,
@@ -556,15 +651,20 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   let faded = 0;
   for (const id of STRUCTURE_ORDER) {
     const count = state.structures?.[id] || 0;
+    const running = activeCount(state, id);
     const fed = perConsumer[`structure:${id}`];
+    // Nothing is asked of an idled building, so it settles at full and is ready
+    // the moment it is switched back on.
     const target = fed ? clamp01(fed.ratio) : 1;
     const charge = charges[id] ?? 1;
     const satisfied = target >= 1 - 1e-9;
-    if (count > 0 && !satisfied) starved += 1;
-    if (count > 0 && charge < 1 - 1e-9) faded += 1;
+    if (running > 0 && !satisfied) starved += 1;
+    if (running > 0 && charge < 1 - 1e-9) faded += 1;
     power[id] = {
       id,
       count,
+      running,
+      idle: count - running,
       charge,
       target,
       satisfied,
@@ -746,9 +846,14 @@ export function computeDerived(state, dt = TICK_SECONDS) {
 
   /* -- population ----------------------------------------------------------- */
 
+  // PARKED FOR THE DRONE REBUILD. A hive used to grow a drone out of spare
+  // protein whenever it had the room, the mass and the energy; the replacement
+  // goes through larvae instead, so until that exists nothing grows on its own.
+  // The condition is kept rather than deleted because it is the shape the new
+  // one will be written against.
   const hasProtein = (state.nutrients.protein || 0) >= DRONE_PROTEIN_COST;
-  const growthRate =
-    state.drones < droneCap - EPSILON && hasProtein && energyRatio > 0.5 ? GROWTH_PER_SECOND : 0;
+  const couldGrow = state.drones < droneCap - EPSILON && hasProtein && energyRatio > 0.5;
+  const growthRate = AUTOMATIC_DRONE_GROWTH && couldGrow ? GROWTH_PER_SECOND : 0;
 
   /* -- unlocks and reveals --------------------------------------------------- */
 
@@ -937,6 +1042,13 @@ export function tick(state, dt) {
       // Nothing standing. Forget its charge so that the next one built starts
       // lit rather than inheriting a dead predecessor's.
       delete state.power[id];
+      continue;
+    }
+    if (p.running <= 0) {
+      // Switched off. Not starving — resting. It comes back ready, which is
+      // what makes idling a way OUT of trouble rather than a thirty-second
+      // penalty for having used it.
+      state.power[id] = 1;
       continue;
     }
     const gap = p.target - p.charge;

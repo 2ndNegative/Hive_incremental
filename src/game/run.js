@@ -157,6 +157,8 @@ export function chooseOrigin(id) {
   }
   for (const [structure, count] of Object.entries(start.structures || {})) {
     state.structures[structure] = (state.structures[structure] || 0) + count;
+    // Anything the site hands over is handed over running.
+    state.active[structure] = state.structures[structure];
   }
   for (const [biome, area] of Object.entries(start.territory || {})) {
     grantTerritory(biome, area);

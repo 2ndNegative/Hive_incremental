@@ -314,6 +314,19 @@ function migrate(raw) {
     raw.power ??= {};
   }
 
+  // Before v8 a building that stood was a building that ran. Switching one off
+  // did not exist, so every structure in an old save is switched on — anything
+  // else would silently idle a hive someone had already built.
+  //
+  // Storage also moved off the nutrients themselves and onto the Hivecore in
+  // v8. An old save keeps its stores; what changes is the ceiling above them,
+  // and a hive sitting over its new cap spills the difference in the normal
+  // way rather than being clamped silently here.
+  if ((raw.version ?? 0) < 8) {
+    raw.active ??= {}; // empty = everything that stands is running
+    raw.larvae ??= 0;
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

@@ -45,6 +45,18 @@
 //   as ash, in tissue it sits inside cystine and methionine and reads as
 //   protein. It names both, in that order.
 
+/**
+ * EVERY baseCap HERE IS ZERO, ON PURPOSE.
+ *
+ * A nutrient has no storage of its own. The hive can hold nothing at all until
+ * it has built something to hold it in, and every gram of room comes from a
+ * structure's `storage` map — see definitions/structures.js. Setting a figure
+ * here would do nothing; the engine does not read it.
+ *
+ * The field is kept rather than deleted because the save format, the Codex and
+ * a good deal of interface code all walk these entries, and a missing key is a
+ * worse bug than a zero.
+ */
 export const NUTRIENTS = {
   /* ------------------------------------------------------------- macros -- */
 
@@ -54,7 +66,7 @@ export const NUTRIENTS = {
     tier: 'macro',
     group: 'bulk',
     kjPerGram: 0,
-    baseCap: 200_000,
+    baseCap: 0,
     desc: 'Solvent and coolant. Carries no energy but every reaction needs it.',
   },
   protein: {
@@ -63,7 +75,7 @@ export const NUTRIENTS = {
     tier: 'macro',
     group: 'bulk',
     kjPerGram: 17,
-    baseCap: 20_000,
+    baseCap: 0,
     fuel: true,
     desc: 'Structural mass and emergency fuel. What drones and chambers are built from.',
   },
@@ -73,7 +85,7 @@ export const NUTRIENTS = {
     tier: 'macro',
     group: 'bulk',
     kjPerGram: 37,
-    baseCap: 20_000,
+    baseCap: 0,
     fuel: true,
     desc: 'The densest fuel on this planet at 37 kJ per gram. Burn this first.',
   },
@@ -83,7 +95,7 @@ export const NUTRIENTS = {
     tier: 'macro',
     group: 'bulk',
     kjPerGram: 17,
-    baseCap: 20_000,
+    baseCap: 0,
     fuel: true,
     desc: 'Fast, abundant fuel. Plants are full of it.',
   },
@@ -93,7 +105,7 @@ export const NUTRIENTS = {
     tier: 'macro',
     group: 'bulk',
     kjPerGram: 8,
-    baseCap: 20_000,
+    baseCap: 0,
     fuel: true,
     fuelRequires: 'cellulolysis', // inert until the hive can break the bonds
     desc: 'Structural plant polysaccharide. Locked inside cellulose until the hive learns to cleave it.',
@@ -104,7 +116,7 @@ export const NUTRIENTS = {
     tier: 'macro',
     group: 'bulk',
     kjPerGram: 29,
-    baseCap: 2_000,
+    baseCap: 0,
     fuel: true,
     desc: 'Dense, volatile, mildly toxic. The locals drink it recreationally.',
   },
@@ -114,7 +126,7 @@ export const NUTRIENTS = {
     tier: 'macro',
     group: 'bulk',
     kjPerGram: 0,
-    baseCap: 40_000,
+    baseCap: 0,
     desc: 'Total incombustible residue. You can weigh it from the first bite; telling apart what is in it takes assay work, and every element you learn to name is drawn out of this.',
   },
 
@@ -157,7 +169,7 @@ export const NUTRIENTS = {
 };
 
 /**
- * Shorthand for a micronutrient entry. Caps are in grams.
+ * Shorthand for a micronutrient entry.
  *
  * `parents` lists the macro fractions this micro's mass is physically part of,
  * most likely first. It defaults from the assay group: minerals come out of the
@@ -170,7 +182,10 @@ function m(id, name, revealedBy, baseCap, desc, parents) {
     tier: 'micro',
     group: revealedBy,
     kjPerGram: 0, // minerals and vitamins yield no metabolisable energy
-    baseCap,
+    // Deliberately ignored — see the note on baseCap above. The argument is
+    // kept so the hundred-odd call sites below do not all have to be rewritten
+    // for a number nothing reads.
+    baseCap: 0,
     revealedBy,
     desc,
     parents: parents ?? [defaultParent(revealedBy)],

@@ -199,8 +199,11 @@ function formatReserve(seconds) {
           <span class="field-label">
             {{ g.name }} <template v-if="g.count > 1">×{{ g.count }}</template>
             <span class="field-help">
-              {{ formatMass(g.capacity) }}/s capacity
-              <template v-if="g.charge < 0.999">
+              {{ formatMass(g.owned) }}/s capacity
+              <template v-if="g.idle > 0">
+                · <span class="warn">{{ g.idle }} idle</span>
+              </template>
+              <template v-if="g.running > 0 && g.charge < 0.999">
                 · <span class="warn">{{ Math.round(g.charge * 100) }}% powered</span>
               </template>
               <template v-if="g.dry">

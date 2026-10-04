@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { state, derived } from './game/useGame.js';
 import { formatDuration, formatNumber } from './game/format.js';
-import { formatEnergy, formatPower, formatCogits, formatMassFlow } from './game/units.js';
+import { formatEnergy, formatPower, formatCogits, formatMassFlow, formatLarvae } from './game/units.js';
 import { save, saveStatus } from './game/save.js';
 import NutrientPanel from './components/NutrientPanel.vue';
 import MessageLog from './components/MessageLog.vue';
@@ -160,6 +160,23 @@ const savedAgo = computed(() => {
 
             <span v-if="!derived.cognition.capacity" class="tip-row muted" style="margin-top: 0.25rem">
               <span>Nothing to think with yet</span><span>—</span>
+            </span>
+          </span>
+        </span>
+
+        <span class="tip">
+          <span>
+            Larvae
+            <strong class="num" :class="state.larvae > 0 ? 'good' : 'muted'">
+              {{ Math.floor(state.larvae) }}
+            </strong>
+          </span>
+          <span class="tip-body">
+            <span class="tip-title">{{ formatLarvae(state.larvae) }} in the brood</span>
+            <span class="muted" style="display: block">
+              A store, not a width: these are things the hive is holding, and it holds as many as
+              it has. Nothing lays them and nothing spends them yet — the drone rebuild is what
+              will.
             </span>
           </span>
         </span>

@@ -10,7 +10,7 @@ import {
   itemYield,
   settleReveal,
 } from './definitions/nutrients.js';
-import { STRUCTURES, maxLevelOf } from './definitions/structures.js';
+import { STRUCTURES, maxLevelOf, isLeveled } from './definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
@@ -198,8 +198,19 @@ export function buildStructure(id, count = 1) {
   if (!canAfford(state, cost)) return 0;
 
   const had = state.structures[id] || 0;
+  // How many were running BEFORE this. Absent means all of them, so this has to
+  // be read before the count moves.
+  const wasRunning = state.active?.[id] ?? had;
   for (const [n, amount] of Object.entries(cost)) state.nutrients[n] -= amount;
   state.structures[id] += wanted;
+  // Something newly built is switched on. Idling is a thing the player chooses,
+  // never a thing that happens to them.
+  state.active ??= {};
+  state.active[id] = isLeveled(id)
+    // A levelled entry is a flag. Upgrading something you deliberately shut
+    // down leaves it shut down; the first one ever raised comes up running.
+    ? (had === 0 || wasRunning > 0 ? state.structures[id] : 0)
+    : Math.min(state.structures[id], wasRunning + wanted);
   state.stats.built += wanted;
 
   // Something raised from nothing is raised lit, whatever the last one of its
@@ -216,6 +227,45 @@ export function buildStructure(id, count = 1) {
     'build',
   );
   return wanted;
+}
+
+/**
+ * Switch some of a structure on or off.
+ *
+ * The counterpart of assigning drones, and the only way back out of having
+ * overbuilt something that eats: four generators chewing through the stores
+ * faster than the hive can gather is otherwise a hole with no bottom, because
+ * nothing in the game takes a building down again.
+ *
+ * An idle building is not billed for upkeep, metabolises nothing, holds
+ * nothing and occupies no bandwidth. It is still there, and still cost what it
+ * cost. A levelled structure is one thing, so it is simply on or off.
+ *
+ * `count` may be 'all' or 'none'. Returns the number now running.
+ */
+export function setActive(id, count) {
+  const built = state.structures?.[id] || 0;
+  if (!STRUCTURES[id]) return 0;
+  state.active ??= {};
+
+  let next;
+  if (count === 'all') next = built;
+  else if (count === 'none') next = 0;
+  else next = Math.round(Number(count) || 0);
+
+  // One thing you upgrade cannot be half switched on.
+  if (isLeveled(id)) next = next > 0 ? built : 0;
+
+  state.active[id] = Math.max(0, Math.min(built, next));
+  return state.active[id];
+}
+
+/** Nudge the number running by `delta`. */
+export function adjustActive(id, delta) {
+  const built = state.structures?.[id] || 0;
+  const now = state.active?.[id] ?? built;
+  if (isLeveled(id)) return setActive(id, delta > 0 ? 'all' : 'none');
+  return setActive(id, now + delta);
 }
 
 /* --------------------------------------------------------------------- castes */

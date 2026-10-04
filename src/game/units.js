@@ -119,3 +119,12 @@ export function formatEnergyFlow(joulesPerSecond, opts) {
   const sign = joulesPerSecond > 0 ? '+' : joulesPerSecond < 0 ? '−' : '';
   return `${sign}${formatPower(Math.abs(joulesPerSecond), opts)}`;
 }
+
+/**
+ * Larvae, counted. One larva, two larvae — the singular is the whole reason
+ * this is a function rather than a template string.
+ */
+export function formatLarvae(count) {
+  const n = Math.floor(count || 0);
+  return `${n} ${n === 1 ? 'larva' : 'larvae'}`;
+}

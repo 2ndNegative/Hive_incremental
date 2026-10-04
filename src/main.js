@@ -10,6 +10,7 @@ import {
   canAfford,
   computeCognition,
   computeCharges,
+  activeCount,
   stopLoop,
   BROWNOUT_SECONDS,
 } from './game/engine.js';
@@ -25,7 +26,7 @@ import * as discovery from './game/discovery.js';
 import {
   research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary, MANUAL_INTAKE,
   reserveCogits, releaseCogits, releaseAllCogits, buildStructure,
-  setGlobalFuel, setFuelOverride, clearFuelOverride,
+  setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
 } from './game/actions.js';
 import {
   STRUCTURES,
@@ -34,7 +35,7 @@ import {
   maxLevelOf,
 } from './game/definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './game/definitions/castes.js';
-import { formatMass, formatEnergy, formatPower, formatCogits } from './game/units.js';
+import { formatMass, formatEnergy, formatPower, formatCogits, formatLarvae } from './game/units.js';
 import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
 import * as dev from './game/dev.js';
 import * as run from './game/run.js';
@@ -101,6 +102,7 @@ window.hive = {
   formatEnergy,
   formatPower,
   formatCogits,
+  formatLarvae,
   cognition: () => computeCognition(state),
   reserveCogits,
   releaseCogits,
@@ -130,6 +132,9 @@ window.hive = {
   brownoutSeconds: BROWNOUT_SECONDS,
   maxLevelOf,
   build: (id, n) => buildStructure(id, n),
+  setActive,
+  adjustActive,
+  activeCount: (id) => activeCount(state, id),
   structuresLive: STRUCTURE_ORDER.length,
   castesLive: CASTE_ORDER.filter((id) => CASTES[id].assignable).length,
 };

@@ -30,6 +30,13 @@
 //   mult         multiplier channel bonuses per unit
 //   digestion    grams of stored item mass broken down per second, per unit
 //   itemCapMult  multiplicative bonus to every item's storage, per unit
+//   storage      flat grams of room, by nutrient. The hive holds NOTHING on its
+//                own — every nutrient's baseCap is zero — so this map is where
+//                storage comes from, full stop. Granted once per thing standing:
+//                five Gut Sacs give five times this, but a levelled building is
+//                ONE thing however tall it is, so taking a Hivecore from level 1
+//                to level 9 adds no room at all.
+//   itemStorage  the same, in grams per item, for whole matter in the larder.
 //   cogitCapacity  cogits of cognitive bandwidth supplied per unit
 //   cogitDraw      cogits occupied per unit while it stands
 //   metabolism     grams per second this converts into usable energy
@@ -64,11 +71,56 @@ export const STRUCTURES = {
     maxLevel: 20,
     desc:
       'The mind itself: a dense knot of nervous tissue the rest of the hive is grown around. ' +
-      'Every level widens what the hivemind can hold in flight at once — and costs a great deal ' +
-      'to keep lit.',
+      'The first of it brings a body with somewhere to put things; every level after that widens ' +
+      'what the hivemind can hold in flight at once — and costs a great deal to keep lit.',
     unlock: () => true,
     cost: (n) => ({ protein: geo(150, 1.6)(n), fat: geo(60, 1.6)(n) }),
     cogitCapacity: 5,
+
+    // THE HIVE'S ONLY STORAGE.
+    //
+    // A body has to be grown before it has anywhere to put anything, and for
+    // now the core is the whole of that body. Flat, and granted for having a
+    // Hivecore at all — levelling it up widens what the hive can think, not
+    // what it can hold. Something in the Storage band will have to do that.
+    storage: {
+      water: 20_000,
+      protein: 2_000,
+      fat: 2_000,
+      carb: 2_000,
+      fiber: 2_000,
+      ethanol: 200,
+      ash: 4_000,
+      sodium: 20,
+      potassium: 20,
+      calcium: 40,
+      magnesium: 10,
+      phosphorus: 30,
+      chloride: 20,
+      sulfur: 10,
+      iron: 2,
+      zinc: 2,
+      copper: 1,
+      manganese: 1,
+      selenium: 0.05,
+      iodine: 0.05,
+      chromium: 0.02,
+      molybdenum: 0.02,
+      vitaminA: 0.2,
+      vitaminD: 0.02,
+      vitaminE: 1,
+      vitaminK: 0.1,
+      vitaminC: 2,
+      vitaminB1: 0.2,
+      vitaminB2: 0.2,
+      vitaminB3: 1,
+      vitaminB5: 0.5,
+      vitaminB6: 0.2,
+      vitaminB7: 0.05,
+      vitaminB9: 0.1,
+      vitaminB12: 0.02,
+    },
+    itemStorage: 200, // grams per item of whole matter
     // 1 MJ every second. Nothing else in the game is close, and nothing in the
     // game can pay for it without generators.
     upkeepWatts: 1_000_000,

@@ -10,7 +10,7 @@ import {
 import { NUTRIENTS } from '../../game/definitions/nutrients.js';
 import { CASTES } from '../../game/definitions/castes.js';
 import { structureCost, canAfford, etaFor, affordableCount } from '../../game/engine.js';
-import { buildStructure } from '../../game/actions.js';
+import { buildStructure, setActive, adjustActive } from '../../game/actions.js';
 import { formatMass, formatMassFlow, formatPower, formatCogits } from '../../game/units.js';
 import { formatEta } from '../../game/format.js';
 import CostList from '../CostList.vue';
@@ -29,6 +29,19 @@ function effectLines(def) {
   if (def.cogitCapacity) lines.push(`+${formatCogits(def.cogitCapacity)} cognition`);
   if (def.cogitDraw) lines.push(`${formatCogits(def.cogitDraw)} cognition occupied`);
   if (def.metabolism) lines.push(`metabolises ${formatMassFlow(def.metabolism)} into energy`);
+  // Flat and granted once per thing standing, so a levelled building says so
+  // rather than letting the player read it as per-level like everything else.
+  if (def.storage) {
+    const headline = ['protein', 'fat', 'carb', 'water']
+      .filter((n) => def.storage[n])
+      .map((n) => `${formatMass(def.storage[n])} ${NUTRIENTS[n].name.toLowerCase()}`)
+      .join(', ');
+    lines.push(
+      def.leveled
+        ? `storage for ${headline} and the rest — the first level only`
+        : `storage for ${headline} and the rest`,
+    );
+  }
   for (const [caste, value] of Object.entries(def.slots || {})) {
     lines.push(`+${value} ${CASTES[caste]?.name ?? caste} slot`);
   }
@@ -53,10 +66,13 @@ const cards = computed(() =>
     const maxed = headroom <= 0;
     const affordable = !maxed && canAfford(state, cost);
     const power = derived.value.power?.[id] ?? { charge: 1, direction: 'steady', secondsLeft: 0 };
+    const running = power.running ?? owned;
     return {
       id,
       def,
       owned,
+      running,
+      idle: owned - running,
       power,
       // Only worth saying anything when it is not simply running.
       ailing: owned > 0 && (power.direction !== 'steady'),
@@ -237,11 +253,10 @@ const overCapacity = computed(() =>
           <div v-if="!band.cards.length" class="band-empty">Nothing here yet.</div>
 
           <div v-else class="action-grid">
+            <div v-for="card in band.cards" :key="card.id" class="action-slot">
             <button
-              v-for="card in band.cards"
-              :key="card.id"
               class="action-card"
-              :class="{ 'is-affordable': card.affordable }"
+              :class="{ 'is-affordable': card.affordable, 'has-switch': card.owned > 0 }"
               :disabled="!card.affordable"
               @click="buildStructure(card.id, state.ui.buyAmount)"
             >
@@ -275,6 +290,39 @@ const overCapacity = computed(() =>
                 affordable in {{ card.eta }}
               </span>
             </button>
+
+            <!-- Switching buildings off is the way back out of overbuilding
+                 something that eats. Outside the card, because the card is
+                 itself a button. -->
+            <div v-if="card.owned > 0" class="switch-row" :class="{ 'is-idle': card.idle > 0 }">
+              <template v-if="card.leveled">
+                <span class="switch-label">
+                  {{ card.running > 0 ? 'Running' : 'Shut down' }}
+                </span>
+                <button
+                  class="btn switch-btn is-wide"
+                  @click="setActive(card.id, card.running > 0 ? 'none' : 'all')"
+                >
+                  {{ card.running > 0 ? 'Shut down' : 'Start up' }}
+                </button>
+              </template>
+
+              <template v-else>
+                <span class="switch-label">
+                  <strong class="num">{{ card.running }}</strong> of {{ card.owned }} active
+                  <span v-if="card.idle > 0" class="muted">· {{ card.idle }} idle</span>
+                </span>
+                <button class="btn switch-btn" :disabled="card.running <= 0"
+                        @click="setActive(card.id, 'none')" title="Idle all of them">0</button>
+                <button class="btn switch-btn" :disabled="card.running <= 0"
+                        @click="adjustActive(card.id, -1)">−</button>
+                <button class="btn switch-btn" :disabled="card.running >= card.owned"
+                        @click="adjustActive(card.id, 1)">+</button>
+                <button class="btn switch-btn" :disabled="card.running >= card.owned"
+                        @click="setActive(card.id, 'all')" title="Run all of them">All</button>
+              </template>
+            </div>
+            </div>
           </div>
         </div>
       </section>

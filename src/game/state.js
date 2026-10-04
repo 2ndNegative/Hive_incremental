@@ -14,7 +14,7 @@ import { STRUCTURE_ORDER, DEPRECATED_STRUCTURE_ORDER } from './definitions/struc
 import { CASTE_ORDER, DEPRECATED_CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -72,6 +72,11 @@ export function createInitialState() {
     insight: 0,
     drones: 0,
 
+    // Larvae in the brood chamber. A STORE, not a capacity: this is a count of
+    // things the hive is holding, the way nutrients are. Nothing produces or
+    // spends them yet — the drone rebuild is what will.
+    larvae: 0,
+
     // Usable energy, in joules. Separate from the chemical energy locked in the
     // nutrient stores: nothing converts one into the other except a Metabolic
     // Generator, so this is what the hive can actually spend.
@@ -101,6 +106,16 @@ export function createInitialState() {
     starvation: 0,
 
     structures,
+
+    // How many of each structure are switched OFF their full count. Sparse on
+    // purpose: NO ENTRY MEANS ALL OF THEM RUNNING. Anything that raises
+    // structures[id] without a thought — a landing site, a migration, a test,
+    // whatever the rebuild brings — therefore gets a running building rather
+    // than a silently idle one, and only a deliberate act of idling writes
+    // here. An idle building costs nothing and does nothing, which is the only
+    // way back out of having overbuilt something that eats.
+    active: {},
+
     castes,
     tech,
 
