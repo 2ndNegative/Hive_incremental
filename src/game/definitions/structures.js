@@ -37,6 +37,11 @@
 //                ONE thing however tall it is, so taking a Hivecore from level 1
 //                to level 9 adds no room at all.
 //   itemStorage  the same, in grams per item, for whole matter in the larder.
+//   molding      { seconds } — turns one larva into one drone per cycle, of
+//                whatever drones.js says is eligible. A chamber that is actually
+//                pressing — something eligible AND a larva to press — draws
+//                `activeWatts`; one with nothing to do idles at `upkeepWatts`.
+//   activeWatts  what it draws while it has work. Falls back to upkeepWatts.
 //   brood        { seconds, cost, yield } — a cycle this structure works through
 //                at its own charge. When it completes it ATTEMPTS to pay `cost`
 //                and lay `yield` larvae; an attempt it cannot pay for is lost.
@@ -152,13 +157,13 @@ export const STRUCTURES = {
     name: 'Molding Chamber',
     category: 'production',
     desc:
-      'A press of living cartilage. Whatever the hive decides it wants a shape of, it will be ' +
-      'pushed into shape here. Nothing is asking for a shape yet.',
+      'A press of living cartilage. A larva goes in formless and comes out as something with a ' +
+      'job. Switch a drone type on in the Drones tab and this is what makes it.',
     unlock: () => true,
     cost: (n) => ({ protein: geo(180, 1.35)(n), ash: geo(90, 1.35)(n) }),
-    upkeepWatts: 100_000,
-    // No function yet, deliberately. It stands, it draws its watts, and that is
-    // the whole of it until production has something to make.
+    upkeepWatts: 100_000, // idling, with nothing it is allowed to make
+    activeWatts: 500_000, // pressing
+    molding: { seconds: 20 },
   },
 
   vacuole: {

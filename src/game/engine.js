@@ -72,6 +72,7 @@ import { ITEMS } from './definitions/items/index.js';
 import { ORGANISMS } from './definitions/organisms.js';
 import { BIOMES } from './definitions/biomes.js';
 import { BASE_COGIT_CAPACITY, COGIT_PER_DRONE } from './definitions/cognition.js';
+import { DRONE_TYPES, nextMoldable } from './definitions/drones.js';
 import { advanceForage } from './forage.js';
 
 export const TICK_MS = 100;
@@ -528,6 +529,53 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   const slots = computeSlots(state, charges);
   const cognition = computeCognition(state, charges);
 
+  /* -- 1b. molding ----------------------------------------------------------- */
+
+  // WHAT A MOLDING CHAMBER WANTS TO MAKE, settled before anything is billed —
+  // because a chamber with work draws five times what an idle one does, and the
+  // demand list below needs to know which it is.
+  //
+  // A chamber is ACTIVE when it is actually pressing: something it is allowed
+  // to make, and a larva to make it from. Anything short of that is idle, and
+  // an idle chamber costs the lower figure — nothing switched on, nothing left
+  // under its target, or an empty brood all come to the same thing.
+  //
+  // Deliberately NOT a function of charge. If it were, a chamber would drop to
+  // idle whenever it browned out, which would let it afford its watts again,
+  // which would wake it up — a slow oscillation with no way to read it. Larvae
+  // are safe to depend on: they move on a twenty-second cadence, not a
+  // hundred-millisecond one.
+  const moldTarget = nextMoldable(state);
+  const larvaeOnHand = (state.larvae || 0) >= 1;
+  const molding = [];
+  for (const id of STRUCTURE_ORDER) {
+    const def = STRUCTURES[id].molding;
+    if (!def) continue;
+    const running = activeCount(state, id);
+    const units = working(state, charges, id);
+    // Something it is allowed to make, whether or not it can make it yet.
+    const wants = running > 0 && Boolean(moldTarget);
+    const active = wants && larvaeOnHand;
+    molding.push({
+      id,
+      name: STRUCTURES[id].name,
+      count: running,
+      units,
+      charge: charges[id] ?? 1,
+      seconds: def.seconds,
+      wants,
+      active,
+      makes: moldTarget,
+      makesName: moldTarget ? DRONE_TYPES[moldTarget]?.name ?? moldTarget : null,
+      progress: state.molding?.[id] || 0,
+      // Drones per second at this many chambers, at this charge.
+      rate: active ? units / def.seconds : 0,
+      // Work in front of it and an empty brood behind it.
+      starved: wants && !larvaeOnHand,
+    });
+  }
+  const moldRate = molding.reduce((sum, m) => sum + m.rate, 0);
+
   /* -- 2. energy demand ---------------------------------------------------- */
 
   const demands = []; // { key, label, watts }
@@ -556,13 +604,16 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     const running = activeCount(state, id);
     const def = STRUCTURES[id];
     if (!running || !def.upkeepWatts) continue;
+    // A structure that works harder when it has work says so with activeWatts.
+    const busy = molding.find((m) => m.id === id)?.active;
+    const each = busy && def.activeWatts ? def.activeWatts : def.upkeepWatts;
     demands.push({
       key: `structure:${id}`,
-      label: `${def.name} ×${running}`,
+      label: busy ? `${def.name} ×${running} (working)` : `${def.name} ×${running}`,
       // Active count, un-scaled by charge: upkeep is a cost, and a building
       // that stopped asking for power as it faded could never come back. An
       // idled one is not billed at all, which is the whole point of idling it.
-      watts: def.upkeepWatts * running,
+      watts: each * running,
     });
   }
 
@@ -1044,6 +1095,9 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     },
     brood,
     broodRate,
+    molding,
+    moldRate,
+    moldTarget,
     larvae: {
       count: larvaeCount,
       want: larvaeWant,
@@ -1412,6 +1466,31 @@ export function tick(state, dt) {
     }
     state.larvaeHunger = 0;
     state.larvaeDying = 0;
+  }
+
+  // MOLDING. A chamber with work pushes through its cycle at its own charge;
+  // when one completes it takes a larva and turns it into a drone. No larva
+  // means the attempt is lost, the same as a brood cycle that cannot be paid
+  // for — a chamber does not bank a queue of drones it could not make.
+  //
+  // What it makes is re-read at the moment of completion rather than taken from
+  // `derived`, so a target reached mid-cycle stops the next one rather than
+  // overshooting by however many chambers were mid-press.
+  state.molding ??= {};
+  if (derived.molding.length) {
+    for (const m of derived.molding) {
+      let progress = m.progress;
+      if (m.active && m.units > 0) progress += (m.units * dt) / m.seconds;
+      while (progress >= 1) {
+        progress -= 1;
+        const makes = nextMoldable(state);
+        if (!makes || (state.larvae || 0) < 1) break;
+        state.larvae -= 1;
+        state.droneTypes[makes] = (state.droneTypes[makes] || 0) + 1;
+        state.stats.molded = (state.stats.molded || 0) + 1;
+      }
+      state.molding[m.id] = progress;
+    }
   }
 
   state.insight = Math.min(derived.insightCap, state.insight + derived.insightRate * dt);

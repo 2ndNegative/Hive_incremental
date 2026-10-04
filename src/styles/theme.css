@@ -1895,9 +1895,49 @@ textarea.save-box {
   padding: 0.5rem 0.6rem;
 }
 
-/* The right-hand column of a job row, where a control will eventually sit. */
+/* The right-hand column of a job row. */
 .job-note {
   font-family: var(--mono);
   font-size: 0.72rem;
+  text-align: right;
+}
+
+.mold-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.mold-toggle {
+  width: 2.6rem;
+  height: auto;
+  padding: 0.12rem 0.4rem;
+  font-size: 0.72rem;
+}
+
+.mold-target {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+}
+
+.mold-target input {
+  width: 4rem;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.12rem 0.3rem;
+  border-radius: var(--radius);
+  text-align: right;
+}
+
+.mold-status {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  min-width: 7.5rem;
   text-align: right;
 }

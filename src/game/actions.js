@@ -20,6 +20,7 @@ import { biomeShares } from './definitions/biomes.js';
 import { poolFor } from './definitions/forage.js';
 import { pickWeighted } from './forage.js';
 import { TOPBAR, TOPBAR_ORDER, DEFAULT_PINNED } from './definitions/topbar.js';
+import { DRONE_TYPES } from './definitions/drones.js';
 import {
   recordFind,
   isNamed,
@@ -311,6 +312,44 @@ export function setFuelOverride(consumerKey, preferred, fallback) {
 
 export function clearFuelOverride(consumerKey) {
   delete state.energy.overrides[consumerKey];
+}
+
+/* --------------------------------------------------------------------- drones */
+
+/**
+ * Switch a drone type on or off for the molding chambers.
+ *
+ * Off is the default and off means off: a chamber with nothing switched on has
+ * nothing to make, idles at its lower draw, and eats no larvae.
+ */
+export function setMolding(typeId, on) {
+  if (!DRONE_TYPES[typeId]) return false;
+  state.droneMolding ??= {};
+  state.droneMolding[typeId] ??= { on: false, target: null };
+  state.droneMolding[typeId].on = Boolean(on);
+  return state.droneMolding[typeId].on;
+}
+
+export function toggleMolding(typeId) {
+  return setMolding(typeId, !state.droneMolding?.[typeId]?.on);
+}
+
+/**
+ * How many of a type to stop at. null is no ceiling; a number is a ceiling,
+ * including zero, which is a way of saying "not these" without switching the
+ * line off.
+ */
+export function setMoldTarget(typeId, target) {
+  if (!DRONE_TYPES[typeId]) return null;
+  state.droneMolding ??= {};
+  state.droneMolding[typeId] ??= { on: false, target: null };
+  if (target === null || target === undefined || target === '') {
+    state.droneMolding[typeId].target = null;
+  } else {
+    const n = Math.max(0, Math.floor(Number(target)));
+    state.droneMolding[typeId].target = Number.isFinite(n) ? n : null;
+  }
+  return state.droneMolding[typeId].target;
 }
 
 /* -------------------------------------------------------------------- top bar */

@@ -29,7 +29,7 @@ import {
   research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary, MANUAL_INTAKE,
   reserveCogits, releaseCogits, releaseAllCogits, buildStructure,
   setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
-  togglePinned, resetPinned,
+  togglePinned, resetPinned, setMolding, toggleMolding, setMoldTarget,
 } from './game/actions.js';
 import {
   STRUCTURES,
@@ -43,6 +43,7 @@ import { formatMass, formatEnergy, formatPower, formatCogits, formatLarvae } fro
 import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
 import {
   DRONE_CASTES, DRONE_CASTE_ORDER, DRONE_TYPES, DRONE_TYPE_ORDER, typesInCaste, unfiledTypes,
+  nextMoldable, moldStatus,
 } from './game/definitions/drones.js';
 import {
   TOPBAR, TOPBAR_ORDER, TOPBAR_SLOTS, DEFAULT_PINNED, topbarLayout, urgencyRank,
@@ -139,6 +140,11 @@ window.hive = {
     typeOrder: DRONE_TYPE_ORDER,
     typesInCaste,
     unfiled: unfiledTypes,
+    nextMoldable: () => nextMoldable(state),
+    moldStatus: (id) => moldStatus(state, id),
+    setMolding,
+    toggleMolding,
+    setMoldTarget,
   },
   topbar: {
     defs: TOPBAR,

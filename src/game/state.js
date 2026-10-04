@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -43,7 +43,16 @@ export function createInitialState() {
   // How many of each drone type the hive holds. Skeleton: nothing grows one yet
   // and nothing reads these but the Drones tab. See definitions/drones.js.
   const droneTypes = {};
-  for (const id of DRONE_TYPE_ORDER) droneTypes[id] = 0;
+  // What the molding chambers are allowed to make, and how many of it.
+  // `on` starts FALSE for every type: a chamber that began eating larvae the
+  // moment it was built — and drawing five times the power to do it — would be
+  // a thing that happened TO the player rather than something they asked for.
+  // `target: null` is no ceiling.
+  const droneMolding = {};
+  for (const id of DRONE_TYPE_ORDER) {
+    droneTypes[id] = 0;
+    droneMolding[id] = { on: false, target: null };
+  }
 
   const tech = {};
   for (const id of RESEARCH_ORDER) tech[id] = false;
@@ -129,6 +138,11 @@ export function createInitialState() {
     starvation: 0,
 
     droneTypes,
+    droneMolding,
+
+    // How far each molding structure is through its current cycle, 0 to 1,
+    // keyed by structure id. The same shape as `brood`.
+    molding: {},
 
     structures,
 
@@ -161,6 +175,7 @@ export function createInitialState() {
       researched: 0,
       dronesLost: 0,
       larvaeLost: 0,
+      molded: 0,
       peakDrones: 0,
       ticks: 0,
       devUsed: false,

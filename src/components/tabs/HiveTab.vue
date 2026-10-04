@@ -54,7 +54,16 @@ function effectLines(def) {
   for (const [channel, value] of Object.entries(def.mult || {})) {
     lines.push(`+${Math.round(value * 100)}% ${CASTES[channel]?.name ?? channel} output`);
   }
-  if (def.upkeepWatts) lines.push(`${formatPower(def.upkeepWatts)} upkeep`);
+  if (def.molding) {
+    lines.push(`1 larva into 1 drone every ${def.molding.seconds}s`);
+  }
+  if (def.upkeepWatts) {
+    lines.push(
+      def.activeWatts
+        ? `${formatPower(def.upkeepWatts)} idle, ${formatPower(def.activeWatts)} working`
+        : `${formatPower(def.upkeepWatts)} upkeep`,
+    );
+  }
   return lines;
 }
 

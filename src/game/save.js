@@ -348,6 +348,14 @@ function migrate(raw) {
     raw.larvaeDying = 0;
   }
 
+  // Before v12 nothing could be molded. An old save has made no drones and has
+  // every type switched off, which is what a fresh one has too.
+  if ((raw.version ?? 0) < 12) {
+    raw.molding ??= {};
+    raw.droneMolding ??= {};
+    raw.droneTypes ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }
