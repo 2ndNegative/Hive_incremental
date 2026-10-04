@@ -18,8 +18,6 @@ The food and nutrient database is compiled from public nutritional data (chiefly
 the USDA FoodData Central SR Legacy and FNDDS sets) rather than invented, so the
 figures in the Codex are real numbers about real food.
 
-I would rather say this plainly up front than have you work it out from the
-commit history.
 
 ## Running it locally
 
@@ -30,4 +28,3 @@ npm install
 npm run dev
 ```
 
-Design notes are in [docs/DESIGN.md](docs/DESIGN.md).

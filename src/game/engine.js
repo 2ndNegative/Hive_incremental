@@ -357,9 +357,39 @@ function computeCaps(state, charges) {
     }
   }
 
-  const caps = {};
+  // DEDICATED room: a shelf cut to the shape of one nutrient and no use to any
+  // other. The multiplicative bonuses apply here and nowhere else.
+  const dedicated = {};
   for (const id of NUTRIENT_IDS) {
-    caps[id] = (room[id] || 0) * (1 + capMult[capGroup(id)]);
+    dedicated[id] = (room[id] || 0) * (1 + capMult[capGroup(id)]);
+  }
+
+  // GENERAL room: one shared volume that will take anything, and what the hive
+  // uses to catch what will not fit on its shelves.
+  let general = 0;
+  for (const id of STRUCTURE_ORDER) {
+    const per = STRUCTURES[id].generalStorage;
+    if (per) general += per * instances(state, id);
+  }
+
+  const held = state.general || {};
+  let generalUsed = 0;
+  for (const id of NUTRIENT_IDS) generalUsed += held[id] || 0;
+  const generalFree = Math.max(0, general - generalUsed);
+
+  // WHAT THE PANEL SHOWS. A nutrient's ceiling is its own shelf plus however
+  // much of the shared volume it has actually taken: the hive cannot see room
+  // it is not using, so a store spilling into the general pool always reads as
+  // full. Hold 2 kg of fat on a 2 kg shelf and it is 2 kg of 2 kg; take 200 g
+  // more into the pool and it becomes 2.2 kg of 2.2 kg.
+  const caps = {};
+  // What it COULD hold if it took everything free in the pool. Not displayed —
+  // this is the figure for working out whether a cost is reachable at all.
+  const capsMax = {};
+  for (const id of NUTRIENT_IDS) {
+    const mine = held[id] || 0;
+    caps[id] = dedicated[id] + mine;
+    capsMax[id] = dedicated[id] + mine + generalFree;
   }
 
   let droneCap = BASE_DRONE_CAP;
@@ -392,6 +422,8 @@ function computeCaps(state, charges) {
   // rounded: the hive never gets a drone it cannot hold.
   return {
     caps,
+    capsMax,
+    storage: { dedicated, general, generalUsed, generalFree },
     capMult,
     droneCap: Math.floor(droneCap),
     insightCap,
@@ -466,10 +498,8 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   const priority = powerPriority();
   const mult = computeMultipliers(state, charges);
   const efficiency = computeEfficiency(state);
-  const { caps, capMult, droneCap, insightCap, throughput, digestion, itemCap } = computeCaps(
-    state,
-    charges,
-  );
+  const { caps, capsMax, storage, capMult, droneCap, insightCap, throughput, digestion, itemCap } =
+    computeCaps(state, charges);
   const slots = computeSlots(state, charges);
   const cognition = computeCognition(state, charges);
 
@@ -870,6 +900,8 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     mult,
     efficiency,
     caps,
+    capsMax,
+    storage,
     capMult,
     droneCap,
     insightCap,
@@ -985,14 +1017,137 @@ export function etaFor(state, derived, cost) {
     if (have >= amount) continue;
     const rate = n === 'insight' ? derived.insightRate : derived.net[n] || 0;
     if (rate <= EPSILON) return null;
-    const cap = n === 'insight' ? derived.insightCap : derived.caps[n];
+    // The MOST it could hold, pool included — a cost that only fits by using
+    // the general store is still reachable, so it must not read as impossible.
+    const cap = n === 'insight' ? derived.insightCap : derived.capsMax[n];
     if (amount > cap + EPSILON) return null; // storage can never hold it
     worst = Math.max(worst, (amount - have) / rate);
   }
   return worst;
 }
 
+/* ---------------------------------------------------------------- the store */
+
+/**
+ * THE TWO-TIER STORE.
+ *
+ * Every nutrient has its own DEDICATED room, cut to its shape and no use to
+ * anything else. On top of that the hive may have a volume of GENERAL room: one
+ * shared pool, which anything can use and which exists to catch what will not
+ * fit on a shelf.
+ *
+ * The pool is LAST IN, FIRST OUT. Matter only reaches it once its own shelf is
+ * full, and it is the first thing taken back out — so the pool stays as empty
+ * as the hive can keep it, ready for the next overflow, and the shelves hold
+ * the long-term stock. That is the whole behaviour: a buffer, not a bigger
+ * cupboard.
+ *
+ * `state.nutrients[id]` stays the TOTAL held, so every cost, fuel draw and
+ * display in the game goes on reading it unchanged. `state.general[id]` says
+ * how much of that total is sitting in the shared pool rather than on the
+ * shelf. The invariant is:
+ *
+ *     0 <= general[id] <= nutrients[id]
+ *     nutrients[id] - general[id] <= dedicated[id]
+ *     Σ general <= generalCapacity
+ *
+ * Open a handle with `openStore` and the three are kept true for you.
+ */
+export function openStore(state, storage) {
+  state.general ??= {};
+  const dedicated = storage.dedicated;
+  const capacity = storage.general;
+  let used = 0;
+  for (const id of NUTRIENT_IDS) used += state.general[id] || 0;
+
+  function setGeneral(id, grams) {
+    used += grams - (state.general[id] || 0);
+    if (grams <= EPSILON) delete state.general[id];
+    else state.general[id] = grams;
+  }
+
+  return {
+    get generalUsed() { return used; },
+    get generalFree() { return Math.max(0, capacity - used); },
+
+    /**
+     * Move `delta` grams in or out. Returns the grams that could not be stored
+     * and were lost, which is always 0 for a withdrawal.
+     */
+    apply(id, delta) {
+      const total = state.nutrients[id] || 0;
+      const mine = state.general[id] || 0;
+      const shelf = dedicated[id] || 0;
+
+      if (delta >= 0) {
+        // Shelf first, pool with whatever will not fit, and the rest is gone.
+        const shelfHeld = total - mine;
+        const toShelf = Math.min(delta, Math.max(0, shelf - shelfHeld));
+        let left = delta - toShelf;
+        const toPool = Math.min(left, Math.max(0, capacity - used));
+        left -= toPool;
+        if (toPool > 0) setGeneral(id, mine + toPool);
+        state.nutrients[id] = total + toShelf + toPool;
+        return left; // spilled
+      }
+
+      // LAST IN, FIRST OUT: what is in the pool leaves before what is on the
+      // shelf, so the pool frees itself up again as fast as it filled.
+      const taking = Math.min(-delta, total);
+      const fromPool = Math.min(taking, mine);
+      if (fromPool > 0) setGeneral(id, mine - fromPool);
+      state.nutrients[id] = total - taking;
+      return 0;
+    },
+
+    /**
+     * Put the invariant back after the shelves themselves have changed —
+     * a storage building idled, switched off, or a save loaded from before any
+     * of this existed. Returns grams lost, by nutrient.
+     */
+    reconcile() {
+      const lost = {};
+      // Anything over its shelf that is not already counted as pooled is
+      // pooled now, or lost if there is nowhere to put it.
+      for (const id of NUTRIENT_IDS) {
+        const total = state.nutrients[id] || 0;
+        let mine = Math.min(state.general[id] || 0, total);
+        if (mine !== (state.general[id] || 0)) setGeneral(id, mine);
+        const over = total - mine - (dedicated[id] || 0);
+        if (over <= EPSILON) continue;
+        const toPool = Math.min(over, Math.max(0, capacity - used));
+        if (toPool > 0) {
+          setGeneral(id, mine + toPool);
+          mine += toPool;
+        }
+        const gone = over - toPool;
+        if (gone > EPSILON) {
+          state.nutrients[id] = total - gone;
+          lost[id] = (lost[id] || 0) + gone;
+        }
+      }
+
+      // The pool itself may have shrunk under what is in it. Everything in it
+      // arrived as overflow, so the excess is lost in proportion.
+      if (used > capacity + EPSILON) {
+        const excess = used - capacity;
+        const before = used;
+        for (const id of NUTRIENT_IDS) {
+          const mine = state.general[id] || 0;
+          if (mine <= EPSILON) continue;
+          const gone = Math.min(mine, (mine / before) * excess);
+          setGeneral(id, mine - gone);
+          state.nutrients[id] = Math.max(0, (state.nutrients[id] || 0) - gone);
+          lost[id] = (lost[id] || 0) + gone;
+        }
+      }
+      return lost;
+    },
+  };
+}
+
 /* ------------------------------------------------------------------- the tick */
+
 
 export function tick(state, dt) {
   // Derived first, forage after: this tick delivers what the castes were
@@ -1013,18 +1168,20 @@ export function tick(state, dt) {
     state.spilledItems[itemId] = (state.spilledItems[itemId] || 0) + rate * dt;
   }
 
+  // Stores. Dedicated room fills first, the shared general pool catches what
+  // will not fit, and whatever will not fit in either is gone — for a macro or
+  // an assayed micro the hive notices, and for one it cannot yet detect the
+  // surplus simply vanishes with nothing in the interface to say so.
+  const store = openStore(state, derived.storage);
   for (const id of NUTRIENT_IDS) {
-    const cap = derived.caps[id];
-    let next = (state.nutrients[id] || 0) + derived.net[id] * dt;
-
-    if (next > cap) {
-      // Overflow. For a macro or an assayed micro the hive notices; for a
-      // micronutrient it cannot yet detect, the surplus is simply gone, and
-      // nothing in the interface says so until the assay is done.
-      state.spilled[id] = (state.spilled[id] || 0) + (next - cap);
-      next = cap;
-    }
-    state.nutrients[id] = next < 0 ? 0 : next;
+    const delta = derived.net[id] * dt;
+    if (delta === 0) continue;
+    const lost = store.apply(id, delta);
+    if (lost > 0) state.spilled[id] = (state.spilled[id] || 0) + lost;
+  }
+  // Shelves can shrink between ticks — a storage building idled, a save loaded.
+  for (const [id, lost] of Object.entries(store.reconcile())) {
+    state.spilled[id] = (state.spilled[id] || 0) + lost;
   }
 
   state.energyPool = derived.energy.pool;

@@ -11,6 +11,7 @@ import {
   computeCognition,
   computeCharges,
   activeCount,
+  openStore,
   stopLoop,
   BROWNOUT_SECONDS,
 } from './game/engine.js';
@@ -32,6 +33,7 @@ import {
   STRUCTURES,
   STRUCTURE_ORDER,
   powerPriority,
+  BUILDING_CATEGORY_ORDER,
   maxLevelOf,
 } from './game/definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './game/definitions/castes.js';
@@ -128,6 +130,7 @@ window.hive = {
   structureDefs: STRUCTURES,
   structureOrder: STRUCTURE_ORDER,
   powerPriority: () => powerPriority(),
+  buildingCategoryOrder: BUILDING_CATEGORY_ORDER,
   charges: () => computeCharges(state),
   brownoutSeconds: BROWNOUT_SECONDS,
   maxLevelOf,
@@ -135,6 +138,7 @@ window.hive = {
   setActive,
   adjustActive,
   activeCount: (id) => activeCount(state, id),
+  openStore,
   structuresLive: STRUCTURE_ORDER.length,
   castesLive: CASTE_ORDER.filter((id) => CASTES[id].assignable).length,
 };

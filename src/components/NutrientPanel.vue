@@ -19,11 +19,19 @@ function row(id) {
   const amount = state.nutrients[id] ?? 0;
   const cap = derived.value.caps[id];
   const rate = derived.value.net[id] ?? 0;
+  // What is on this nutrient's own shelf, and what has spilled over into the
+  // shared pool. The pool is invisible until something is using it, which is
+  // why the ceiling appears to grow: it is not room until it is occupied.
+  const pooled = state.general?.[id] ?? 0;
+  const shelf = Math.max(0, amount - pooled);
   return {
     id,
     def,
     amount,
     cap,
+    pooled,
+    shelf,
+    shelfCap: derived.value.storage.dedicated[id] ?? 0,
     rate,
     full: cap > 0 && amount >= cap - 1e-9,
     fill: cap > 0 ? Math.min(100, (amount / cap) * 100) : 0,
@@ -52,6 +60,11 @@ const groups = computed(() => {
 });
 
 const hiddenCount = computed(() => MICROS.filter((id) => !isRevealed(state, id)).length);
+
+// The shared pool, for the panel footer and the per-nutrient tooltips. It stays
+// out of sight until the hive has built some and started using it.
+const generalCapacity = computed(() => derived.value.storage.general);
+const generalUsed = computed(() => derived.value.storage.generalUsed);
 
 /**
  * A click no longer means a known mouthful. The drone picks up whatever is
@@ -167,6 +180,19 @@ const lastGather = computed(() => {
               <span>Energy held</span>
               <span :class="r.energy > 0 ? 'good' : 'muted'">{{ formatEnergy(r.energy) }}</span>
             </span>
+            <span class="tip-row">
+              <span>On its own shelf</span>
+              <span :class="r.shelf >= r.shelfCap - 1e-9 && r.shelfCap > 0 ? 'warn' : ''">
+                {{ formatMass(r.shelf) }} / {{ formatMass(r.shelfCap) }}
+              </span>
+            </span>
+            <span v-if="r.pooled > 0" class="tip-row">
+              <span>Overflowed into general storage</span>
+              <span class="warn">{{ formatMass(r.pooled) }}</span>
+            </span>
+            <span v-else-if="generalCapacity > 0" class="tip-row muted">
+              <span>In general storage</span><span>none</span>
+            </span>
             <span v-if="r.def.fuelRequires && !state.tech[r.def.fuelRequires]" class="tip-row warn">
               <span>Locked</span><span>needs {{ r.def.fuelRequires }}</span>
             </span>
@@ -214,6 +240,21 @@ const lastGather = computed(() => {
             </span>
           </span>
         </div>
+      </div>
+    </div>
+
+    <div v-if="generalCapacity > 0" class="panel-body tight">
+      <div class="res-row">
+        <span class="res-name">General storage</span>
+        <span class="res-amount num">
+          <span :class="{ warn: generalUsed >= generalCapacity - 1e-9 }">
+            {{ formatMass(generalUsed) }}
+          </span>
+          <span class="cap"> / {{ formatMass(generalCapacity) }}</span>
+        </span>
+        <span class="res-bar" :class="{ 'is-full': generalUsed >= generalCapacity - 1e-9 }">
+          <span :style="{ width: `${generalCapacity > 0 ? (generalUsed / generalCapacity) * 100 : 0}%` }" />
+        </span>
       </div>
     </div>
 

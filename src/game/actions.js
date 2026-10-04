@@ -14,7 +14,7 @@ import { STRUCTURES, maxLevelOf, isLeveled } from './definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
-import { structureCost, canAfford, computeDerived, affordableCount } from './engine.js';
+import { structureCost, canAfford, computeDerived, affordableCount, openStore } from './engine.js';
 import { formatMass } from './units.js';
 import { biomeShares } from './definitions/biomes.js';
 import { poolFor } from './definitions/forage.js';
@@ -54,16 +54,13 @@ export function ingestItem(itemId, grams) {
   const item = ITEMS[itemId];
   if (!item || grams <= 0) return 0;
   const derived = computeDerived(state);
+  // Same two-tier store as the tick: dedicated room first, the shared general
+  // pool after it, and whatever fits in neither is lost.
+  const store = openStore(state, derived.storage);
   for (const [nutrient, amount] of Object.entries(itemYield(state, item.per100g, grams))) {
     if (amount <= 0) continue;
-    const cap = derived.caps[nutrient];
-    const next = (state.nutrients[nutrient] || 0) + amount;
-    if (next > cap) {
-      state.spilled[nutrient] = (state.spilled[nutrient] || 0) + (next - cap);
-      state.nutrients[nutrient] = cap;
-    } else {
-      state.nutrients[nutrient] = next;
-    }
+    const lost = store.apply(nutrient, amount);
+    if (lost > 0) state.spilled[nutrient] = (state.spilled[nutrient] || 0) + lost;
   }
   state.stats.ingested += grams;
   return grams;

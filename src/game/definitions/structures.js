@@ -37,6 +37,10 @@
 //                ONE thing however tall it is, so taking a Hivecore from level 1
 //                to level 9 adds no room at all.
 //   itemStorage  the same, in grams per item, for whole matter in the larder.
+//   generalStorage  flat grams of SHARED room, which anything may use. Last in,
+//                first out: matter only reaches it once its own dedicated room
+//                is full, and it is the first thing drawn back out. It is a
+//                buffer for catching overflow, not a bigger cupboard.
 //   cogitCapacity  cogits of cognitive bandwidth supplied per unit
 //   cogitDraw      cogits occupied per unit while it stands
 //   metabolism     grams per second this converts into usable energy
@@ -124,6 +128,31 @@ export const STRUCTURES = {
     // 1 MJ every second. Nothing else in the game is close, and nothing in the
     // game can pay for it without generators.
     upkeepWatts: 1_000_000,
+  },
+
+  vacuole: {
+    id: 'vacuole',
+    name: 'Vacuole',
+    category: 'storage',
+    desc:
+      'A slack membrane sac that holds whatever is pushed into it. It keeps nothing in particular ' +
+      'and everything in general: when a dedicated store overflows, this is what catches it — and ' +
+      'it is the first thing the hive empties again.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(90, 1.35)(n), water: geo(400, 1.35)(n) }),
+    generalStorage: 1_000, // grams, shared across every nutrient
+  },
+
+  proteinGranule: {
+    id: 'proteinGranule',
+    name: 'Protein Granule',
+    category: 'storage',
+    desc:
+      'Dense packed amino acid, laid down in a shell the hive can break open again. Holds nothing ' +
+      'but protein, and holds it far better than anything that holds everything.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(140, 1.4)(n), ash: geo(40, 1.4)(n) }),
+    storage: { protein: 200 },
   },
 
   metabolicGenerator: {
@@ -281,7 +310,7 @@ export const BUILDING_CATEGORY_ORDER = ['core', 'cognition', 'gathering', 'produ
  * Buildable structures. EMPTY during the rebuild — see the header.
  * Everything the engine and the interface iterate comes from here.
  */
-export const STRUCTURE_ORDER = ['hivecore', 'metabolicGenerator'];
+export const STRUCTURE_ORDER = ['hivecore', 'metabolicGenerator', 'proteinGranule', 'vacuole'];
 
 /**
  * The order energy is handed out in when there is not enough of it.

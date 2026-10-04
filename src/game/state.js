@@ -14,7 +14,7 @@ import { STRUCTURE_ORDER, DEPRECATED_STRUCTURE_ORDER } from './definitions/struc
 import { CASTE_ORDER, DEPRECATED_CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH_ORDER } from './definitions/research.js';
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -47,8 +47,14 @@ export function createInitialState() {
     savedAt: null,
     playtime: 0,
 
-    nutrients,
+    nutrients, // TOTAL grams held, shelf and pool together
     spilled, // lifetime mass lost to full stores, per nutrient
+
+    // How much of each nutrient's total is sitting in the shared general store
+    // rather than on its own dedicated shelf. Sparse: no entry means none of
+    // it. See engine.js openStore — the pool is last in, first out, so this is
+    // usually empty and fills only when a shelf overflows.
+    general: {},
 
     // Harvested matter, still whole. Castes deliver here and digestion draws
     // from here; a hive that cannot digest fast enough visibly backs up.

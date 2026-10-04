@@ -29,18 +29,16 @@ function effectLines(def) {
   if (def.cogitCapacity) lines.push(`+${formatCogits(def.cogitCapacity)} cognition`);
   if (def.cogitDraw) lines.push(`${formatCogits(def.cogitDraw)} cognition occupied`);
   if (def.metabolism) lines.push(`metabolises ${formatMassFlow(def.metabolism)} into energy`);
-  // Flat and granted once per thing standing, so a levelled building says so
-  // rather than letting the player read it as per-level like everything else.
-  if (def.storage) {
-    const headline = ['protein', 'fat', 'carb', 'water']
-      .filter((n) => def.storage[n])
-      .map((n) => `${formatMass(def.storage[n])} ${NUTRIENTS[n].name.toLowerCase()}`)
-      .join(', ');
-    lines.push(
-      def.leveled
-        ? `storage for ${headline} and the rest — the first level only`
-        : `storage for ${headline} and the rest`,
-    );
+  // Only a building in the Storage band says what it holds. Everywhere else
+  // room is a quiet side effect of having grown something — the Hivecore
+  // bringing a body with it is not what the player is choosing to build it for.
+  if (def.category === 'storage') {
+    if (def.generalStorage) {
+      lines.push(`+${formatMass(def.generalStorage)} general storage`);
+    }
+    for (const [n, grams] of Object.entries(def.storage || {})) {
+      lines.push(`+${formatMass(grams)} ${NUTRIENTS[n]?.name.toLowerCase() ?? n} storage`);
+    }
   }
   for (const [caste, value] of Object.entries(def.slots || {})) {
     lines.push(`+${value} ${CASTES[caste]?.name ?? caste} slot`);

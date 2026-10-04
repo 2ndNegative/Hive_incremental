@@ -327,6 +327,14 @@ function migrate(raw) {
     raw.larvae ??= 0;
   }
 
+  // Before v9 there was only ever one kind of room, so nothing was pooled.
+  // Anything a loaded save is holding is on its shelf; if the shelf has since
+  // shrunk under it, the first tick pools or spills the difference in the
+  // normal way.
+  if ((raw.version ?? 0) < 9) {
+    raw.general ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }
