@@ -23,8 +23,9 @@ import { FORAGE, poolFor } from './game/definitions/forage.js';
 import * as forage from './game/forage.js';
 import * as discovery from './game/discovery.js';
 import {
-  research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary,
+  research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary, MANUAL_INTAKE,
   reserveCogits, releaseCogits, releaseAllCogits, buildStructure,
+  setGlobalFuel, setFuelOverride, clearFuelOverride,
 } from './game/actions.js';
 import {
   STRUCTURES,
@@ -87,6 +88,10 @@ window.hive = {
   consumeBiomass,
   manualOdds,
   manualOddsSummary,
+  manualIntake: MANUAL_INTAKE,
+  setGlobalFuel,
+  setFuelOverride,
+  clearFuelOverride,
   canAfford,
   itemYield,
   parentsOf,

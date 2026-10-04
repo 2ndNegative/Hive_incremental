@@ -21,20 +21,40 @@ const fuels = computed(() =>
 
 const usableFuels = computed(() => fuels.value.filter((f) => f.usable));
 
+/**
+ * The generators, which are the only things in the hive that choose a fuel.
+ *
+ * Everything else draws watts out of the pool and has no opinion about what was
+ * burned to fill it, so nothing else gets a dropdown. Before the metabolism
+ * rewrite every consumer had one and every one of them was a lie.
+ */
+const generators = computed(() => derived.value.generators.filter((g) => g.count > 0));
+
+/** The queue: who is being paid, in the order they are paid. Read-only. */
 const consumers = computed(() =>
   derived.value.demands.map((d) => {
-    const choice = fuelChoiceFor(state, d.key);
     const detail = derived.value.perConsumer[d.key] ?? {};
+    const power = d.key.startsWith('structure:')
+      ? derived.value.power[d.key.slice('structure:'.length)]
+      : null;
     return {
       key: d.key,
       label: d.label,
       watts: d.watts,
-      ...choice,
       ratio: detail.ratio ?? 1,
-      from: detail.from ?? {},
+      delivered: detail.delivered ?? 0,
+      charge: power?.charge ?? null,
+      direction: power?.direction ?? null,
     };
   }),
 );
+
+function drawLine(drew) {
+  const parts = Object.entries(drew).map(
+    ([n, g]) => `${formatMassFlow(-g)} ${NUTRIENTS[n].name.toLowerCase()}`,
+  );
+  return parts.length ? parts.join(', ') : null;
+}
 
 function setPreferred(key, value) {
   if (key === 'global') setGlobalFuel(value, state.energy.fallback);
@@ -109,9 +129,9 @@ function formatReserve(seconds) {
       <div class="panel-head"><span>Fuels</span></div>
       <div class="panel-body">
         <p class="muted" style="font-size: 0.78rem; margin-bottom: 0.5rem">
-          Energy is not a separate store — it is what the hive's mass is worth. Burning a gram of
-          fat costs 37 kJ of reserve; burning a gram of sodium costs nothing, because sodium holds
-          nothing. That is why only these appear here.
+          What a generator can get out of a gram. Fat gives up 37 kJ; sodium gives up nothing at
+          all, which is why only these appear here. Until a generator opens one of these stores,
+          every joule in them is locked in the matter and the hive cannot spend a watt of it.
         </p>
         <table class="table is-fullwidth is-narrow data-table">
           <thead>
@@ -147,17 +167,17 @@ function formatReserve(seconds) {
       </div>
     </div>
 
-    <div class="panel-box">
+    <div class="panel-box" style="margin-bottom: 0.9rem">
       <div class="panel-head">
-        <span>Energy sources</span>
-        <span class="muted">in the order they are paid</span>
+        <span>Generators</span>
+        <span class="muted">what gets burned</span>
       </div>
       <div class="panel-body" style="padding-bottom: 0">
         <p class="muted" style="font-size: 0.78rem; margin: 0">
-          This list is the queue. The drones are kept alive first, then the buildings band by band
-          down the Hive tab — Core, Cognition, Gathering, Production, Digestion, Storage — and
-          left to right inside each band. When there is not enough to go round, whatever the
-          supply runs out on starts to go dark, and everything below it with it.
+          Only a generator opens a store. Everything else in the hive draws watts out of the pool
+          and never knows what was burned to fill it, so this is the whole of the hive's say in
+          the matter: which mass each generator reaches for first, and what it falls back to when
+          that runs out.
         </p>
       </div>
       <div class="panel-body">
@@ -175,33 +195,90 @@ function formatReserve(seconds) {
           <span class="muted" style="width: 5.5rem; text-align: right">—</span>
         </div>
 
-        <div v-for="c in consumers" :key="c.key" class="fuel-row">
+        <div v-for="g in generators" :key="g.key" class="fuel-row">
           <span class="field-label">
-            {{ c.label }}
+            {{ g.name }} <template v-if="g.count > 1">×{{ g.count }}</template>
             <span class="field-help">
-              {{ formatPower(c.watts) }}
-              <template v-if="c.ratio < 0.999"> · <span class="bad">{{ Math.floor(c.ratio * 100) }}% met</span></template>
-              <template v-else-if="Object.keys(c.from).length">
-                · drawing
-                {{ Object.entries(c.from).map(([n, g]) => `${formatMassFlow(-g)} ${NUTRIENTS[n].name.toLowerCase()}`).join(', ') }}
+              {{ formatMass(g.capacity) }}/s capacity
+              <template v-if="g.charge < 0.999">
+                · <span class="warn">{{ Math.round(g.charge * 100) }}% powered</span>
+              </template>
+              <template v-if="g.dry">
+                · <span class="bad">nothing it can open is in store</span>
+              </template>
+              <template v-else-if="drawLine(g.drew)">
+                · drawing {{ drawLine(g.drew) }} for {{ formatPower(g.watts) }}
               </template>
             </span>
           </span>
-          <select class="fuel-select" :value="c.preferred" @change="setPreferred(c.key, $event.target.value)">
+          <select class="fuel-select" :value="g.preferred" @change="setPreferred(g.key, $event.target.value)">
             <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
           </select>
-          <select class="fuel-select" :value="c.fallback" @change="setFallback(c.key, $event.target.value)">
+          <select class="fuel-select" :value="g.fallback" @change="setFallback(g.key, $event.target.value)">
             <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
           </select>
           <button
             class="btn"
             style="width: 5.5rem"
-            :disabled="!c.overridden"
-            @click="clearFuelOverride(c.key)"
+            :disabled="!g.overridden"
+            @click="clearFuelOverride(g.key)"
           >
-            {{ c.overridden ? 'Reset' : 'default' }}
+            {{ g.overridden ? 'Reset' : 'default' }}
           </button>
         </div>
+
+        <p v-if="!generators.length" class="muted" style="font-size: 0.78rem; margin: 0.4rem 0 0">
+          No generators standing. Nothing is converting mass into energy, so the pool can only
+          empty — grow a Metabolic Generator in the Digestion band.
+        </p>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------------ the queue -->
+    <div class="panel-box">
+      <div class="panel-head">
+        <span>Where it goes</span>
+        <span class="muted">in the order they are paid</span>
+      </div>
+      <div class="panel-body" style="padding-bottom: 0">
+        <p class="muted" style="font-size: 0.78rem; margin: 0">
+          The drones are kept alive first, then the buildings band by band down the Hive tab —
+          Core, Cognition, Gathering, Production, Digestion, Storage — and left to right inside
+          each band. When there is not enough to go round, a building settles at the share it is
+          actually being paid, and everything below it gets nothing.
+        </p>
+      </div>
+      <div class="panel-body">
+        <table class="table is-fullwidth is-narrow data-table">
+          <thead>
+            <tr>
+              <th>Consumer</th>
+              <th class="right">Wants</th>
+              <th class="right">Gets</th>
+              <th class="right">Running at</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in consumers" :key="c.key">
+              <td>{{ c.label }}</td>
+              <td class="right num">{{ formatPower(c.watts) }}</td>
+              <td class="right num" :class="c.ratio < 0.999 ? 'bad' : 'muted'">
+                {{ formatPower(c.delivered) }}
+              </td>
+              <td class="right num">
+                <template v-if="c.charge === null">—</template>
+                <template v-else>
+                  <span :class="c.charge < 0.999 ? (c.direction === 'failing' ? 'bad' : 'warn') : 'good'">
+                    {{ Math.round(c.charge * 100) }}%
+                  </span>
+                </template>
+              </td>
+            </tr>
+            <tr v-if="!consumers.length">
+              <td colspan="4" class="muted">Nothing is asking for energy.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>

@@ -91,11 +91,14 @@ const lastGather = computed(() => {
       <span class="tip tip-side" style="display: block">
         <button class="gather-btn" @click="consumeBiomass()">Consume biomass</button>
         <span class="tip-body">
-          <span class="tip-title">{{ formatMass(MANUAL_INTAKE.grams) }} of whatever is to hand</span>
+          <span class="tip-title">
+            {{ formatMass(MANUAL_INTAKE.min) }}–{{ formatMass(MANUAL_INTAKE.max) }} of whatever is
+            to hand
+          </span>
           <span class="muted" style="display: block; margin-bottom: 0.3rem">
             A drone picks up what it can reach on the hive's
             {{ area.toFixed(0) }} m² and eats it where it stands. What it finds depends on the
-            ground.
+            ground; how much of it is whatever came away in one bite.
           </span>
           <span v-for="o in odds" :key="o.itemId" class="tip-row">
             <span :class="{ 'offer-unknown': !o.named }">{{ o.label }}</span>

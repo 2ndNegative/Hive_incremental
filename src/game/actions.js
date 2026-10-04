@@ -29,6 +29,22 @@ import {
 
 const MANUAL_GRAMS = 40;
 
+/** How far either side of that a single mouthful can land. */
+const MANUAL_SPREAD = 0.3;
+
+/**
+ * What one drone actually comes back with.
+ *
+ * Two draws averaged rather than one, so the distribution is a triangle peaked
+ * on MANUAL_GRAMS instead of a flat band: a mouthful is usually about a
+ * mouthful, and only occasionally a very good or a very poor one. Flat
+ * randomness reads as noise; this reads as variation.
+ */
+function manualGrams() {
+  const roll = (Math.random() + Math.random()) / 2; // 0..1, centred
+  return MANUAL_GRAMS * (1 + (roll * 2 - 1) * MANUAL_SPREAD);
+}
+
 /**
  * Add an item's mass to the nutrient stores. This is the only path matter takes
  * into the hive, whether from a click, a caste or offline catch-up.
@@ -81,12 +97,18 @@ export function consumeBiomass() {
     return 0;
   }
 
-  state.lastGather = { itemId: found.itemId, biomeId: biome.id, grams: MANUAL_GRAMS };
+  const grams = manualGrams();
+  state.lastGather = { itemId: found.itemId, biomeId: biome.id, grams };
   recordFind(state, biome.id, found.itemId);
-  return ingestItem(found.itemId, MANUAL_GRAMS);
+  return ingestItem(found.itemId, grams);
 }
 
-export const MANUAL_INTAKE = { grams: MANUAL_GRAMS };
+export const MANUAL_INTAKE = {
+  grams: MANUAL_GRAMS,
+  spread: MANUAL_SPREAD,
+  min: MANUAL_GRAMS * (1 - MANUAL_SPREAD),
+  max: MANUAL_GRAMS * (1 + MANUAL_SPREAD),
+};
 
 /**
  * What a click could turn up, likeliest first — the whole distribution rather

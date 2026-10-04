@@ -93,23 +93,38 @@ const bands = computed(() =>
       // Bands are the power queue, so each one knows its own place in it — and
       // says so when something inside it is in trouble, even folded shut.
       rank: index + 1,
-      failing: mine.filter((c) => c.power.direction === 'failing').length,
+      short: mine.filter((c) => c.owned > 0 && !c.power.satisfied).length,
       ailing: mine.filter((c) => c.ailing).length,
       open: !state.ui.buildBands?.[id],
     };
   }),
 );
 
-/** How a building's power state reads on its card. */
+/**
+ * How a building's power state reads on its card.
+ *
+ * A building no longer simply dies when it is short — it settles at the share
+ * of its upkeep it is actually getting — so the line has to say both where it
+ * is now and where it is heading.
+ */
 function powerLine(card) {
   const pct = Math.round(card.power.charge * 100);
+  const target = Math.round(card.power.target * 100);
   const secs = Math.max(1, Math.ceil(card.power.secondsLeft));
-  if (card.power.direction === 'failing') {
-    return pct > 0
-      ? `Losing power — ${pct}% output, dark in ${secs}s`
-      : 'Dark. No output at all until the power comes back.';
+
+  if (card.power.direction === 'holding') {
+    return target > 0
+      ? `Browned out — holding at ${pct}% output on ${pct}% of its upkeep`
+      : 'Dark. Nothing is reaching it at all.';
   }
-  return `Coming back — ${pct}% output, full in ${secs}s`;
+  if (card.power.direction === 'failing') {
+    return target > 0
+      ? `Losing power — ${pct}% output, settling at ${target}% in ${secs}s`
+      : `Losing power — ${pct}% output, dark in ${secs}s`;
+  }
+  return target >= 100
+    ? `Coming back — ${pct}% output, full in ${secs}s`
+    : `Coming back — ${pct}% output, levelling at ${target}% in ${secs}s`;
 }
 
 function toggleBand(id) {
@@ -125,9 +140,11 @@ const nothingBuildable = computed(() => cards.value.length === 0);
 const starving = computed(() => derived.value.energy.ratio < 0.999);
 const throttled = computed(() => derived.value.energy.throughputRatio < 0.999);
 
-/** The buildings actually losing their supply right now, worst-placed first. */
+/** The buildings not getting their full upkeep, best-placed first. */
 const failing = computed(() =>
-  cards.value.filter((c) => c.power.direction === 'failing').sort((a, b) => a.power.priority - b.power.priority),
+  cards.value
+    .filter((c) => c.owned > 0 && !c.power.satisfied)
+    .sort((a, b) => a.power.priority - b.power.priority),
 );
 
 const overCapacity = computed(() =>
@@ -155,8 +172,10 @@ const overCapacity = computed(() =>
         What there is goes to the drones first, then band by band down this page. Of what is left,
         <template v-if="failing.length">
           <strong class="bad">{{ failing.map((c) => c.def.name).join(', ') }}</strong>
-          {{ failing.length === 1 ? 'is' : 'are' }} not getting enough and will be dark in
-          {{ Math.max(1, Math.ceil(Math.min(...failing.map((c) => c.power.secondsLeft)))) }}s.
+          {{ failing.length === 1 ? 'is' : 'are' }} short, and will settle at
+          {{ failing.map((c) => `${Math.round(c.power.target * 100)}%`).join(' / ') }} of
+          {{ failing.length === 1 ? 'its' : 'their' }} output. A building runs at whatever share
+          of its upkeep it is paid — it only goes dark when nothing reaches it.
         </template>
         <template v-else>every building is still being paid for.</template>
       </div>
@@ -202,8 +221,8 @@ const overCapacity = computed(() =>
             <span class="band-arrow" aria-hidden="true">{{ band.open ? '▾' : '▸' }}</span>
             <span class="band-name">{{ band.def.name }}</span>
             <span class="band-desc">
-              <span v-if="band.failing" class="bad">
-                {{ band.failing }} losing power
+              <span v-if="band.short" class="bad">
+                {{ band.short }} short of power
               </span>
               <span v-else-if="band.ailing" class="warn">
                 {{ band.ailing }} coming back up

@@ -433,36 +433,73 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   //
   // The generator takes mass at a fixed rate and converts it at that mass's own
   // energy density, through the metabolic efficiency the tech tree has bought.
-  // Which mass it takes is the preferred/fallback choice, which is now a
-  // property of the generator rather than of every consumer separately.
+  //
+  // CHOOSING A FUEL IS A GENERATOR'S JOB AND NOBODY ELSE'S. Every other consumer
+  // draws watts out of the pool and has no opinion about where they came from, so
+  // the preferred/fallback pair is keyed per generating structure — `structure:<id>`,
+  // falling back to the hive default. The Metabolism tab shows exactly these.
   //
   // Generators brown out like everything else — but they have no upkeep, so
   // nothing can starve them, which is what stops the hive from being able to
   // dig itself into a hole it cannot climb out of.
-  let massRate = 0; // grams per second the generators can process
-  for (const id of STRUCTURE_ORDER) {
-    const units = working(state, charges, id);
-    const per = STRUCTURES[id].metabolism;
-    if (units && per) massRate += per * units;
-  }
-
   const burn = {}; // nutrient -> grams per second actually consumed
+  const generators = [];
+  let massRate = 0; // grams per second the generators can process
   let generatedWatts = 0;
   {
-    const { preferred, fallback } = fuelChoiceFor(state, 'generator');
-    const order = [preferred, fallback].filter(
-      (n, i, arr) => n && arr.indexOf(n) === i && isUsableFuel(state, n),
-    );
-    let gramsLeft = massRate * dt;
-    for (const nutrient of order) {
-      if (gramsLeft <= EPSILON) break;
-      const perGram = joulesPerGram(nutrient) * efficiency[nutrient];
-      if (perGram <= EPSILON) continue; // a zero-energy store is not fuel
-      const taken = Math.min(gramsLeft, state.nutrients[nutrient] || 0);
-      if (taken <= EPSILON) continue;
-      burn[nutrient] = (burn[nutrient] || 0) + taken / dt;
-      generatedWatts += (taken * perGram) / dt;
-      gramsLeft -= taken;
+    // Grams still unclaimed this step. Two generator types pointed at the same
+    // store must not each spend all of it.
+    const left = {};
+    const unclaimed = (n) => (left[n] ??= state.nutrients[n] || 0);
+
+    for (const id of STRUCTURE_ORDER) {
+      const per = STRUCTURES[id].metabolism;
+      if (!per) continue;
+      const count = state.structures?.[id] || 0;
+      const units = working(state, charges, id);
+      const rate = per * units;
+      massRate += rate;
+
+      const key = `structure:${id}`;
+      const { preferred, fallback, overridden } = fuelChoiceFor(state, key);
+      const order = [preferred, fallback].filter(
+        (n, i, arr) => n && arr.indexOf(n) === i && isUsableFuel(state, n),
+      );
+
+      const drew = {}; // nutrient -> grams per second this generator took
+      let watts = 0;
+      let gramsLeft = rate * dt;
+      for (const nutrient of order) {
+        if (gramsLeft <= EPSILON) break;
+        const perGram = joulesPerGram(nutrient) * efficiency[nutrient];
+        if (perGram <= EPSILON) continue; // a zero-energy store is not fuel
+        const taken = Math.min(gramsLeft, unclaimed(nutrient));
+        if (taken <= EPSILON) continue;
+        left[nutrient] -= taken;
+        drew[nutrient] = (drew[nutrient] || 0) + taken / dt;
+        burn[nutrient] = (burn[nutrient] || 0) + taken / dt;
+        watts += (taken * perGram) / dt;
+        gramsLeft -= taken;
+      }
+      generatedWatts += watts;
+
+      generators.push({
+        id,
+        key,
+        name: STRUCTURES[id].name,
+        count,
+        charge: charges[id] ?? 1,
+        // What it could process, and what it managed to find to process.
+        capacity: rate,
+        rate: rate - gramsLeft / Math.max(dt, EPSILON),
+        watts,
+        preferred,
+        fallback,
+        overridden,
+        drew,
+        // Pointed at stores that are empty, or at nothing it can open.
+        dry: rate > EPSILON && watts <= EPSILON,
+      });
     }
   }
 
@@ -498,26 +535,38 @@ export function computeDerived(state, dt = TICK_SECONDS) {
 
   /* -- 4b. brownout ---------------------------------------------------------- */
 
-  // Who got what they asked for, and therefore which way their charge is about
-  // to move. tick() is what moves it; this only reports the direction, so the
-  // interface can say "fading" or "coming back" rather than just showing a
-  // number that happens to be going down.
+  // A BUILDING SETTLES AT THE SHARE OF ITS UPKEEP IT IS ACTUALLY GETTING.
+  //
+  // Not at zero. Three hundred and forty kilowatts into a megawatt of Hivecore
+  // is a Hivecore running at 34%, held there for as long as that is what it is
+  // being paid — the same way a motor on two thirds of its voltage turns slowly
+  // rather than stopping. Charge walks towards that target at a constant rate,
+  // so a shortfall is still felt over seconds rather than instantly, and the
+  // thirty seconds is now the time for the FULL swing: halving the supply takes
+  // fifteen.
+  //
+  // Asking for nothing settles at full. That is the generators' exemption, and
+  // it is the reason the lights can ever come back on at all.
+  //
+  // tick() is what moves the charge; this only works out where it is heading,
+  // so the interface can say "settling at 34%" rather than showing a number
+  // that happens to be going down.
   const power = {};
   let starved = 0;
   let faded = 0;
   for (const id of STRUCTURE_ORDER) {
     const count = state.structures?.[id] || 0;
     const fed = perConsumer[`structure:${id}`];
-    // Asking for nothing cannot fail. That is the generators' exemption, and
-    // it is the reason the lights can ever come back on.
-    const satisfied = !fed || fed.ratio >= 1 - 1e-9;
+    const target = fed ? clamp01(fed.ratio) : 1;
     const charge = charges[id] ?? 1;
+    const satisfied = target >= 1 - 1e-9;
     if (count > 0 && !satisfied) starved += 1;
     if (count > 0 && charge < 1 - 1e-9) faded += 1;
     power[id] = {
       id,
       count,
       charge,
+      target,
       satisfied,
       // 1-based place in the queue, so the interface can explain the ordering
       // without knowing the rule.
@@ -525,8 +574,19 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       watts: fed?.watts ?? 0,
       delivered: fed?.delivered ?? 0,
       // Where its charge is heading, and how long it has left to get there.
-      direction: satisfied ? (charge >= 1 - 1e-9 ? 'steady' : 'recovering') : 'failing',
-      secondsLeft: satisfied ? (1 - charge) * BROWNOUT_SECONDS : charge * BROWNOUT_SECONDS,
+      //   steady     running, fully paid
+      //   holding    settled below full and staying there — the new resting state
+      //   failing    on its way down to a lower target
+      //   recovering on its way up to a higher one
+      direction:
+        charge > target + 1e-9
+          ? 'failing'
+          : charge < target - 1e-9
+            ? 'recovering'
+            : satisfied
+              ? 'steady'
+              : 'holding',
+      secondsLeft: Math.abs(charge - target) * BROWNOUT_SECONDS,
     };
   }
 
@@ -714,6 +774,9 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     perConsumer,
     charges,
     power,
+    // Every structure that turns mass into energy, with the fuel pair it is
+    // pointed at. The only things in the hive that choose a fuel at all.
+    generators,
     powerPriority: priority,
     // How many standing buildings are losing their supply, and how many are
     // already running at less than full output for any reason.
@@ -861,11 +924,11 @@ export function tick(state, dt) {
 
   state.energyPool = derived.energy.pool;
 
-  // Brownout. A building that could not get its watts slides towards dark at a
-  // constant rate, and a building that got them climbs back the same way, so
-  // thirty seconds without power costs everything and thirty seconds with it
-  // gives everything back. Linear in both directions on purpose: the player can
-  // count the seconds and know exactly where they stand.
+  // Brownout. Every standing building walks towards the share of its upkeep it
+  // is actually being paid, at a constant rate — a full swing takes
+  // BROWNOUT_SECONDS either way, so a building cut off entirely is dark in
+  // thirty seconds and one cut to a third settles there in twenty. Linear on
+  // purpose: the player can count the seconds and know where they stand.
   state.power ??= {};
   const chargeStep = dt / BROWNOUT_SECONDS;
   for (const id of STRUCTURE_ORDER) {
@@ -876,11 +939,12 @@ export function tick(state, dt) {
       delete state.power[id];
       continue;
     }
-    // Snapped to the rails. Thirty seconds of hundred-millisecond steps leaves
-    // a few parts in 10^16 of rounding behind, and "dark" that is actually
-    // 4.7e-16 of a Hivecore is a thing that shows up later as a bug somewhere
-    // else entirely.
-    let next = clamp01(p.charge + (p.satisfied ? chargeStep : -chargeStep));
+    const gap = p.target - p.charge;
+    // Landing exactly on the target once it is within a step stops the charge
+    // oscillating around it, and keeps thirty seconds of hundred-millisecond
+    // arithmetic from leaving a few parts in 10^16 of rounding behind.
+    let next = Math.abs(gap) <= chargeStep ? p.target : p.charge + Math.sign(gap) * chargeStep;
+    next = clamp01(next);
     if (next < 1e-9) next = 0;
     else if (next > 1 - 1e-9) next = 1;
     state.power[id] = next;
