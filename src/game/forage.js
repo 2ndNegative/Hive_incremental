@@ -23,6 +23,7 @@ import { BIOMES, biomeShares } from './definitions/biomes.js';
 import { poolFor } from './definitions/forage.js';
 import { preyFor, ORGANISMS } from './definitions/organisms.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
+import { DRONE_TYPES, foragingTypes, droneForageKey } from './definitions/drones.js';
 import { recordFind, preyKey } from './discovery.js';
 import { ITEMS } from './definitions/items/index.js';
 
@@ -93,6 +94,58 @@ export function rollForage(state, casteId, random = Math.random) {
 }
 
 /**
+ * How heavy this trip turned out to be, in grams, for one drone of this type.
+ *
+ * FLAT between the two bounds. The manual gather is weighted towards its middle
+ * because a player feels every single press and a long tail reads as the button
+ * being broken; nobody watches an individual forager, so the simple answer is
+ * the right one here.
+ */
+export function rollLoad(def, random = Math.random) {
+  const load = def?.load;
+  if (!load) return 0;
+  const { min = 0, max = min } = load;
+  return min + random() * (max - min);
+}
+
+/**
+ * Roll one trip for a drone type. Mutates `state.forage[droneForageKey(id)]`.
+ *
+ * TWO ROLLS, NOT ONE: where it went and what it found, exactly as a caste did,
+ * and then how much of it came back. The weight is per TRIP and not per drone —
+ * every forager of a type is working the same patch at the same time, so they
+ * all have the same walk and the same luck with it.
+ */
+export function rollDroneForage(state, typeId, random = Math.random) {
+  const def = DRONE_TYPES[typeId];
+  state.forage ??= {};
+  const key = droneForageKey(typeId);
+  const slot = (state.forage[key] ||= { elapsed: 0 });
+  slot.itemId = null;
+  slot.organismId = null;
+  slot.biomeId = null;
+  slot.grams = 0;
+
+  if (!def?.gather) return slot;
+
+  const shares = biomeShares(state);
+  const biome = pickWeighted(
+    Object.entries(shares).map(([id, share]) => ({ id, weight: share })),
+    random,
+  );
+  if (!biome) return slot; // no territory at all
+  slot.biomeId = biome.id;
+
+  const found = pickWeighted(poolFor(def.gather, biome.id), random);
+  if (found) {
+    slot.itemId = found.itemId;
+    slot.grams = rollLoad(def, random);
+    recordFind(state, biome.id, found.itemId);
+  }
+  return slot;
+}
+
+/**
  * Advance every caste's forage cycle. At most one roll per caste per tick:
  * during offline catch-up a single tick can span an hour, and queueing up three
  * hundred rolls to throw away two hundred and ninety-nine of them would be a
@@ -109,6 +162,22 @@ export function advanceForage(state, dt) {
     if (slot.elapsed >= FORAGE_CYCLE || nothingYet) {
       slot.elapsed = FORAGE_CYCLE > 0 ? slot.elapsed % FORAGE_CYCLE : 0;
       rollForage(state, casteId);
+    }
+  }
+
+  // And the same again for the drone types, which is where foraging actually
+  // lives now. A type the hive holds NONE of does not roll: a roll teaches the
+  // hive about its own ground (see recordFind), and a hive with no foragers has
+  // not learned anything by having none.
+  for (const typeId of foragingTypes()) {
+    if ((state.droneTypes?.[typeId] || 0) < 1) continue;
+    const key = droneForageKey(typeId);
+    const slot = (state.forage[key] ||= { elapsed: FORAGE_CYCLE });
+    slot.elapsed = (slot.elapsed || 0) + dt;
+    const nothingYet = !slot.itemId;
+    if (slot.elapsed >= FORAGE_CYCLE || nothingYet) {
+      slot.elapsed = FORAGE_CYCLE > 0 ? slot.elapsed % FORAGE_CYCLE : 0;
+      rollDroneForage(state, typeId);
     }
   }
 }

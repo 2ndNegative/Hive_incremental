@@ -72,8 +72,14 @@ import { ITEMS } from './definitions/items/index.js';
 import { ORGANISMS } from './definitions/organisms.js';
 import { BIOMES } from './definitions/biomes.js';
 import { BASE_COGIT_CAPACITY, COGIT_PER_DRONE } from './definitions/cognition.js';
-import { DRONE_TYPES, nextMoldable } from './definitions/drones.js';
-import { advanceForage } from './forage.js';
+import {
+  DRONE_TYPES,
+  DRONE_TYPE_ORDER,
+  nextMoldable,
+  foragingTypes,
+  droneForageKey,
+} from './definitions/drones.js';
+import { advanceForage, FORAGE_CYCLE } from './forage.js';
 
 export const TICK_MS = 100;
 export const TICK_SECONDS = TICK_MS / 1000;
@@ -283,6 +289,20 @@ export function computeCognition(state, charges = computeCharges(state)) {
     const amount = drones * COGIT_PER_DRONE;
     used += amount;
     load.push({ key: 'drones', label: `Drones ×${drones}`, amount });
+  }
+
+  // Every drone the hive has MOLDED, by type. A cost, so like a structure's
+  // draw it does not shrink with anything: a drone standing idle in the dark is
+  // still a drone the hive is holding together. This is the ceiling the drone
+  // economy runs into — a Forager is one cogit, so a bare hive can hold a
+  // handful of them and no more until it widens.
+  for (const id of DRONE_TYPE_ORDER) {
+    const count = state.droneTypes?.[id] || 0;
+    const per = DRONE_TYPES[id]?.cogitDraw || 0;
+    if (!count || !per) continue;
+    const amount = per * count;
+    used += amount;
+    load.push({ key: `drone:${id}`, label: `${DRONE_TYPES[id].name} ×${count}`, amount });
   }
 
   // Castes that cost more than the baseline to run.
@@ -923,6 +943,49 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     }
 
     if (def.insight) insightRate += def.insight * assigned * scale;
+  }
+
+  // And the drones, which is where foraging lives now.
+  //
+  // A trip, not a tap: the slot holds what this trip found and what it weighs,
+  // and the rate is that weight spread over the cycle it takes to walk it home.
+  // So the figure on screen is an average of something lumpy rather than a
+  // pressure — and it moves every twelve seconds, because the next patch was
+  // not as good as this one.
+  //
+  // Not scaled by charge or by energy: a drone type declares no upkeep yet, so
+  // there is nothing for a brownout to take away from it. When one does, this
+  // is where that multiplier goes.
+  for (const typeId of foragingTypes()) {
+    const count = state.droneTypes?.[typeId] || 0;
+    if (!count) continue;
+    const def = DRONE_TYPES[typeId];
+    const slot = state.forage?.[droneForageKey(typeId)];
+    const biome = slot?.biomeId ? BIOMES[slot.biomeId] : null;
+    const where = biome ? ` in ${biome.name.toLowerCase()}` : '';
+    const perSecond = ((slot?.grams || 0) * count) / FORAGE_CYCLE;
+
+    forage[droneForageKey(typeId)] = {
+      droneId: typeId,
+      gather: def.gather,
+      biomeId: slot?.biomeId ?? null,
+      itemId: slot?.itemId ?? null,
+      organismId: null,
+      grams: slot?.grams || 0,
+      count,
+      rate: perSecond,
+      empty: !slot?.itemId,
+    };
+
+    if (slot?.itemId && perSecond > EPSILON) {
+      itemFlow[slot.itemId] = (itemFlow[slot.itemId] || 0) + perSecond;
+      (itemSources[slot.itemId] ||= []).push({
+        label: `${def.name} ×${count}${where}`,
+        amount: perSecond,
+        droneId: typeId,
+        biomeId: slot.biomeId,
+      });
+    }
   }
 
   /* -- 6. digestion --------------------------------------------------------- */

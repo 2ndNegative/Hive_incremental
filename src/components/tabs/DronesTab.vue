@@ -21,8 +21,11 @@ import {
   moldStatus,
   typesInCaste,
   unfiledTypes,
+  droneForageKey,
 } from '../../game/definitions/drones.js';
+import { GATHER_TYPES } from '../../game/definitions/forage.js';
 import { toggleMolding, setMoldTarget } from '../../game/actions.js';
+import { formatCogits, formatMass, formatMassFlow } from '../../game/units.js';
 
 /** What each status reads as on the row, and what colour it is. */
 const STATUS = {
@@ -41,14 +44,34 @@ const bands = computed(() =>
       .map((tid) => {
         const want = state.droneMolding?.[tid] ?? { on: false, target: null };
         const status = moldStatus(state, tid);
+        const def = DRONE_TYPES[tid];
+        const count = state.droneTypes?.[tid] || 0;
+        const flow = derived.value.forage?.[droneForageKey(tid)];
+
+        // What one of them costs and what one of them is for, in the type's own
+        // terms rather than the hive's totals. Declared-but-unread fields stay
+        // off this line: it should only ever say things that are true.
+        const terms = [];
+        if (def.cogitDraw) terms.push(`${formatCogits(def.cogitDraw)} cognition each`);
+        if (def.load) {
+          terms.push(`carries ${def.load.min}–${formatMass(def.load.max)} home a trip`);
+        }
+        if (def.gather && GATHER_TYPES[def.gather]) {
+          terms.push(`works ${GATHER_TYPES[def.gather].desc.split(':')[0].toLowerCase()}`);
+        }
+
         return {
           id: tid,
-          def: DRONE_TYPES[tid],
-          count: state.droneTypes?.[tid] || 0,
+          def,
+          count,
           on: want.on,
           target: want.target,
           status,
           label: STATUS[status] ?? { text: status, tone: 'muted' },
+          terms,
+          cogits: (def.cogitDraw || 0) * count,
+          rate: flow?.rate || 0,
+          find: flow?.itemId ? flow : null,
         };
       });
     return {
@@ -56,6 +79,8 @@ const bands = computed(() =>
       def,
       types,
       held: types.reduce((sum, t) => sum + t.count, 0),
+      cogits: types.reduce((sum, t) => sum + t.cogits, 0),
+      rate: types.reduce((sum, t) => sum + t.rate, 0),
       open: !state.ui.droneBands?.[id],
     };
   }),
@@ -68,6 +93,9 @@ function toggleBand(id) {
 
 const unfiled = computed(() => unfiledTypes());
 const total = computed(() => bands.value.reduce((sum, b) => sum + b.held, 0));
+const cogits = computed(() => bands.value.reduce((sum, b) => sum + b.cogits, 0));
+const hauling = computed(() => bands.value.reduce((sum, b) => sum + b.rate, 0));
+const cognition = computed(() => derived.value.cognition);
 
 /** The molding chambers, so the tab can say why nothing is happening. */
 const chambers = computed(() => derived.value.molding ?? []);
@@ -107,6 +135,18 @@ function onTarget(id, event) {
       </template>
     </div>
 
+    <!-- What the standing drones cost the hive and what they are returning for
+         it. Cognition is the binding constraint on a drone population, so it
+         belongs on this screen and not only under the chip in the top bar. -->
+    <div v-if="total" class="notice">
+      <strong>{{ total }} drone{{ total === 1 ? '' : 's' }} standing.</strong>
+      Holding {{ formatCogits(cogits) }} of the hive's {{ formatCogits(cognition.capacity) }}
+      cognition<span v-if="cognition.over" class="bad"> — which is already over budget</span>.
+      <template v-if="hauling > 0">
+        Bringing in {{ formatMassFlow(hauling) }} between them.
+      </template>
+    </div>
+
     <div class="band-stack">
       <section v-for="band in bands" :key="band.id" class="band">
         <h2 class="band-head">
@@ -131,6 +171,12 @@ function onTarget(id, event) {
               <span>
                 <span class="job-name">{{ t.def.name }}</span>
                 <span class="job-desc" style="display: block">{{ t.def.desc }}</span>
+                <span v-if="t.terms.length" class="job-desc muted" style="display: block">
+                  {{ t.terms.join(' · ') }}
+                </span>
+                <span v-if="t.count && t.rate > 0" class="job-desc good" style="display: block">
+                  {{ formatMassFlow(t.rate) }} coming in
+                </span>
               </span>
               <span class="job-count" :class="t.count > 0 ? '' : 'muted'">{{ t.count }}</span>
 

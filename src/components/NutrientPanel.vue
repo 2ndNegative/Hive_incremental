@@ -9,6 +9,18 @@ import { ITEMS } from '../game/definitions/items/index.js';
 import { isPinned, pinHandlers } from '../game/tips.js';
 import { BIOMES } from '../game/definitions/biomes.js';
 
+/**
+ * Every drone the hive is holding. Two counters, for now: `state.drones` is the
+ * old population, which nothing grows any more, and `droneTypes` is what the
+ * Molding Chambers press. Summing both means this line cannot disagree with the
+ * Drones tab while the rebuild has one foot in each.
+ */
+const droneCount = computed(
+  () =>
+    (state.drones || 0) +
+    Object.values(state.droneTypes || {}).reduce((sum, n) => sum + (n || 0), 0),
+);
+
 const collapsed = ref({});
 function toggle(key) {
   collapsed.value[key] = !collapsed.value[key];
@@ -95,7 +107,7 @@ const lastGather = computed(() => {
   <div class="panel-box">
     <div class="panel-head">
       <span>Stores</span>
-      <span class="muted num">{{ state.drones }} drones</span>
+      <span class="muted num">{{ droneCount }} drones</span>
     </div>
 
     <div class="panel-body">

@@ -19,6 +19,7 @@ import { GATHER_TYPES, poolFor } from '../../game/definitions/forage.js';
 import { ORGANISMS, preyFor } from '../../game/definitions/organisms.js';
 import { ITEMS } from '../../game/definitions/items/index.js';
 import { CASTES, CASTE_ORDER } from '../../game/definitions/castes.js';
+import { DRONE_TYPES, foragingTypes, droneForageKey } from '../../game/definitions/drones.js';
 import { describeFind } from '../../game/forage.js';
 import { formatMass, formatMassFlow } from '../../game/units.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
@@ -151,21 +152,45 @@ const learned = computed(() => {
   return { known, exact, total };
 });
 
-/** What every gathering caste is on right now. */
-const working = computed(() =>
-  CASTE_ORDER.filter((id) => CASTES[id].gather && (state.castes[id] || 0) > 0).map((id) => {
+/**
+ * What is out on the land right now — the drone types that gather, and any
+ * gathering caste still left standing. Both read the same `state.forage` slots;
+ * the only difference is which registry the name and the count come from.
+ */
+const working = computed(() => {
+  const rows = [];
+  for (const id of foragingTypes()) {
+    const count = state.droneTypes?.[id] || 0;
+    if (!count) continue;
+    const key = droneForageKey(id);
+    const found = describeFind(state, key);
+    const flow = derived.value.forage?.[key];
+    rows.push({
+      id: key,
+      def: DRONE_TYPES[id],
+      assigned: count,
+      found,
+      rate: flow?.rate || 0,
+      grams: flow?.grams || 0,
+      empty: found.empty,
+    });
+  }
+  for (const id of CASTE_ORDER) {
+    if (!CASTES[id].gather || (state.castes[id] || 0) <= 0) continue;
     const found = describeFind(state, id);
     const flow = derived.value.forage?.[id];
-    return {
+    rows.push({
       id,
       def: CASTES[id],
       assigned: state.castes[id],
       found,
       rate: flow?.rate || 0,
+      grams: 0,
       empty: found.empty,
-    };
-  }),
-);
+    });
+  }
+  return rows;
+});
 </script>
 
 <template>
@@ -271,7 +296,11 @@ const working = computed(() =>
                   @click="showInCodex(w.found.itemId)"
                 >{{ w.found.label.toLowerCase() }}</button>
                 <strong v-else>{{ w.found.label.toLowerCase() }}</strong>
-                in {{ w.found.biome.name.toLowerCase() }}. Rolls again shortly.
+                in {{ w.found.biome.name.toLowerCase() }}.
+                <template v-if="w.grams">
+                  {{ formatMass(w.grams) }} each this trip; rolls again shortly.
+                </template>
+                <template v-else>Rolls again shortly.</template>
               </template>
             </span>
           </span>

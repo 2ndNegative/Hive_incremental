@@ -43,6 +43,7 @@ import { formatMass, formatEnergy, formatPower, formatCogits, formatLarvae } fro
 import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
 import {
   DRONE_CASTES, DRONE_CASTE_ORDER, DRONE_TYPES, DRONE_TYPE_ORDER, typesInCaste, unfiledTypes,
+  foragingTypes, droneForageKey, cogitDrawOf,
   nextMoldable, moldStatus,
 } from './game/definitions/drones.js';
 import {
@@ -140,6 +141,10 @@ window.hive = {
     typeOrder: DRONE_TYPE_ORDER,
     typesInCaste,
     unfiled: unfiledTypes,
+    foraging: foragingTypes,
+    forageKey: droneForageKey,
+    cogitDrawOf,
+    rollForage: (id) => forage.rollDroneForage(state, id),
     nextMoldable: () => nextMoldable(state),
     moldStatus: (id) => moldStatus(state, id),
     setMolding,

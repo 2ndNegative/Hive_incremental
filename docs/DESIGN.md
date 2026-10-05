@@ -243,7 +243,8 @@ src/
     definitions/
       nutrients.js         35 nutrients, densities, assay gating
       structures.js        hive structures
-      castes.js            drone castes and what they harvest
+      castes.js            drone castes and what they harvest (parked)
+      drones.js            drone castes, the types inside them, and what they cost
       research.js          the tech ladder
       organisms.js         prey and butchery yields
       items/               the composition database
