@@ -88,16 +88,22 @@ const MAX_CATCHUP_SECONDS = 5;
 // work stays bounded however long the player has been away.
 
 const BASE_THROUGHPUT_WATTS = 2_000;
-// The gut the hive lands with. Set to 0 to make the Digestive Caecum a hard
-// gate rather than an upgrade; at 80 g/s a starting hive digests everything it
-// can gather and a hive past about four harvesters starts to back up.
-const BASE_DIGESTION = 80; // grams of stored item mass per second
+/**
+ * The gut the hive lands with: NONE.
+ *
+ * A seed has no digestive tissue, so raw matter is exactly as useful to it as a
+ * rock until it grows some. Everything a forager brings home sits whole in the
+ * larder, fills it, and spoils — which makes the Digestive Caecum a hard gate
+ * rather than a nice-to-have, and makes the first one the most consequential
+ * building in the opening.
+ */
+const BASE_DIGESTION = 0; // grams of raw matter per second
 /**
  * What a hive can hold before it builds anything: nothing, of anything. Every
  * nutrient's baseCap is zero too. All storage comes from a structure's
  * `storage` map, and the Hivecore is where the first of it comes from.
  */
-const BASE_ITEM_CAP = 0; // grams, per item
+const BASE_ITEM_CAP = 0; // grams of raw matter, across the whole larder
 const BASE_INSIGHT_CAP = 200;
 const BASE_DRONE_CAP = 3;
 const DRONE_PROTEIN_COST = 180; // grams of protein per new drone
@@ -455,6 +461,11 @@ function computeCaps(state, charges) {
   }
   // Whole matter obeys the same rule: nowhere to put it until something is
   // built that can hold it.
+  //
+  // ONE POOL, not a shelf per item. The larder is a sac with things in it, so
+  // five hundred grams of room is five hundred grams whether that is all acorns
+  // or nine different things — and a hive with no gut fills it with whatever it
+  // happened to find and then spoils, which is the point.
   const itemRoom =
     BASE_ITEM_CAP +
     STRUCTURE_ORDER.reduce(
@@ -1014,8 +1025,11 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   let harvestRate = 0;
   let digestRate = 0;
 
+  // What each pile would be once the gut has taken its share, before the larder
+  // has its say.
+  const after = {};
+  let afterTotal = 0;
   for (const itemId of Object.keys(reachable)) {
-    const held = state.items?.[itemId] || 0;
     const arriving = itemFlow[itemId] || 0;
     const taken = reachable[itemId] * digestShare;
     harvestRate += arriving;
@@ -1023,14 +1037,23 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       digestFlow[itemId] = taken / dt;
       digestRate += taken / dt;
     }
+    const left = Math.max(0, (state.items?.[itemId] || 0) + arriving * dt - taken);
+    after[itemId] = left;
+    afterTotal += left;
+  }
 
-    let after = held + arriving * dt - taken;
-    if (after > itemCap) {
-      itemSpill[itemId] = (after - itemCap) / dt;
-      after = itemCap;
-    }
-    if (after < 0) after = 0;
-    itemNet[itemId] = (after - held) / dt;
+  // THE LARDER IS ONE SAC, so it overflows as one. What spoils is taken in
+  // proportion from every pile rather than from whichever happened to be
+  // biggest: a full larder is full, and the next gram of anything displaces a
+  // gram of the mixture already in there.
+  const keep = afterTotal > itemCap + EPSILON ? itemCap / afterTotal : 1;
+  let itemHeld = 0;
+  for (const itemId of Object.keys(after)) {
+    const held = state.items?.[itemId] || 0;
+    const kept = after[itemId] * keep;
+    if (keep < 1) itemSpill[itemId] = (after[itemId] - kept) / dt;
+    itemHeld += kept;
+    itemNet[itemId] = (kept - held) / dt;
   }
 
   const inflow = {};
@@ -1191,7 +1214,9 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     forage,
     itemNet,
     itemSpill,
-    itemCap,
+    itemCap, // the whole larder, shared
+    itemHeld, // what is in it after this step
+    itemFull: itemCap > 0 && itemHeld >= itemCap - EPSILON,
     digestFlow,
     digestion,
     digestRatio,

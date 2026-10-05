@@ -32,17 +32,23 @@ export const ORIGINS = {
     effects: [
       '36 m² of temperate forest',
       'Hivecore at level 1',
+      '240 MJ left in the seed — four minutes of Hivecore',
       'No stores, no drones, nothing else built',
     ],
     // Stores and drones stay at zero for the building and drone rebuild — but
     // the Hivecore is there from the first second, because a hive without one is
-    // not a hive, it is mass. It lands lit and immediately begins to brown out:
-    // 1 MW of upkeep against an empty pool, and nothing to fill the pool until
-    // the player gets a Metabolic Generator up. That is the opening problem.
+    // not a hive, it is mass.
+    //
+    // THE GRACE PERIOD. What is left in the seed: 240 MJ, which is four minutes
+    // of a Hivecore and nothing else. The hive does not brown out while the
+    // player is still reading the screen — it browns out when that runs down,
+    // by which time there has been time to gather, grow a gut and get a
+    // generator lit. Spent, not stored: nothing refills it but a generator.
     start: {
       territory: { temperateForest: 36 },
       nutrients: {},
       drones: 0,
+      energy: 240e6, // joules
       structures: { hivecore: 1 },
     },
     flavour: 'The colony does not understand what has happened to it. It goes on working.',

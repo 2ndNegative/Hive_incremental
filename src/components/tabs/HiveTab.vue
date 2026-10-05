@@ -29,6 +29,7 @@ function effectLines(def) {
   if (def.cogitCapacity) lines.push(`+${formatCogits(def.cogitCapacity)} cognition`);
   if (def.cogitDraw) lines.push(`${formatCogits(def.cogitDraw)} cognition occupied`);
   if (def.metabolism) lines.push(`metabolises ${formatMassFlow(def.metabolism)} into energy`);
+  if (def.digestion) lines.push(`breaks down ${formatMassFlow(def.digestion)} of raw matter`);
   if (def.brood) {
     const cost = Object.entries(def.brood.cost)
       .map(([n, g]) => `${formatMass(g)} ${NUTRIENTS[n]?.name.toLowerCase() ?? n}`)
@@ -43,6 +44,9 @@ function effectLines(def) {
   if (def.category === 'storage') {
     if (def.generalStorage) {
       lines.push(`+${formatMass(def.generalStorage)} general storage`);
+    }
+    if (def.itemStorage) {
+      lines.push(`+${formatMass(def.itemStorage)} raw matter storage`);
     }
     for (const [n, grams] of Object.entries(def.storage || {})) {
       lines.push(`+${formatMass(grams)} ${NUTRIENTS[n]?.name.toLowerCase() ?? n} storage`);
@@ -103,9 +107,52 @@ const cards = computed(() =>
       affordable,
       eta: affordable ? null : formatEta(etaFor(state, derived.value, cost)),
       effects: effectLines(def),
+      cycle: cycleOf(id),
     };
   }),
 );
+
+/**
+ * Where a chamber is in its cycle, for the bar on its card.
+ *
+ * Progress is held per STRUCTURE, not per unit — three Brood Chambers push one
+ * shared cycle three times as fast rather than running three staggered ones —
+ * so one bar per card is the honest picture. The time left divides by the units
+ * actually working, which is why the number drops when a second chamber comes
+ * up and stretches when one browns out.
+ */
+function cycleOf(id) {
+  const brood = (derived.value.brood ?? []).find((b) => b.id === id);
+  const mold = (derived.value.molding ?? []).find((m) => m.id === id);
+  const job = brood ?? mold;
+  if (!job || !job.count) return null;
+
+  const working = job.units || 0;
+  const progress = Math.max(0, Math.min(1, job.progress || 0));
+
+  // Nothing is turning, so there is no countdown to give. Saying "Larva in 0s"
+  // under a dark chamber is the worst of both: it reads as imminent and it is
+  // the one thing that is definitely not about to happen.
+  if (working <= 0) {
+    return { progress, label: 'Dark — nothing is turning', stalled: true };
+  }
+
+  const left = ((1 - progress) * job.seconds) / working;
+  const stalled = brood ? !brood.affordable : !mold.active;
+
+  let label;
+  if (brood) {
+    label = brood.affordable
+      ? `${brood.yield > 1 ? `${brood.yield} larvae` : 'Larva'} in ${Math.ceil(left)}s`
+      : 'Short of protein — this attempt will be lost';
+  } else if (mold.active) {
+    label = `${mold.makesName ?? 'Drone'} in ${Math.ceil(left)}s`;
+  } else {
+    label = mold.starved ? 'Waiting on a larva' : 'Nothing switched on';
+  }
+
+  return { progress, label, stalled };
+}
 
 /**
  * The Hive tab is banded by what a building is FOR, and each band folds. Bands
@@ -144,8 +191,12 @@ function powerLine(card) {
   const secs = Math.max(1, Math.ceil(card.power.secondsLeft));
 
   if (card.power.direction === 'holding') {
+    // Settled. Saying "holding at 51% output on 51% of its upkeep" is true and
+    // useless — of course the two agree, that IS the rule. What the player
+    // cannot see anywhere else is the watts, so that is what this says.
     return target > 0
-      ? `Browned out — holding at ${pct}% output on ${pct}% of its upkeep`
+      ? `Browned out — ${formatPower(card.power.delivered)} of the ` +
+          `${formatPower(card.power.watts)} it wants, so it runs at ${pct}%`
       : 'Dark. Nothing is reaching it at all.';
   }
   if (card.power.direction === 'failing') {
@@ -296,6 +347,15 @@ const overCapacity = computed(() =>
                 </span>
                 {{ powerLine(card) }}
               </span>
+              <!-- Where its cycle is. A chamber is the only thing on this
+                   screen that is doing something over time rather than simply
+                   being on, so it is the only thing with a bar. -->
+              <span v-if="card.cycle" class="action-cycle" :class="{ 'is-stalled': card.cycle.stalled }">
+                <span class="cycle-bar">
+                  <span :style="{ width: `${card.cycle.progress * 100}%` }" />
+                </span>
+                <span class="cycle-label">{{ card.cycle.label }}</span>
+              </span>
               <span v-if="card.action" class="action-upgrade" :class="{ muted: card.maxed }">
                 {{ card.action }}
               </span>
@@ -311,8 +371,15 @@ const overCapacity = computed(() =>
                  itself a button. -->
             <div v-if="card.owned > 0" class="switch-row" :class="{ 'is-idle': card.idle > 0 }">
               <template v-if="card.leveled">
+                <!-- "Running" alone under a browned-out building reads as a
+                     contradiction, so a levelled one says what it is running
+                     AT whenever that is not everything. -->
                 <span class="switch-label">
-                  {{ card.running > 0 ? 'Running' : 'Shut down' }}
+                  <template v-if="card.running <= 0">Shut down</template>
+                  <template v-else-if="card.power.charge < 0.995">
+                    Running at <strong class="num warn">{{ Math.round(card.power.charge * 100) }}%</strong>
+                  </template>
+                  <template v-else>Running</template>
                 </span>
                 <button
                   class="btn switch-btn is-wide"

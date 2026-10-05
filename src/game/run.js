@@ -163,6 +163,10 @@ export function chooseOrigin(id) {
   for (const [biome, area] of Object.entries(start.territory || {})) {
     grantTerritory(biome, area);
   }
+  // Whatever is left in the seed, banked. It is ordinary pool energy from here
+  // on: spendable, not refillable, and gone the moment the upkeep has eaten it.
+  if (start.energy) state.energyPool = (state.energyPool || 0) + start.energy;
+
   const drones = start.drones || 0;
   state.drones += drones;
   state.castes.dormant += drones;

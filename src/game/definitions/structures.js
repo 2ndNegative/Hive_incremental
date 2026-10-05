@@ -28,15 +28,22 @@
 //   upkeepWatts  continuous energy draw per unit
 //   slots        caste capacity added per unit
 //   mult         multiplier channel bonuses per unit
-//   digestion    grams of stored item mass broken down per second, per unit
-//   itemCapMult  multiplicative bonus to every item's storage, per unit
+//   itemCapMult  multiplicative bonus to the larder, per unit
 //   storage      flat grams of room, by nutrient. The hive holds NOTHING on its
 //                own — every nutrient's baseCap is zero — so this map is where
 //                storage comes from, full stop. Granted once per thing standing:
 //                five Gut Sacs give five times this, but a levelled building is
 //                ONE thing however tall it is, so taking a Hivecore from level 1
 //                to level 9 adds no room at all.
-//   itemStorage  the same, in grams per item, for whole matter in the larder.
+//   itemStorage  flat grams of room for RAW matter — the larder. One pool for
+//                everything gathered and not yet broken down, not a shelf per
+//                item: five hundred grams of room is five hundred grams whether
+//                it is all acorns or nine different things. Granted per thing
+//                standing, like `storage`.
+//   digestion    grams of raw matter broken down into nutrients per second, per
+//                unit. The hive has NONE of its own: without something that
+//                declares this, everything gathered sits in the larder until
+//                the larder is full and then spoils where it lies.
 //   molding      { seconds } — turns one larva into one drone per cycle, of
 //                whatever drones.js says is eligible. A chamber that is actually
 //                pressing — something eligible AND a larva to press — draws
@@ -132,7 +139,11 @@ export const STRUCTURES = {
       vitaminB9: 0.1,
       vitaminB12: 0.02,
     },
-    itemStorage: 200, // grams per item of whole matter
+    // Room for raw matter, shared across everything in the larder. Deliberately
+    // small and deliberately unadvertised — the card says nothing about it,
+    // because a player choosing to grow a Hivecore is not choosing a pantry.
+    // It is there so the first forage has somewhere to land at all.
+    itemStorage: 500,
     // 1 MJ every second. Nothing else in the game is close, and nothing in the
     // game can pay for it without generators.
     upkeepWatts: 1_000_000,
@@ -191,6 +202,42 @@ export const STRUCTURES = {
     storage: { protein: 200 },
   },
 
+  lipidDroplet: {
+    id: 'lipidDroplet',
+    name: 'Lipid Droplet',
+    category: 'storage',
+    desc:
+      'A bead of rendered fat held in a skin of its own making. The densest thing the hive can ' +
+      'keep, and the cheapest to keep it in — fat needs no water around it.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(120, 1.4)(n), fat: geo(60, 1.4)(n) }),
+    storage: { fat: 200 },
+  },
+
+  glycogenGranule: {
+    id: 'glycogenGranule',
+    name: 'Glycogen Granule',
+    category: 'storage',
+    desc:
+      'Sugar wound into a branched knot so it can be packed away and pulled back out in a hurry. ' +
+      'What the brood eats comes out of here.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(120, 1.4)(n), carb: geo(120, 1.4)(n) }),
+    storage: { carb: 200 },
+  },
+
+  crop: {
+    id: 'crop',
+    name: 'Crop Chamber',
+    category: 'storage',
+    desc:
+      'A muscular holding sac for matter the hive has gathered but not yet broken down. Harvest ' +
+      'beyond what it can hold spoils where it lies.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(260, 1.3)(n), fiber: geo(200, 1.3)(n) }),
+    itemStorage: 2_000,
+  },
+
   metabolicGenerator: {
     id: 'metabolicGenerator',
     name: 'Metabolic Generator',
@@ -202,6 +249,23 @@ export const STRUCTURES = {
     unlock: () => true,
     cost: (n) => ({ protein: geo(120, 1.25)(n), ash: geo(60, 1.25)(n) }),
     metabolism: 10, // grams per second
+  },
+
+  caecum: {
+    id: 'caecum',
+    name: 'Digestive Caecum',
+    category: 'digestion',
+    desc:
+      'A blind fermenting gut. Breaks whole harvest down into the nutrients it was made of — ' +
+      'without one, everything gathered simply piles up in the larder and rots there.',
+    unlock: () => true,
+    cost: (n) => ({ protein: geo(220, 1.28)(n), water: geo(500, 1.28)(n) }),
+    // Eighty grams a second, for nothing. Digestion is not a machine the hive
+    // runs — it is a gut, and a gut works on what is in it. Charging watts for
+    // it would make the opening unwinnable: a hive with no generator could not
+    // digest, so it could not fuel a generator.
+    digestion: 80,
+    upkeepWatts: 0,
   },
 
   /* ------------------------------------------------------------- parked -- */
@@ -223,24 +287,6 @@ export const STRUCTURES = {
     cost: (n) => ({ protein: geo(400, 1.32)(n) }),
     capMult: { bulk: 0.5 },
     upkeepWatts: 5,
-  },
-  caecum: {
-    id: 'caecum',
-    name: 'Digestive Caecum',
-    desc: 'A blind fermenting gut. Breaks whole harvest down into the nutrients it was made of — without enough of them, matter just piles up in storage.',
-    unlock: () => true,
-    cost: (n) => ({ protein: geo(220, 1.28)(n), water: geo(500, 1.28)(n) }),
-    digestion: 150,
-    upkeepWatts: 10,
-  },
-  crop: {
-    id: 'crop',
-    name: 'Crop Chamber',
-    desc: 'A muscular holding sac for matter the hive has gathered but not yet broken down. Harvest in excess of this spoils where it lies.',
-    unlock: () => true,
-    cost: (n) => ({ protein: geo(260, 1.3)(n), fiber: geo(200, 1.3)(n) }),
-    itemCapMult: 0.75,
-    upkeepWatts: 4,
   },
   thermalVent: {
     id: 'thermalVent',
@@ -351,7 +397,11 @@ export const STRUCTURE_ORDER = [
   'broodChamber',
   'moldingChamber',
   'metabolicGenerator',
+  'caecum',
   'proteinGranule',
+  'lipidDroplet',
+  'glycogenGranule',
+  'crop',
   'vacuole',
 ];
 
@@ -394,8 +444,6 @@ export function maxLevelOf(id) {
  */
 export const DEPRECATED_STRUCTURE_ORDER = [
   'nodeCluster',
-  'caecum',
-  'crop',
   'gutSac',
   'thermalVent',
   'assayChamber',

@@ -1765,6 +1765,44 @@ textarea.save-box {
   background: var(--warn);
 }
 
+/* A chamber part-way through a cycle. Same bar as the power one, read the
+   other way round: this one is filling rather than draining. */
+.action-cycle {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  margin-bottom: 0.35rem;
+  color: var(--good);
+}
+
+.action-cycle.is-stalled {
+  color: var(--muted);
+}
+
+.cycle-bar {
+  display: block;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 0.2rem;
+}
+
+.cycle-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--good);
+  transition: width 0.12s linear;
+}
+
+.action-cycle.is-stalled .cycle-bar > span {
+  background: var(--muted);
+}
+
+.cycle-label {
+  display: block;
+}
+
 /* Ground the hive has not worked out yet. */
 .offer-unknown {
   color: var(--muted);

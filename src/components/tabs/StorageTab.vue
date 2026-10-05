@@ -35,7 +35,10 @@ const rows = computed(() => {
   ]);
 
   const q = (state.ui.storageSearch || '').trim().toLowerCase();
-  const cap = d.value.itemCap;
+  // The larder is one sac, so a row's bar is its SHARE of what is in there,
+  // not a fill against a cap of its own. Every row reading "180 g / 500 g" when
+  // the five of them together are what fills the 500 g was the old lie.
+  const total = Object.values(state.items || {}).reduce((a, b) => a + (b || 0), 0);
 
   const out = [];
   for (const id of ids) {
@@ -50,9 +53,7 @@ const rows = computed(() => {
       name: item.name,
       category: CATEGORIES[item.category]?.name ?? item.category,
       held,
-      cap,
-      fill: cap > 0 ? Math.min(100, (held / cap) * 100) : 0,
-      full: cap > 0 && held >= cap - 1e-9,
+      share: total > 0 ? Math.min(100, (held / total) * 100) : 0,
       harvest: d.value.itemFlow[id] || 0,
       digest: d.value.digestFlow[id] || 0,
       net: d.value.itemNet[id] || 0,
@@ -70,6 +71,19 @@ const totals = computed(() => ({
   spoiled: Object.values(state.spilledItems || {}).reduce((a, b) => a + b, 0),
   spoiling: rows.value.reduce((a, r) => a + r.spill, 0),
 }));
+
+/** How full the shared larder is. */
+const larder = computed(() => {
+  const cap = d.value.itemCap;
+  const held = d.value.itemHeld ?? totals.value.held;
+  return {
+    cap,
+    held,
+    fill: cap > 0 ? Math.min(100, (held / cap) * 100) : 0,
+    full: d.value.itemFull,
+    none: cap <= 0,
+  };
+});
 
 const gutFill = computed(() => {
   const gut = d.value.digestion;
@@ -105,11 +119,17 @@ function breakdown(id) {
       </div>
       <div class="panel-body">
         <p class="muted" style="font-size: 0.78rem; margin: 0 0 0.4rem">
-          Castes deliver whole matter into storage. Gut tissue draws it back out and splits it into
-          the nutrients it was made of — an even share of every pile, so nothing waits at the back of
-          the queue. Harvest beyond what the gut can process stays in storage, and storage spoils
-          once it is full.
+          Drones deliver whole matter into the larder. Gut tissue draws it back out and splits it
+          into the nutrients it was made of — an even share of every pile, so nothing waits at the
+          back of the queue. The hive is born with no gut at all: without one, everything gathered
+          sits here until the larder is full and then spoils where it lies.
         </p>
+
+        <div v-if="!d.digestion" class="notice is-warn" style="margin: 0 0 0.5rem">
+          <strong class="bad">No gut.</strong>
+          Nothing the hive has built can break raw matter down, so none of this is reaching the
+          stores. Grow a Digestive Caecum — it costs no energy to run.
+        </div>
 
         <div class="data-table">
           <div class="field-row">
@@ -120,7 +140,9 @@ function breakdown(id) {
           </div>
           <div class="field-row">
             <span>Gut capacity</span>
-            <span class="num">{{ formatMassFlow(d.digestion) }}</span>
+            <span class="num" :class="d.digestion > 0 ? '' : 'bad'">
+              {{ formatMassFlow(d.digestion) }}
+            </span>
           </div>
           <div class="field-row">
             <span>Keeping up with</span>
@@ -129,8 +151,10 @@ function breakdown(id) {
             </span>
           </div>
           <div class="field-row">
-            <span>Held in storage</span>
-            <span class="num">{{ formatMass(totals.held) }}</span>
+            <span>Larder</span>
+            <span class="num" :class="larder.full ? 'bad' : larder.none ? 'bad' : ''">
+              {{ formatMass(larder.held) }} / {{ formatMass(larder.cap) }}
+            </span>
           </div>
           <div v-if="totals.spoiling > 0" class="field-row">
             <span class="warn">Spoiling now</span>
@@ -145,9 +169,24 @@ function breakdown(id) {
         <div class="gut-meter" :class="{ 'is-behind': d.digestRatio < 0.999 }">
           <span :style="{ width: `${gutFill}%` }" />
         </div>
-        <p v-if="d.digestRatio < 0.999" class="warn" style="font-size: 0.76rem; margin: 0.4rem 0 0">
-          The hive is gathering faster than it can digest. Grow more Digestive Caecums, or more Crop
-          Chambers to hold the backlog until it can.
+
+        <!-- How full the sac itself is, which is the thing that decides whether
+             the next gram gathered is kept or thrown away. -->
+        <div class="store-bar" :class="{ 'is-full': larder.full }" style="margin-top: 0.4rem">
+          <span :style="{ width: `${larder.fill}%` }" />
+        </div>
+
+        <p v-if="larder.none" class="warn" style="font-size: 0.76rem; margin: 0.4rem 0 0">
+          Nowhere to put anything. The hive holds no raw matter at all until something is built that
+          can hold it.
+        </p>
+        <p
+          v-else-if="d.digestRatio < 0.999"
+          class="warn"
+          style="font-size: 0.76rem; margin: 0.4rem 0 0"
+        >
+          The hive is gathering faster than it can digest. Grow more Digestive Caecums, or a Crop
+          Chamber to hold the backlog until it can.
         </p>
       </div>
     </div>
@@ -178,8 +217,8 @@ function breakdown(id) {
 
       <div v-if="!rows.length" class="panel-body">
         <span class="muted" style="font-size: 0.78rem">
-          Nothing in storage and nothing being gathered. Assign drones to a harvesting caste and
-          whatever they bring back will appear here.
+          Nothing in the larder and nothing being gathered. Mold a Forager and whatever it brings
+          back will appear here.
         </span>
       </div>
 
@@ -196,8 +235,8 @@ function breakdown(id) {
           </span>
 
           <span class="store-amount num">
-            <span :class="{ warn: r.full }">{{ formatMass(r.held) }}</span>
-            <span class="cap"> / {{ formatMass(r.cap) }}</span>
+            <span :class="{ warn: larder.full }">{{ formatMass(r.held) }}</span>
+            <span class="cap"> · {{ r.share.toFixed(0) }}%</span>
           </span>
 
           <!-- Throughput, not the standing balance. When the gut is keeping up
@@ -215,8 +254,8 @@ function breakdown(id) {
             <template v-else-if="r.harvest > 0">keeping up</template>
           </span>
 
-          <span class="store-bar" :class="{ 'is-full': r.full }">
-            <span :style="{ width: `${r.fill}%` }" />
+          <span class="store-bar" :class="{ 'is-full': larder.full }">
+            <span :style="{ width: `${r.share}%` }" />
           </span>
 
           <span class="tip-body">

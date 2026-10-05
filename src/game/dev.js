@@ -85,16 +85,27 @@ export function grantItem(itemId, grams) {
 
 /* ------------------------------------------------------------------ storage */
 
-/** Fill every item the hive is currently gathering to its storage cap. */
+/**
+ * Fill the larder to its cap, split evenly between whatever the hive is
+ * currently holding or gathering. The larder is one shared sac, so filling it
+ * means filling it ONCE — handing every item the full cap would put nine times
+ * the cap in a sac that holds one, and the next tick would spoil eight of them.
+ */
 export function fillStorage() {
   const d = computeDerived(state);
-  const ids = new Set([...Object.keys(state.items || {}), ...Object.keys(d.itemFlow)]);
+  const ids = [...new Set([...Object.keys(state.items || {}), ...Object.keys(d.itemFlow)])].filter(
+    (id) => ITEMS[id],
+  );
   state.items ??= {};
-  for (const id of ids) {
-    if (ITEMS[id]) state.items[id] = d.itemCap;
+  if (ids.length) {
+    const each = d.itemCap / ids.length;
+    for (const id of ids) state.items[id] = each;
   }
   touch();
-  pushLog(`Storage filled: ${ids.size} item${ids.size === 1 ? '' : 's'} at ${formatMass(d.itemCap)}.`, 'info');
+  pushLog(
+    `Larder filled: ${formatMass(d.itemCap)} across ${ids.length} item${ids.length === 1 ? '' : 's'}.`,
+    'info',
+  );
 }
 
 /** Drop matter into storage without digesting it, to watch the backlog behave. */
