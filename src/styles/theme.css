@@ -572,6 +572,36 @@ a:hover {
   transform: translateY(1px);
 }
 
+/* The click combo. The button itself warms up as the heat builds, so the
+   feedback is on the thing being pressed rather than off to one side. */
+.gather-btn.is-hot {
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+
+.gather-btn .combo-mult {
+  float: right;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--good);
+}
+
+.combo-bar {
+  display: block;
+  height: 3px;
+  margin-top: 0.25rem;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.combo-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--good);
+  transition: width 0.1s linear;
+}
+
 .log-list {
   list-style: none;
   margin: 0;

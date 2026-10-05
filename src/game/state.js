@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 13;
+export const SAVE_VERSION = 14;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -85,6 +85,11 @@ export function createInitialState() {
     // What the last manual gather turned up, so the panel can show it without
     // putting a line in the log for every single click.
     lastGather: null,
+
+    // How hot the Consume biomass button is, 0 to 1. Every press adds to it and
+    // every second bleeds it away; what the hive takes is multiplied by where
+    // it has got to. See engine.js MANUAL_COMBO_MAX.
+    clickHeat: 0,
 
     // What each gathering caste is working on right now: the biome it rolled,
     // the item (or prey) it found there, and how long it has been on it. Rolled

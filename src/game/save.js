@@ -365,6 +365,12 @@ function migrate(raw) {
     raw.fuelLock ??= {};
   }
 
+  // Before v14 the click was worth the same however fast it was pressed. A
+  // loaded save starts cold, which is where anyone who has been away is.
+  if ((raw.version ?? 0) < 14) {
+    raw.clickHeat = 0;
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

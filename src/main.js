@@ -16,6 +16,8 @@ import {
   BROWNOUT_SECONDS,
   FUEL_SWITCH_SECONDS,
   fuelLockFor,
+  clickMultiplier,
+  MANUAL_COMBO_MAX,
   LARVA_CARB_PER_SECOND,
 } from './game/engine.js';
 import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS } from './game/save.js';
@@ -30,6 +32,7 @@ import * as forage from './game/forage.js';
 import * as discovery from './game/discovery.js';
 import {
   research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary, MANUAL_INTAKE,
+  manualCombo,
   reserveCogits, releaseCogits, releaseAllCogits, buildStructure,
   setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
   togglePinned, resetPinned, setMolding, toggleMolding, setMoldTarget,
@@ -105,6 +108,8 @@ window.hive = {
   manualOdds,
   manualOddsSummary,
   manualIntake: MANUAL_INTAKE,
+  manualCombo,
+  clickMultiplier: () => clickMultiplier(state),
   setGlobalFuel,
   setFuelOverride,
   clearFuelOverride,

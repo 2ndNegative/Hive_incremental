@@ -3,11 +3,16 @@ import { computed, ref } from 'vue';
 import { state, derived, showInCodex } from '../game/useGame.js';
 import { NUTRIENTS, MACROS, MICROS, ASSAY_GROUPS, isRevealed } from '../game/definitions/nutrients.js';
 import { formatMass, formatMassFlow, formatEnergy } from '../game/units.js';
-import { consumeBiomass, MANUAL_INTAKE, manualOdds, manualOddsSummary } from '../game/actions.js';
+import {
+  consumeBiomass, MANUAL_INTAKE, manualOdds, manualOddsSummary, manualCombo,
+} from '../game/actions.js';
 import { RANGE_AT } from '../game/discovery.js';
 import { ITEMS } from '../game/definitions/items/index.js';
 import { isPinned, pinHandlers } from '../game/tips.js';
 import { BIOMES } from '../game/definitions/biomes.js';
+
+/** Where the click combo has got to, for the button to wear. */
+const combo = computed(() => manualCombo());
 
 /**
  * Every drone the hive is holding. Two counters, for now: `state.drones` is the
@@ -99,6 +104,7 @@ const lastGather = computed(() => {
     itemId: last.itemId,
     biome: last.biomeId ? BIOMES[last.biomeId] : null,
     grams: last.grams,
+    multiplier: last.multiplier ?? 1,
   };
 });
 </script>
@@ -112,7 +118,11 @@ const lastGather = computed(() => {
 
     <div class="panel-body">
       <span class="tip tip-side" style="display: block">
-        <button class="gather-btn" @click="consumeBiomass()">Consume biomass</button>
+        <button class="gather-btn" :class="{ 'is-hot': combo.hot }" @click="consumeBiomass()">
+          Consume biomass
+          <span v-if="combo.hot" class="combo-mult">×{{ combo.multiplier.toFixed(1) }}</span>
+          <span class="combo-bar"><span :style="{ width: `${combo.heat * 100}%` }" /></span>
+        </button>
         <span class="tip-body">
           <span class="tip-title">Take biomass from the hive's own territory</span>
           <span class="muted" style="display: block; margin-bottom: 0.3rem">
@@ -120,6 +130,14 @@ const lastGather = computed(() => {
             What that turns out to be depends on the territory; how much of it comes away is
             whatever came away — {{ formatMass(MANUAL_INTAKE.min) }} to
             {{ formatMass(MANUAL_INTAKE.max) }} a time.
+          </span>
+          <span class="muted" style="display: block; margin-bottom: 0.3rem">
+            Reaching again before it has settled takes more:
+            <strong>×{{ MANUAL_INTAKE.comboMax }}</strong> at a steady hammering, bleeding back to
+            nothing over {{ MANUAL_INTAKE.comboCool }}s of leaving it alone.
+            <template v-if="combo.hot">
+              Currently <strong class="good">×{{ combo.multiplier.toFixed(2) }}</strong>.
+            </template>
           </span>
           <span v-for="o in odds" :key="o.itemId" class="tip-row">
             <span :class="{ 'offer-unknown': !o.named }">{{ o.label }}</span>
@@ -138,7 +156,10 @@ const lastGather = computed(() => {
 
       <div v-if="lastGather" class="last-gather">
         <template v-if="lastGather.name">
-          Last: {{ formatMass(lastGather.grams) }}
+          Last: {{ formatMass(lastGather.grams) }}<span
+            v-if="lastGather.multiplier > 1.01"
+            class="good"
+          >&nbsp;×{{ lastGather.multiplier.toFixed(1) }}</span>&nbsp;
           <button class="codex-link" @click="showInCodex(lastGather.itemId)">
             {{ lastGather.name.toLowerCase() }}
           </button>

@@ -68,9 +68,8 @@ export const DRONE_TYPES = {
     // The ground-vegetation route, the same one the parked forager caste worked
     // and the same one a manual gather draws on.
     gather: 'forager',
-    // Grams per trip, rolled per trip. Thin: a forager is the cheapest thing
-    // the hive can field and it is paid accordingly.
-    load: { min: 12, max: 20 },
+    // Grams per trip, rolled per trip.
+    load: { min: 20, max: 45 },
     unlock: () => true,
   },
 };

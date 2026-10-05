@@ -186,6 +186,25 @@ export const STRUCTURES = {
     molding: { seconds: 20 },
   },
 
+  nodeCluster: {
+    id: 'nodeCluster',
+    name: 'Nerve Node',
+    category: 'cognition',
+    desc:
+      'A knot of processing mass grown off the core and wired back into it. It decides nothing by ' +
+      'itself — it is simply more room to hold a thought in, and the hive is always short of that.',
+    unlock: () => true,
+    // Steeper than the storage buildings on purpose. Bandwidth is the ceiling
+    // on the whole drone economy, so it should be bought a node at a time and
+    // felt each time, not stacked twenty deep in one go.
+    cost: (n) => ({ fiber: geo(480, 1.45)(n), protein: geo(80, 1.45)(n), fat: geo(30, 1.45)(n) }),
+    cogitCapacity: 5,
+    // The same bandwidth the Hivecore supplies, for half the watts — which is
+    // the point of a dedicated organ, and the reason to grow one rather than
+    // keep levelling the core.
+    upkeepWatts: 250_000,
+  },
+
   vacuole: {
     id: 'vacuole',
     name: 'Vacuole',
@@ -301,15 +320,6 @@ export const STRUCTURES = {
 
   /* ------------------------------------------------------------- parked -- */
 
-  nodeCluster: {
-    id: 'nodeCluster',
-    name: 'Nerve Node',
-    desc: 'Extra processing mass. Raises how many drones the hivemind can hold coherent at once.',
-    unlock: () => true,
-    cost: (n) => ({ protein: geo(350, 1.3)(n), fat: geo(150, 1.3)(n) }),
-    caps: { drones: 3 },
-    upkeepWatts: 15,
-  },
   gutSac: {
     id: 'gutSac',
     name: 'Gut Sac',
@@ -426,6 +436,7 @@ export const BUILDING_CATEGORY_ORDER = ['core', 'cognition', 'gathering', 'produ
 export const STRUCTURE_ORDER = [
   'hivecore',
   'broodChamber',
+  'nodeCluster',
   'moldingChamber',
   'metabolicGenerator',
   'caecum',
@@ -475,7 +486,6 @@ export function maxLevelOf(id) {
  * these comes back.
  */
 export const DEPRECATED_STRUCTURE_ORDER = [
-  'nodeCluster',
   'gutSac',
   'thermalVent',
   'assayChamber',

@@ -120,6 +120,35 @@ const STARVE_SECONDS = 25; // at zero energy, how long until a drone is lost
 /** What one larva eats, every second it exists. */
 export const LARVA_CARB_PER_SECOND = 0.1;
 
+/* --------------------------------------------------------------- the click */
+
+/**
+ * CLICKING FAST IS WORTH MORE THAN CLICKING SLOWLY.
+ *
+ * The hive reaching out and taking something is the one thing the player does
+ * with their hands, and it was worth exactly the same whether they tapped it
+ * once a minute or hammered it. So it builds heat: every press raises it, every
+ * second without one bleeds it away, and what the hive takes is multiplied by
+ * where that heat has got to.
+ *
+ * Deliberately NOT a stacking counter that survives walking away — it is a
+ * reward for the thirty seconds somebody is actually leaning on the button, not
+ * a number to be protected. Cold to full in MANUAL_COMBO_CLICKS presses, full
+ * to cold in MANUAL_COMBO_COOL_SECONDS of leaving it alone.
+ */
+export const MANUAL_COMBO_MAX = 3;
+export const MANUAL_COMBO_CLICKS = 12;
+export const MANUAL_COMBO_COOL_SECONDS = 2;
+
+/** Heat gained per press, before any decay. */
+export const MANUAL_COMBO_PER_CLICK = 1 / MANUAL_COMBO_CLICKS;
+
+/** What the next press is worth, given where the heat has got to: 1× to 3×. */
+export function clickMultiplier(state) {
+  const heat = Math.max(0, Math.min(1, state.clickHeat || 0));
+  return 1 + heat * (MANUAL_COMBO_MAX - 1);
+}
+
 /**
  * How long a brood can go unfed before it starts dying, and how fast it then
  * goes. Five seconds of grace is not much — and it is not meant to be. A larva
@@ -1728,6 +1757,13 @@ export function tick(state, dt) {
   }
 
   advanceForage(state, dt);
+
+  // The click combo bleeds away in real time. Offline catch-up runs the same
+  // line with a dt of hours, which lands it at zero — which is right: nobody
+  // was clicking.
+  if (state.clickHeat > 0) {
+    state.clickHeat = Math.max(0, state.clickHeat - dt / MANUAL_COMBO_COOL_SECONDS);
+  }
 
   state.stats.peakDrones = Math.max(state.stats.peakDrones, state.drones);
   state.playtime += dt;

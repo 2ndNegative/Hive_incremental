@@ -14,7 +14,17 @@ import { STRUCTURES, maxLevelOf, isLeveled } from './definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
 import { RESEARCH } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
-import { structureCost, canAfford, computeDerived, affordableCount, openStore } from './engine.js';
+import {
+  structureCost,
+  canAfford,
+  computeDerived,
+  affordableCount,
+  openStore,
+  clickMultiplier,
+  MANUAL_COMBO_MAX,
+  MANUAL_COMBO_PER_CLICK,
+  MANUAL_COMBO_COOL_SECONDS,
+} from './engine.js';
 import { formatMass } from './units.js';
 import { biomeShares } from './definitions/biomes.js';
 import { poolFor } from './definitions/forage.js';
@@ -81,6 +91,9 @@ export function ingestItem(itemId, grams) {
  */
 export function consumeBiomass() {
   state.stats.clicks += 1;
+  // Heat first, so this press is worth what the player just earned. tick() is
+  // what bleeds it away again — see MANUAL_COMBO_COOL_SECONDS.
+  state.clickHeat = Math.min(1, (state.clickHeat || 0) + MANUAL_COMBO_PER_CLICK);
 
   const shares = biomeShares(state);
   const biome = pickWeighted(Object.entries(shares).map(([id, weight]) => ({ id, weight })));
@@ -96,8 +109,11 @@ export function consumeBiomass() {
     return 0;
   }
 
-  const grams = manualGrams();
-  state.lastGather = { itemId: found.itemId, biomeId: biome.id, grams };
+  // The press counts towards its own multiplier: the click you just made is
+  // the one that gets better, which is the whole feel of the thing.
+  const multiplier = clickMultiplier(state);
+  const grams = manualGrams() * multiplier;
+  state.lastGather = { itemId: found.itemId, biomeId: biome.id, grams, multiplier };
   recordFind(state, biome.id, found.itemId);
   return ingestItem(found.itemId, grams);
 }
@@ -107,7 +123,20 @@ export const MANUAL_INTAKE = {
   spread: MANUAL_SPREAD,
   min: MANUAL_GRAMS * (1 - MANUAL_SPREAD),
   max: MANUAL_GRAMS * (1 + MANUAL_SPREAD),
+  // What a run of fast presses builds up to, and how long it survives being
+  // left alone. The interface reads these rather than restating them.
+  comboMax: MANUAL_COMBO_MAX,
+  comboCool: MANUAL_COMBO_COOL_SECONDS,
 };
+
+/** Where the click combo has got to: the multiplier, and 0..1 for a bar. */
+export function manualCombo() {
+  return {
+    multiplier: clickMultiplier(state),
+    heat: Math.max(0, Math.min(1, state.clickHeat || 0)),
+    hot: (state.clickHeat || 0) > 1e-6,
+  };
+}
 
 /**
  * What a click could turn up, likeliest first — the whole distribution rather
