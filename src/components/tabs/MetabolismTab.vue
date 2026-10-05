@@ -216,6 +216,16 @@ function formatReserve(seconds) {
               <template v-else-if="drawLine(g.drew)">
                 · drawing {{ drawLine(g.drew) }} for {{ formatPower(g.watts) }}
               </template>
+              <!-- A generator burns ONE fuel at a time and waits out a
+                   cooldown before changing back, so the screen says which and
+                   for how long rather than flickering between the two. -->
+              <template v-if="g.onFallback">
+                · <span class="warn">on its fallback</span>
+                <template v-if="g.hold > 0">
+                  for another {{ Math.ceil(g.hold) }}s
+                </template>
+                <template v-else>until something better is in store</template>
+              </template>
             </span>
           </span>
           <select class="fuel-select" :value="g.preferred" @change="setPreferred(g.key, $event.target.value)">

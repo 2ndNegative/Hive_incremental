@@ -14,6 +14,9 @@ import {
   openStore,
   stopLoop,
   BROWNOUT_SECONDS,
+  FUEL_SWITCH_SECONDS,
+  fuelLockFor,
+  LARVA_CARB_PER_SECOND,
 } from './game/engine.js';
 import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS } from './game/save.js';
 import { SAVE_VERSION } from './game/state.js';
@@ -171,6 +174,9 @@ window.hive = {
   buildingCategoryOrder: BUILDING_CATEGORY_ORDER,
   charges: () => computeCharges(state),
   brownoutSeconds: BROWNOUT_SECONDS,
+  fuelSwitchSeconds: FUEL_SWITCH_SECONDS,
+  fuelLock: (key) => fuelLockFor(state, key),
+  larvaCarbPerSecond: LARVA_CARB_PER_SECOND,
   maxLevelOf,
   build: (id, n) => buildStructure(id, n),
   setActive,

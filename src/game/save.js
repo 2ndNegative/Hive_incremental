@@ -356,6 +356,15 @@ function migrate(raw) {
     raw.droneTypes ??= {};
   }
 
+  // Before v13 a generator picked its fuel fresh every tick and would blend two
+  // stores inside one step. An empty lock means every generator starts on its
+  // preferred fuel with no cooldown running, which is where a fresh hive starts
+  // too. The costs also moved onto fibre at v13; nothing stored needs changing
+  // for that, since a cost is read from the definition and never saved.
+  if ((raw.version ?? 0) < 13) {
+    raw.fuelLock ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

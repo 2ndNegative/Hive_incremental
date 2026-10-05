@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 12;
+export const SAVE_VERSION = 13;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -165,6 +165,13 @@ export function createInitialState() {
       fallback: 'fat',
       overrides: {},
     },
+
+    // Which fuel each generator is actually on, and how long it is held there.
+    // Keyed the same way the overrides are. Sparse: no entry means it has not
+    // started yet and will take its preferred fuel the first time it runs. See
+    // engine.js FUEL_SWITCH_SECONDS — this is what stops a generator flickering
+    // between two stores every tick when the first one is nearly empty.
+    fuelLock: {},
 
     // THIS RUN. Everything here resets when a run restarts.
     stats: {

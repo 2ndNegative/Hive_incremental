@@ -301,17 +301,40 @@ export function clearCastes() {
 
 /* -------------------------------------------------------------- energy source */
 
+/**
+ * THE COOLDOWN IS FOR THE GENERATOR, NOT FOR THE PLAYER.
+ *
+ * A generator waits out FUEL_SWITCH_SECONDS before changing its own mind, which
+ * is what stops it flickering between two stores. Being TOLD to change is not
+ * changing its mind: a player who picks a different fuel and then watches the
+ * old one keep draining for ten seconds has been given a broken switch. So
+ * every one of these drops the lock it affects, and the next tick starts fresh
+ * on the new choice.
+ */
+function releaseFuelLock(consumerKey) {
+  if (!state.fuelLock) return;
+  if (consumerKey) delete state.fuelLock[consumerKey];
+  else state.fuelLock = {};
+}
+
 export function setGlobalFuel(preferred, fallback) {
   if (preferred && isUsableFuel(state, preferred)) state.energy.preferred = preferred;
   if (fallback && isUsableFuel(state, fallback)) state.energy.fallback = fallback;
+  // Everything without its own setting follows the default, so everything
+  // without its own setting is free to move.
+  for (const key of Object.keys(state.fuelLock || {})) {
+    if (!state.energy.overrides?.[key]) releaseFuelLock(key);
+  }
 }
 
 export function setFuelOverride(consumerKey, preferred, fallback) {
   state.energy.overrides[consumerKey] = { preferred, fallback };
+  releaseFuelLock(consumerKey);
 }
 
 export function clearFuelOverride(consumerKey) {
   delete state.energy.overrides[consumerKey];
+  releaseFuelLock(consumerKey);
 }
 
 /* --------------------------------------------------------------------- drones */

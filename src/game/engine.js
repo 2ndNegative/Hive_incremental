@@ -118,7 +118,7 @@ const AUTOMATIC_DRONE_GROWTH = false;
 const STARVE_SECONDS = 25; // at zero energy, how long until a drone is lost
 
 /** What one larva eats, every second it exists. */
-export const LARVA_CARB_PER_SECOND = 0.5;
+export const LARVA_CARB_PER_SECOND = 0.1;
 
 /**
  * How long a brood can go unfed before it starts dying, and how fast it then
@@ -539,6 +539,77 @@ export function fuelChoiceFor(state, consumerKey) {
 }
 
 /**
+ * How long a generator stays on a fuel after changing to it.
+ *
+ * WHY THERE IS A COOLDOWN AT ALL. A generator burns its preferred fuel and
+ * falls back to the second when the first runs out — and a store that has run
+ * out is also a store that digestion is dripping into. Without this, every
+ * single tick went: a crumb of carbohydrate arrived, the generator jumped back
+ * onto carbohydrate, burned the crumb, found it empty, jumped to fat. Ten times
+ * a second, for as long as the hive was short. The numbers were right and the
+ * screen was unreadable.
+ *
+ * So: one fuel at a time, and a changeover costs a quiet spell.
+ */
+export const FUEL_SWITCH_SECONDS = 10;
+
+/** Enough of a store to be worth crossing the room for: one second of work. */
+const FUEL_SWITCH_MINIMUM_SECONDS = 1;
+
+/**
+ * Below this, a store is dregs rather than fuel: a tenth of a second of work.
+ *
+ * Without it a generator parks on a store that digestion is dripping into and
+ * burns each crumb as it lands — no flicker, but no power either, and the full
+ * tank of the other fuel sits untouched. Dregs do not count as having fuel, so
+ * it leaves, and the cooldown decides when it is worth coming back.
+ */
+const FUEL_DREGS_SECONDS = 0.1;
+
+/** What a generator is burning right now, and whether it may change its mind. */
+export function fuelLockFor(state, key) {
+  const lock = state.fuelLock?.[key];
+  return { on: lock?.on ?? null, hold: lock?.hold ?? 0 };
+}
+
+/**
+ * Decide which single fuel a generator burns this step.
+ *
+ * TWO KINDS OF CHANGE, and only one of them is gated:
+ *   - FLEEING an empty store is forced and immediate. Nothing is gained by
+ *     making a generator sit idle in front of a fuel that is not there.
+ *   - GOING BACK UP the preference list is what stutters, so it waits out the
+ *     cooldown AND wants the store to hold at least a second of work. A trickle
+ *     of the preferred fuel is not a reason to abandon a full tank of the other.
+ *
+ * Pure: it reads the lock and says what it would become. tick() is what writes.
+ */
+function chooseFuel(state, key, order, rate) {
+  const { on, hold } = fuelLockFor(state, key);
+  const grams = (n) => (n ? state.nutrients[n] || 0 : 0);
+  const alive = (n) =>
+    order.includes(n) && grams(n) > EPSILON && grams(n) >= rate * FUEL_DREGS_SECONDS;
+  const worthIt = (n) => alive(n) && grams(n) >= rate * FUEL_SWITCH_MINIMUM_SECONDS;
+
+  // Still burning something that is there: the only question is whether it is
+  // allowed to trade up, and whether there is anything better to trade up to.
+  if (alive(on)) {
+    if (hold > EPSILON) return { nutrient: on, switched: false, hold };
+    const better = order.find(worthIt) ?? on;
+    return better === on
+      ? { nutrient: on, switched: false, hold: 0 }
+      : { nutrient: better, switched: true, hold: FUEL_SWITCH_SECONDS };
+  }
+
+  // Nothing in the tank. Take whatever there is, in preference order.
+  const next = order.find(alive) ?? order[0] ?? null;
+  if (!next) return { nutrient: null, switched: false, hold: Math.max(0, hold) };
+  return next === on
+    ? { nutrient: next, switched: false, hold: Math.max(0, hold) }
+    : { nutrient: next, switched: true, hold: FUEL_SWITCH_SECONDS };
+}
+
+/**
  * Turn authored state into every number the game and UI need.
  *
  * `dt` is the window the fuel allocation is planned over. It only matters at
@@ -693,20 +764,27 @@ export function computeDerived(state, dt = TICK_SECONDS) {
         (n, i, arr) => n && arr.indexOf(n) === i && isUsableFuel(state, n),
       );
 
+      // ONE FUEL AT A TIME. Topping up from the second store the moment the
+      // first runs dry inside a single step is the other half of the stutter:
+      // it made every tick a blend, and no two ticks the same blend. A
+      // generator burns what it is on, and if that store empties mid-step it
+      // simply makes less this step and moves next step.
+      const choice = chooseFuel(state, key, order, rate);
+      const using = choice.nutrient;
+
       const drew = {}; // nutrient -> grams per second this generator took
       let watts = 0;
       let gramsLeft = rate * dt;
-      for (const nutrient of order) {
-        if (gramsLeft <= EPSILON) break;
-        const perGram = joulesPerGram(nutrient) * efficiency[nutrient];
-        if (perGram <= EPSILON) continue; // a zero-energy store is not fuel
-        const taken = Math.min(gramsLeft, unclaimed(nutrient));
-        if (taken <= EPSILON) continue;
-        left[nutrient] -= taken;
-        drew[nutrient] = (drew[nutrient] || 0) + taken / dt;
-        burn[nutrient] = (burn[nutrient] || 0) + taken / dt;
-        watts += (taken * perGram) / dt;
-        gramsLeft -= taken;
+      if (using) {
+        const perGram = joulesPerGram(using) * efficiency[using];
+        const taken = perGram > EPSILON ? Math.min(gramsLeft, unclaimed(using)) : 0;
+        if (taken > EPSILON) {
+          left[using] -= taken;
+          drew[using] = taken / dt;
+          burn[using] = (burn[using] || 0) + taken / dt;
+          watts += (taken * perGram) / dt;
+          gramsLeft -= taken;
+        }
       }
       generatedWatts += watts;
 
@@ -729,6 +807,12 @@ export function computeDerived(state, dt = TICK_SECONDS) {
         fallback,
         overridden,
         drew,
+        // What it is actually burning, and how long until it is allowed to
+        // change its mind about that. `switched` is this step's changeover.
+        using,
+        switched: choice.switched,
+        hold: choice.hold,
+        onFallback: Boolean(using) && using !== preferred,
         // Pointed at stores that are empty, or at nothing it can open.
         dry: rate > EPSILON && watts <= EPSILON,
       });
@@ -1453,6 +1537,19 @@ export function tick(state, dt) {
   }
 
   state.energyPool = derived.energy.pool;
+
+  // Where each generator is in its fuel cooldown. computeDerived worked out
+  // what the lock WOULD be — it is called many times a frame to paint the
+  // screen, so it may not write — and this is the one place that applies it.
+  state.fuelLock ??= {};
+  for (const g of derived.generators) {
+    const held = g.switched ? FUEL_SWITCH_SECONDS : Math.max(0, (g.hold || 0) - dt);
+    if (!g.using && held <= 0) {
+      delete state.fuelLock[g.key];
+      continue;
+    }
+    state.fuelLock[g.key] = { on: g.using, hold: held };
+  }
 
   // Brownout. Every standing building walks towards the share of its upkeep it
   // is actually being paid, at a constant rate — a full swing takes
