@@ -371,6 +371,24 @@ function migrate(raw) {
     raw.clickHeat = 0;
   }
 
+  // Before v15 a drone type worked ONE find, wherever its holdings were. Land
+  // now decides how many patches are worked at once, so the old single slot is
+  // dropped and the first tick rolls a full set against the same ground.
+  if ((raw.version ?? 0) < 15) {
+    raw.patches = {};
+    for (const key of Object.keys(raw.forage || {})) {
+      if (key.startsWith('drone:')) delete raw.forage[key];
+    }
+  }
+
+  // v16 adds the Scavenger. An old save has none and has it switched off,
+  // which is where a fresh one starts too — the merge below fills both in from
+  // the defaults, so this only has to exist to mark the version.
+  if ((raw.version ?? 0) < 16) {
+    raw.droneTypes ??= {};
+    raw.droneMolding ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

@@ -127,7 +127,9 @@ function cycleOf(id) {
   const job = brood ?? mold;
   if (!job || !job.count) return null;
 
-  const working = job.units || 0;
+  // A full brood works faster, so the countdown has to know about it — see
+  // engine.js larvaPace. The bar itself is unaffected; only how fast it fills.
+  const working = (job.units || 0) * (job.pace || 1);
   const progress = Math.max(0, Math.min(1, job.progress || 0));
 
   // Nothing is turning, so there is no countdown to give. Saying "Larva in 0s"
@@ -139,6 +141,7 @@ function cycleOf(id) {
 
   const left = ((1 - progress) * job.seconds) / working;
   const stalled = brood ? !brood.affordable : !mold.active;
+  const pace = job.pace || 1;
 
   let label;
   if (brood) {
@@ -147,11 +150,15 @@ function cycleOf(id) {
       : 'Short of protein — this attempt will be lost';
   } else if (mold.active) {
     label = `${mold.makesName ?? 'Drone'} in ${Math.ceil(left)}s`;
+  } else if (mold.broke) {
+    label = `Cannot pay for a ${(mold.makesName ?? 'drone').toLowerCase()}`;
+  } else if (mold.starved) {
+    label = 'Waiting on a larva';
   } else {
-    label = mold.starved ? 'Waiting on a larva' : 'Nothing switched on';
+    label = 'Nothing switched on';
   }
 
-  return { progress, label, stalled };
+  return { progress, label, stalled, pace };
 }
 
 /**
@@ -354,7 +361,10 @@ const overCapacity = computed(() =>
                 <span class="cycle-bar">
                   <span :style="{ width: `${card.cycle.progress * 100}%` }" />
                 </span>
-                <span class="cycle-label">{{ card.cycle.label }}</span>
+                <span class="cycle-label">
+                  {{ card.cycle.label }}<span v-if="card.cycle.pace > 1.005" class="muted">
+                  · ×{{ card.cycle.pace.toFixed(1) }} on a full brood</span>
+                </span>
               </span>
               <span v-if="card.action" class="action-upgrade" :class="{ muted: card.maxed }">
                 {{ card.action }}

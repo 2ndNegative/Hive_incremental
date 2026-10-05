@@ -240,6 +240,57 @@ export function isUsableFuel(state, id) {
   return true;
 }
 
+/* ------------------------------------------------------------------- costs */
+
+/**
+ * What a cost in a nutrient the hive cannot yet see costs INSTEAD.
+ *
+ * The hive can want a thing before it can name it. A drone built out of
+ * phosphorus is still a drone built out of phosphorus — but a hive that has not
+ * run the assay has no idea which part of the ash that is, so it has to shovel
+ * ash at the problem until enough of it happens to be phosphorus. Fifty grams
+ * of the parent for every gram of the real thing: wasteful, workable, and it
+ * turns every assay into a cost cut rather than a new menu.
+ */
+export const LOCKED_COST_MULTIPLIER = 50;
+
+/**
+ * Resolve a cost against what the hive can currently see.
+ *
+ * A revealed nutrient is charged as written. An unrevealed one is charged to
+ * its parent macro at LOCKED_COST_MULTIPLIER, and several locked micros sharing
+ * a parent pile onto the same line. A nutrient with no parent at all — which
+ * should not happen — is left as written rather than silently made free.
+ */
+export function payableCost(state, cost) {
+  if (!cost) return {};
+  let swapped = false;
+  const out = {};
+  for (const [id, grams] of Object.entries(cost)) {
+    if (!grams) continue;
+    if (!NUTRIENTS[id] || isRevealed(state, id)) {
+      out[id] = (out[id] || 0) + grams;
+      continue;
+    }
+    const parent = parentsOf(id)[0];
+    if (!parent) {
+      out[id] = (out[id] || 0) + grams;
+      continue;
+    }
+    out[parent] = (out[parent] || 0) + grams * LOCKED_COST_MULTIPLIER;
+    swapped = true;
+  }
+  // Marked rather than inferred, so the interface can say WHY a cost looks the
+  // way it does without re-deriving it.
+  if (swapped) Object.defineProperty(out, 'substituted', { value: true, enumerable: false });
+  return out;
+}
+
+/** Did resolving this cost swap a locked nutrient for its parent? */
+export function costWasSubstituted(cost) {
+  return Boolean(cost?.substituted);
+}
+
 /* ------------------------------------------------------------ mass accounting */
 
 /** The macro fractions a micro's mass is part of, most likely first. */

@@ -25,6 +25,11 @@
 //
 // WHAT A TYPE DECLARES
 //   caste        the band it belongs to, from DRONE_CASTES
+//   cost         what a Molding Chamber spends to press one.  READ. A cost in
+//                a nutrient the hive has not assayed yet is charged to its
+//                parent macro at fifty times the amount — see payableCost in
+//                definitions/nutrients.js. The hive can want phosphorus before
+//                it can find phosphorus; it just pays in ash until it can.
 //   cogitDraw    cogits one of them occupies, working or not.  READ
 //   gather       which forage route it works, as the old castes did.  READ
 //   load         grams one of them carries home per trip, as { min, max }
@@ -63,8 +68,11 @@ export const DRONE_TYPES = {
       'worth growing — and the one every other drone is a specialisation of.',
     // One cogit each. The hive has to hold a drone in mind for it to stay
     // coherent, and that room is occupied whether the drone is doing anything
-    // or not.
+    // or not — and a chamber will not press one the hive has no room for.
     cogitDraw: 1,
+    // Pressed out of a larva and a little fat. Cheap, because a Forager is the
+    // thing a hive makes when it has nothing else to make.
+    cost: { fat: 5 },
     // The ground-vegetation route, the same one the parked forager caste worked
     // and the same one a manual gather draws on.
     gather: 'forager',
@@ -72,10 +80,28 @@ export const DRONE_TYPES = {
     load: { min: 20, max: 45 },
     unlock: () => true,
   },
+
+  scavenger: {
+    id: 'scavenger',
+    name: 'Scavenger',
+    caste: 'worker',
+    desc:
+      'Works what has already died. Brings back no more mass than a Forager and far more out of ' +
+      'it — carrion is fat and protein where standing vegetation is water and fibre. Nothing it ' +
+      'takes puts up a fight.',
+    cogitDraw: 1,
+    // Phosphorus, which the hive cannot see yet: until the assay is run this is
+    // charged as 250 g of mineral mass instead. Expensive on purpose — the
+    // scavenger route is worth far more per gram than the forager one.
+    cost: { phosphorus: 5 },
+    gather: 'scavenger',
+    load: { min: 20, max: 45 },
+    unlock: () => true,
+  },
 };
 
 /** Display order within a caste, and the order the engine will iterate. */
-export const DRONE_TYPE_ORDER = ['forager'];
+export const DRONE_TYPE_ORDER = ['forager', 'scavenger'];
 
 /**
  * What the molding chambers should make next, or null if there is nothing they
@@ -89,7 +115,7 @@ export const DRONE_TYPE_ORDER = ['forager'];
  * Eligible means: switched on, unlocked, and under its target. No target at all
  * means no ceiling.
  */
-export function nextMoldable(state) {
+export function nextMoldable(state, free = Infinity) {
   for (const id of DRONE_TYPE_ORDER) {
     const def = DRONE_TYPES[id];
     if (!def || !def.unlock(state)) continue;
@@ -97,13 +123,16 @@ export function nextMoldable(state) {
     if (!want?.on) continue;
     const target = want.target;
     if (target !== null && target !== undefined && (state.droneTypes?.[id] || 0) >= target) continue;
+    // A drone the hive cannot hold in mind is not a drone, it is a loss. The
+    // chamber waits rather than pressing one.
+    if ((def.cogitDraw || 0) > free + 1e-9) continue;
     return id;
   }
   return null;
 }
 
 /** Why a type is not being made, for the row to say so. */
-export function moldStatus(state, id) {
+export function moldStatus(state, id, free = Infinity) {
   const def = DRONE_TYPES[id];
   if (!def) return 'unknown';
   const want = state.droneMolding?.[id];
@@ -112,7 +141,8 @@ export function moldStatus(state, id) {
   if (target !== null && target !== undefined && (state.droneTypes?.[id] || 0) >= target) {
     return 'at target';
   }
-  if (nextMoldable(state) !== id) return 'queued';
+  if ((def.cogitDraw || 0) > free + 1e-9) return 'no bandwidth';
+  if (nextMoldable(state, free) !== id) return 'queued';
   // Allowed, first in line, and nothing to press. The chamber idles at its
   // lower draw while this is true, so the row should not claim it is working.
   return (state.larvae || 0) >= 1 ? 'molding' : 'no larvae';
@@ -126,18 +156,6 @@ export function typesInCaste(casteId) {
 /** The types that work a forage route, in declared order. */
 export function foragingTypes() {
   return DRONE_TYPE_ORDER.filter((id) => DRONE_TYPES[id]?.gather && DRONE_TYPES[id]?.load);
-}
-
-/**
- * Where a drone type's current find lives in `state.forage`.
- *
- * NAMESPACED on purpose. The parked castes keep their own slots under their
- * bare ids, and one of them is called `forager` too — the same word for a
- * different thing. A save from before the rebuild would otherwise hand the new
- * Forager drones whatever the old Forager caste was last carrying.
- */
-export function droneForageKey(id) {
-  return `drone:${id}`;
 }
 
 /** Cogits one drone of this type occupies. */

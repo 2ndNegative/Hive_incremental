@@ -15,12 +15,13 @@ import { computed } from 'vue';
 import { state, derived, showInCodex } from '../../game/useGame.js';
 import { BIOMES, CLIMATES, holdings, totalArea, biomeShares, needsLightText } from '../../game/definitions/biomes.js';
 import { squarify } from '../../game/treemap.js';
+import { FORAGERS_PER_SQUARE_METRE, AREA_PER_PATCH } from '../../game/definitions/biomes.js';
 import { GATHER_TYPES, poolFor } from '../../game/definitions/forage.js';
 import { ORGANISMS, preyFor } from '../../game/definitions/organisms.js';
 import { ITEMS } from '../../game/definitions/items/index.js';
 import { CASTES, CASTE_ORDER } from '../../game/definitions/castes.js';
-import { DRONE_TYPES, foragingTypes, droneForageKey } from '../../game/definitions/drones.js';
-import { describeFind } from '../../game/forage.js';
+import { DRONE_TYPES } from '../../game/definitions/drones.js';
+import { describeFind, describeSlot } from '../../game/forage.js';
 import { formatMass, formatMassFlow } from '../../game/units.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
 import {
@@ -153,44 +154,54 @@ const learned = computed(() => {
 });
 
 /**
- * What is out on the land right now — the drone types that gather, and any
- * gathering caste still left standing. Both read the same `state.forage` slots;
- * the only difference is which registry the name and the count come from.
+ * What is out on the land right now.
+ *
+ * ONE ROW PER PATCH, not per drone type. The hive works several places at once
+ * — how many is decided by how much ground it holds — and each of them is its
+ * own find with its own share of the drones on it. A hive on four patches is
+ * bringing in four different things, which is the whole reason to expand.
+ *
+ * The parked castes still get a row each, read from their old single slot.
  */
 const working = computed(() => {
   const rows = [];
-  for (const id of foragingTypes()) {
-    const count = state.droneTypes?.[id] || 0;
-    if (!count) continue;
-    const key = droneForageKey(id);
-    const found = describeFind(state, key);
-    const flow = derived.value.forage?.[key];
-    rows.push({
-      id: key,
-      def: DRONE_TYPES[id],
-      assigned: count,
-      found,
-      rate: flow?.rate || 0,
-      grams: flow?.grams || 0,
-      empty: found.empty,
-    });
+  for (const f of Object.values(derived.value.droneForage ?? {})) {
+    for (const patch of f.patches) {
+      rows.push({
+        id: `${f.droneId}-${patch.index}`,
+        name: DRONE_TYPES[f.droneId]?.name ?? f.droneId,
+        assigned: patch.drones,
+        found: describeSlot(patch),
+        rate: patch.rate,
+        grams: patch.grams,
+        worked: patch.worked,
+        empty: patch.empty,
+      });
+    }
   }
   for (const id of CASTE_ORDER) {
     if (!CASTES[id].gather || (state.castes[id] || 0) <= 0) continue;
     const found = describeFind(state, id);
-    const flow = derived.value.forage?.[id];
     rows.push({
       id,
-      def: CASTES[id],
+      name: CASTES[id].name,
       assigned: state.castes[id],
       found,
-      rate: flow?.rate || 0,
+      rate: derived.value.forage?.[id]?.rate || 0,
       grams: 0,
+      worked: true,
       empty: found.empty,
     });
   }
   return rows;
 });
+
+/** What the ground will carry, and how many places it is worked in. */
+const ground = computed(
+  () => derived.value.land ?? { capacity: 0, patches: 0, working: 0, landless: 0 },
+);
+const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
+
 </script>
 
 <template>
@@ -277,17 +288,35 @@ const working = computed(() => {
     </div>
 
     <!-- ------------------------------------------------------- who is on what -->
-    <div v-if="working.length" class="panel-box" style="margin-bottom: 0.75rem">
+    <div v-if="ground.patches || working.length" class="panel-box" style="margin-bottom: 0.75rem">
       <div class="panel-head">
         <span>Out now</span>
-        <span class="muted num">{{ working.length }}</span>
+        <span class="muted num">{{ formatMassFlow(totalRate) }}</span>
       </div>
+
+      <div class="panel-body">
+        <p class="muted" style="font-size: 0.78rem; margin: 0 0 0.5rem">
+          Ground carries <strong>{{ ground.capacity.toFixed(0) }}</strong> foraging
+          drone{{ ground.capacity === 1 ? '' : 's' }} at
+          {{ (1 / FORAGERS_PER_SQUARE_METRE).toFixed(1) }} m² each, and is worked in
+          <strong>{{ ground.patches }}</strong> patch{{ ground.patches === 1 ? '' : 'es' }} —
+          one per {{ AREA_PER_PATCH }} m², never fewer than the number of biomes held. Each
+          patch is its own find, rolled separately.
+        </p>
+        <p v-if="ground.landless > 0" class="warn" style="font-size: 0.78rem; margin: 0 0 0.5rem">
+          <strong class="bad">{{ ground.landless.toFixed(0) }} with nowhere to work.</strong>
+          The hive holds more foragers than its ground will carry. More land, or fewer drones.
+        </p>
+      </div>
+
       <div class="panel-body tight">
         <div v-for="w in working" :key="w.id" class="field-row">
           <span class="field-label">
-            {{ w.def.name }} <span class="muted">×{{ w.assigned }}</span>
+            {{ w.name }}
+            <span class="muted">×{{ w.assigned < 1 ? w.assigned.toFixed(2) : w.assigned.toFixed(1) }}</span>
             <span class="field-help">
-              <template v-if="w.empty">{{ w.found.label }} — nothing of this kind there.</template>
+              <template v-if="!w.worked">No drone on this patch.</template>
+              <template v-else-if="w.empty">{{ w.found.label }} — nothing of this kind there.</template>
               <template v-else>
                 On
                 <button
@@ -304,7 +333,7 @@ const working = computed(() => {
               </template>
             </span>
           </span>
-          <span class="num" :class="w.empty ? 'bad' : 'good'">{{ formatMassFlow(w.rate) }}</span>
+          <span class="num" :class="w.rate > 0 ? 'good' : 'bad'">{{ formatMassFlow(w.rate) }}</span>
         </div>
       </div>
     </div>

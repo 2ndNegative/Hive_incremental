@@ -32,18 +32,19 @@ export const ORIGINS = {
     effects: [
       '36 m² of temperate forest',
       'Hivecore at level 1',
-      '1 GJ left in the seed — half an hour of Hivecore',
+      '1 GJ left in the seed — hours before it runs dry',
       'No stores, no drones, nothing else built',
     ],
     // Stores and drones stay at zero for the building and drone rebuild — but
     // the Hivecore is there from the first second, because a hive without one is
     // not a hive, it is mass.
     //
-    // THE GRACE PERIOD. What is left in the seed: 1 GJ, which is a little over
-    // half an hour of a Hivecore and nothing else. The hive does not brown out while the
-    // player is still reading the screen — it browns out when that runs down,
-    // by which time there has been time to gather, grow a gut and get a
-    // generator lit. Spent, not stored: nothing refills it but a generator.
+    // THE GRACE PERIOD. What is left in the seed: 1 GJ. At the Hivecore's old
+    // half-megawatt that was half an hour; at fifty kilowatts it is most of a
+    // working day, which is far more rope than the opening needs. Left as it
+    // is for now because the number was chosen deliberately — but it is the
+    // obvious thing to cut if the start feels weightless.
+    // Spent, not stored: nothing refills it but a generator.
     start: {
       territory: { temperateForest: 36 },
       nutrients: {},

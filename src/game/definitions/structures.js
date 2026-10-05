@@ -153,9 +153,13 @@ export const STRUCTURES = {
     // because a player choosing to grow a Hivecore is not choosing a pantry.
     // It is there so the first forage has somewhere to land at all.
     itemStorage: 500,
-    // Half a megajoule every second. Nothing else in the game is close, and
-    // nothing in the game can pay for it without generators.
-    upkeepWatts: 500_000,
+    // PRICED IN FORAGERS. A forager brings 2.7 g/s of forest forage, which is
+    // about 16 kW once a generator has opened it — so this is three foragers,
+    // and a hive that cannot field three foragers has bigger problems. It used
+    // to be five hundred kilowatts, which was thirty-one of them: a fixed cost
+    // no small hive could ever pay, and the reason a fifteen-drone hive could
+    // not keep itself alive.
+    upkeepWatts: 50_000,
   },
 
   broodChamber: {
@@ -168,8 +172,8 @@ export const STRUCTURES = {
       'feeding it and it stops being anything at all, quickly.',
     unlock: () => true,
     cost: (n) => ({ fiber: geo(520, 1.4)(n), protein: geo(90, 1.4)(n), fat: geo(30, 1.4)(n) }),
-    brood: { seconds: 20, cost: { protein: 120 }, yield: 1 },
-    upkeepWatts: 100_000,
+    brood: { seconds: 20, cost: { protein: 60 }, yield: 1 },
+    upkeepWatts: 25_000,
   },
 
   moldingChamber: {
@@ -181,8 +185,8 @@ export const STRUCTURES = {
       'job. Switch a drone type on in the Drones tab and this is what makes it.',
     unlock: () => true,
     cost: (n) => ({ fiber: geo(400, 1.35)(n), protein: geo(60, 1.35)(n), ash: geo(30, 1.35)(n) }),
-    upkeepWatts: 100_000, // idling, with nothing it is allowed to make
-    activeWatts: 500_000, // pressing
+    upkeepWatts: 25_000, // idling, with nothing it is allowed to make
+    activeWatts: 100_000, // pressing
     molding: { seconds: 20 },
   },
 
@@ -199,10 +203,12 @@ export const STRUCTURES = {
     // felt each time, not stacked twenty deep in one go.
     cost: (n) => ({ fiber: geo(480, 1.45)(n), protein: geo(80, 1.45)(n), fat: geo(30, 1.45)(n) }),
     cogitCapacity: 5,
-    // The same bandwidth the Hivecore supplies, for half the watts — which is
-    // the point of a dedicated organ, and the reason to grow one rather than
-    // keep levelling the core.
-    upkeepWatts: 250_000,
+    // THE RULE THAT MAKES DRONES WORTH HAVING. Five cogits holds five drones
+    // coherent, and five foragers earn about 80 kW. A node has to cost a
+    // fraction of that or every drone added is a drone the hive loses energy
+    // on — which is exactly what 250 kW did, at −34 kW a drone, and why hives
+    // died the moment they grew.
+    upkeepWatts: 20_000,
   },
 
   vacuole: {
@@ -319,6 +325,11 @@ export const STRUCTURES = {
   },
 
   /* ------------------------------------------------------------- parked -- */
+  //
+  // NOTE ON THE WATTS BELOW: these are pre-rebuild figures, from when a whole
+  // hive ran on a few hundred watts. Nothing reads them. Anything revived from
+  // here needs repricing against the live scale first — see the Hivecore, which
+  // explains what a watt is worth in foragers.
 
   gutSac: {
     id: 'gutSac',

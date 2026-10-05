@@ -21,9 +21,10 @@ import {
   moldStatus,
   typesInCaste,
   unfiledTypes,
-  droneForageKey,
 } from '../../game/definitions/drones.js';
 import { GATHER_TYPES } from '../../game/definitions/forage.js';
+import { STRUCTURES } from '../../game/definitions/structures.js';
+import { NUTRIENTS, payableCost, costWasSubstituted } from '../../game/definitions/nutrients.js';
 import { toggleMolding, setMoldTarget } from '../../game/actions.js';
 import { formatCogits, formatMass, formatMassFlow } from '../../game/units.js';
 
@@ -33,8 +34,26 @@ const STATUS = {
   queued: { text: 'waiting its turn', tone: 'muted' },
   'at target': { text: 'at target', tone: 'muted' },
   'no larvae': { text: 'no larvae', tone: 'bad' },
+  'no bandwidth': { text: 'no bandwidth', tone: 'bad' },
   off: { text: 'off', tone: 'muted' },
 };
+
+/** A mold cost as the hive can actually pay it, locked nutrients swapped out. */
+function costLine(def) {
+  const cost = payableCost(state, def.cost);
+  const parts = Object.entries(cost).map(
+    ([n, g]) => `${formatMass(g)} ${NUTRIENTS[n]?.name.toLowerCase() ?? n}`,
+  );
+  if (!parts.length) return null;
+  return {
+    text: parts.join(' + '),
+    // Charged to a parent macro because the real thing is still unassayed.
+    substituted: costWasSubstituted(cost),
+    real: Object.keys(def.cost || {})
+      .map((n) => NUTRIENTS[n]?.name.toLowerCase() ?? n)
+      .join(' + '),
+  };
+}
 
 const bands = computed(() =>
   DRONE_CASTE_ORDER.map((id) => {
@@ -43,10 +62,10 @@ const bands = computed(() =>
       .filter((tid) => DRONE_TYPES[tid].unlock(state))
       .map((tid) => {
         const want = state.droneMolding?.[tid] ?? { on: false, target: null };
-        const status = moldStatus(state, tid);
+        const status = moldStatus(state, tid, derived.value.cognition.free);
         const def = DRONE_TYPES[tid];
         const count = state.droneTypes?.[tid] || 0;
-        const flow = derived.value.forage?.[droneForageKey(tid)];
+        const flow = derived.value.droneForage?.[tid];
 
         // What one of them costs and what one of them is for, in the type's own
         // terms rather than the hive's totals. Declared-but-unread fields stay
@@ -69,9 +88,13 @@ const bands = computed(() =>
           status,
           label: STATUS[status] ?? { text: status, tone: 'muted' },
           terms,
+          cost: costLine(def),
           cogits: (def.cogitDraw || 0) * count,
           rate: flow?.rate || 0,
-          find: flow?.itemId ? flow : null,
+          // Drones the hive is holding that its land will not carry. They cost
+          // bandwidth and bring nothing back, which is worth saying out loud.
+          landless: flow?.landless || 0,
+          patches: flow?.open || 0,
         };
       });
     return {
@@ -80,6 +103,7 @@ const bands = computed(() =>
       types,
       held: types.reduce((sum, t) => sum + t.count, 0),
       cogits: types.reduce((sum, t) => sum + t.cogits, 0),
+      landless: types.reduce((sum, t) => sum + t.landless, 0),
       rate: types.reduce((sum, t) => sum + t.rate, 0),
       open: !state.ui.droneBands?.[id],
     };
@@ -94,11 +118,19 @@ function toggleBand(id) {
 const unfiled = computed(() => unfiledTypes());
 const total = computed(() => bands.value.reduce((sum, b) => sum + b.held, 0));
 const cogits = computed(() => bands.value.reduce((sum, b) => sum + b.cogits, 0));
+const landless = computed(() => bands.value.reduce((sum, b) => sum + b.landless, 0));
+const land = computed(() => derived.value.land ?? { capacity: 0, patches: 0 });
 const hauling = computed(() => bands.value.reduce((sum, b) => sum + b.rate, 0));
 const cognition = computed(() => derived.value.cognition);
 
 /** The molding chambers, so the tab can say why nothing is happening. */
 const chambers = computed(() => derived.value.molding ?? []);
+/** What pressing costs over idling, and how much the brood is speeding it up. */
+const moldDraw = computed(() => {
+  const def = STRUCTURES.moldingChamber;
+  return def?.upkeepWatts ? Math.round((def.activeWatts || 0) / def.upkeepWatts) : 1;
+});
+const pace = computed(() => chambers.value[0]?.pace ?? 1);
 const standing = computed(() => chambers.value.reduce((n, m) => n + m.count, 0));
 const rate = computed(() => derived.value.moldRate ?? 0);
 const starved = computed(() => chambers.value.some((m) => m.starved));
@@ -127,7 +159,8 @@ function onTarget(id, event) {
       <strong>{{ standing }} Molding Chamber{{ standing === 1 ? '' : 's' }}.</strong>
       <template v-if="rate > 0">
         Pressing {{ (rate * 60).toFixed(1) }} drones a minute out of the brood, one larva each,
-        and drawing five times its idle power to do it.
+        and drawing {{ moldDraw }}× its idle power to do it.<template v-if="pace > 1.005">
+        A brood this full is running it at ×{{ pace.toFixed(1) }}.</template>
       </template>
       <template v-else>
         Nothing is switched on, so they are idling at their lower draw. The hive is holding
@@ -143,8 +176,16 @@ function onTarget(id, event) {
       Holding {{ formatCogits(cogits) }} of the hive's {{ formatCogits(cognition.capacity) }}
       cognition<span v-if="cognition.over" class="bad"> — which is already over budget</span>.
       <template v-if="hauling > 0">
-        Bringing in {{ formatMassFlow(hauling) }} between them.
+        Bringing in {{ formatMassFlow(hauling) }} across {{ land.patches }}
+        patch{{ land.patches === 1 ? '' : 'es' }} of ground.
       </template>
+    </div>
+
+    <div v-if="landless > 0" class="notice is-warn">
+      <strong class="bad">{{ landless.toFixed(0) }} with nowhere to work.</strong>
+      The hive's land carries {{ land.capacity.toFixed(0) }} foraging
+      drone{{ land.capacity === 1 ? '' : 's' }}, and it is holding more than that. They still
+      cost bandwidth and still eat; they just have nowhere to go. Take more ground.
     </div>
 
     <div class="band-stack">
@@ -174,8 +215,15 @@ function onTarget(id, event) {
                 <span v-if="t.terms.length" class="job-desc muted" style="display: block">
                   {{ t.terms.join(' · ') }}
                 </span>
+                <span v-if="t.cost" class="job-desc muted" style="display: block">
+                  costs {{ t.cost.text }} a press<template v-if="t.cost.substituted">
+                  — it is really built out of {{ t.cost.real }}, and the hive is shovelling the
+                  parent at it until the assay is run</template>
+                </span>
                 <span v-if="t.count && t.rate > 0" class="job-desc good" style="display: block">
-                  {{ formatMassFlow(t.rate) }} coming in
+                  {{ formatMassFlow(t.rate) }} coming in across {{ t.patches }}
+                  patch{{ t.patches === 1 ? '' : 'es' }}<span v-if="t.landless > 0" class="bad">
+                  · {{ t.landless.toFixed(0) }} with nowhere to work</span>
                 </span>
               </span>
               <span class="job-count" :class="t.count > 0 ? '' : 'muted'">{{ t.count }}</span>

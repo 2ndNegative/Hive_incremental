@@ -18,15 +18,21 @@ import {
   fuelLockFor,
   clickMultiplier,
   MANUAL_COMBO_MAX,
+  larvaPace,
   LARVA_CARB_PER_SECOND,
 } from './game/engine.js';
 import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS } from './game/save.js';
 import { SAVE_VERSION } from './game/state.js';
 import { runOfflineCatchup, offline, skipOffline } from './game/offline.js';
-import { NUTRIENTS, FUELS, itemYield, parentsOf } from './game/definitions/nutrients.js';
+import {
+  NUTRIENTS, FUELS, itemYield, parentsOf, payableCost, LOCKED_COST_MULTIPLIER,
+} from './game/definitions/nutrients.js';
 import { ITEMS } from './game/definitions/items/index.js';
 import { ORGANISMS, preyFor } from './game/definitions/organisms.js';
-import { BIOMES, BIOME_IDS, biomeShares, totalArea, holdings } from './game/definitions/biomes.js';
+import {
+  BIOMES, BIOME_IDS, biomeShares, totalArea, holdings, landCapacity, patchCount,
+  FORAGERS_PER_SQUARE_METRE, AREA_PER_PATCH,
+} from './game/definitions/biomes.js';
 import { FORAGE, poolFor } from './game/definitions/forage.js';
 import * as forage from './game/forage.js';
 import * as discovery from './game/discovery.js';
@@ -49,7 +55,7 @@ import { formatMass, formatEnergy, formatPower, formatCogits, formatLarvae } fro
 import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
 import {
   DRONE_CASTES, DRONE_CASTE_ORDER, DRONE_TYPES, DRONE_TYPE_ORDER, typesInCaste, unfiledTypes,
-  foragingTypes, droneForageKey, cogitDrawOf,
+  foragingTypes, cogitDrawOf,
   nextMoldable, moldStatus,
 } from './game/definitions/drones.js';
 import {
@@ -100,6 +106,8 @@ window.hive = {
   biomeShares: () => biomeShares(state),
   totalArea: () => totalArea(state),
   holdings: () => holdings(state),
+  landCapacity: () => landCapacity(state),
+  patchCount: () => patchCount(state),
   forageTable: FORAGE,
   poolFor,
   preyFor,
@@ -133,7 +141,10 @@ window.hive = {
   saveVersion: SAVE_VERSION,
   saveStatus,
   measureStorageHeadroom,
-  tick: (seconds) => advance(state, seconds),
+  // `step` is the simulated slice per iteration, as offline catch-up scales it:
+  // a month at one-second steps is 2.6 million of them, which is minutes of
+  // wall clock for a result a coarse step reaches in a moment.
+  tick: (seconds, step = 1) => advance(state, seconds, step),
   // Hand control of the clock, so a test can take exact samples instead of
   // racing the live loop.
   loop: { start: () => startLoop(state), stop: stopLoop },
@@ -150,11 +161,12 @@ window.hive = {
     typesInCaste,
     unfiled: unfiledTypes,
     foraging: foragingTypes,
-    forageKey: droneForageKey,
     cogitDrawOf,
-    rollForage: (id) => forage.rollDroneForage(state, id),
-    nextMoldable: () => nextMoldable(state),
-    moldStatus: (id) => moldStatus(state, id),
+    patches: (id) => forage.patchesFor(state, id),
+    rollPatch: (id, patch) => forage.rollPatch(state, id, patch),
+    nextMoldable: () => nextMoldable(state, computeCognition(state).free),
+    moldStatus: (id, free) => moldStatus(state, id, free ?? computeCognition(state).free),
+    nextMoldableFree: (free) => nextMoldable(state, free ?? computeCognition(state).free),
     setMolding,
     toggleMolding,
     setMoldTarget,
@@ -179,9 +191,14 @@ window.hive = {
   buildingCategoryOrder: BUILDING_CATEGORY_ORDER,
   charges: () => computeCharges(state),
   brownoutSeconds: BROWNOUT_SECONDS,
+  foragersPerSquareMetre: FORAGERS_PER_SQUARE_METRE,
+  areaPerPatch: AREA_PER_PATCH,
   fuelSwitchSeconds: FUEL_SWITCH_SECONDS,
   fuelLock: (key) => fuelLockFor(state, key),
   larvaCarbPerSecond: LARVA_CARB_PER_SECOND,
+  larvaPace: () => larvaPace(state),
+  lockedCostMultiplier: LOCKED_COST_MULTIPLIER,
+  payableCost: (cost) => payableCost(state, cost || {}),
   maxLevelOf,
   build: (id, n) => buildStructure(id, n),
   setActive,

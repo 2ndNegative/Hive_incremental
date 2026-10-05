@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 14;
+export const SAVE_VERSION = 16;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -96,6 +96,13 @@ export function createInitialState() {
     // in tick(), never in computeDerived — the interface reads this, so it has
     // to be the same from one frame to the next.
     forage: {},
+
+    // The patches each foraging drone type is working, keyed by type id: an
+    // array of { elapsed, biomeId, itemId, grams }. How many there are is
+    // decided by the land — see definitions/biomes.js patchCount — and each one
+    // is rolled separately, so a big holding is several places at once rather
+    // than one place that happens to be bigger.
+    patches: {},
     insight: 0,
     drones: 0,
 

@@ -52,6 +52,7 @@ import {
   isRevealed,
   isUsableFuel,
   itemYield,
+  payableCost,
 } from './definitions/nutrients.js';
 import {
   STRUCTURES,
@@ -70,14 +71,13 @@ import {
 import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import { ORGANISMS } from './definitions/organisms.js';
-import { BIOMES } from './definitions/biomes.js';
+import { BIOMES, totalArea, landCapacity, patchCount } from './definitions/biomes.js';
 import { BASE_COGIT_CAPACITY, COGIT_PER_DRONE } from './definitions/cognition.js';
 import {
   DRONE_TYPES,
   DRONE_TYPE_ORDER,
   nextMoldable,
   foragingTypes,
-  droneForageKey,
 } from './definitions/drones.js';
 import { advanceForage, FORAGE_CYCLE } from './forage.js';
 
@@ -119,6 +119,25 @@ const STARVE_SECONDS = 25; // at zero energy, how long until a drone is lost
 
 /** What one larva eats, every second it exists. */
 export const LARVA_CARB_PER_SECOND = 0.1;
+
+/**
+ * A FULL BROOD WORKS FASTER THAN AN EMPTY ONE.
+ *
+ * Larvae are not just stock waiting to be spent — a packed brood is warm, and
+ * warmth is what a chamber is for. Every cycle in the hive that handles larvae
+ * (laying them and pressing them into drones) runs at a multiplier that starts
+ * at exactly 1 with an empty brood and climbs from there.
+ *
+ * Square root, not linear: five larvae doubles the pace, which is enough to
+ * make the first handful feel like an achievement, and a thousand does not
+ * multiply it by a hundred. Only ever ≥ 1 — a young hive is never punished for
+ * having nothing in the nursery, it simply gets no help.
+ */
+export const LARVA_PACE_SCALE = 5;
+
+export function larvaPace(state) {
+  return 1 + Math.sqrt(Math.max(0, state.larvae || 0) / LARVA_PACE_SCALE);
+}
 
 /* --------------------------------------------------------------- the click */
 
@@ -676,7 +695,19 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // which would wake it up — a slow oscillation with no way to read it. Larvae
   // are safe to depend on: they move on a twenty-second cadence, not a
   // hundred-millisecond one.
-  const moldTarget = nextMoldable(state);
+  // How much faster a full brood runs. Used by both the molding block here and
+  // the brood block further down, so it is worked out once, up here.
+  const pace = larvaPace(state);
+
+  // A chamber will not press a drone the hive has no bandwidth left to hold
+  // coherent, and will not press one it cannot pay for. Both are checked here,
+  // before anything is billed, so an unaffordable drone idles the chamber at
+  // its lower draw rather than running it at five times the watts for nothing.
+  const moldTarget = nextMoldable(state, cognition.free);
+  const moldCost = moldTarget ? payableCost(state, DRONE_TYPES[moldTarget].cost) : {};
+  const moldAffordable = Object.entries(moldCost).every(
+    ([n, g]) => (state.nutrients[n] || 0) >= g - EPSILON,
+  );
   const larvaeOnHand = (state.larvae || 0) >= 1;
   const molding = [];
   for (const id of STRUCTURE_ORDER) {
@@ -686,7 +717,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     const units = working(state, charges, id);
     // Something it is allowed to make, whether or not it can make it yet.
     const wants = running > 0 && Boolean(moldTarget);
-    const active = wants && larvaeOnHand;
+    const active = wants && larvaeOnHand && moldAffordable;
     molding.push({
       id,
       name: STRUCTURES[id].name,
@@ -698,11 +729,16 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       active,
       makes: moldTarget,
       makesName: moldTarget ? DRONE_TYPES[moldTarget]?.name ?? moldTarget : null,
+      cost: moldCost,
+      affordable: moldAffordable,
+      pace,
       progress: state.molding?.[id] || 0,
-      // Drones per second at this many chambers, at this charge.
-      rate: active ? units / def.seconds : 0,
+      // Drones per second at this many chambers, at this charge, at this pace.
+      rate: active ? (units * pace) / def.seconds : 0,
       // Work in front of it and an empty brood behind it.
-      starved: wants && !larvaeOnHand,
+      starved: wants && larvaeOnHand === false,
+      // Work in front of it and nothing to build it out of.
+      broke: wants && larvaeOnHand && !moldAffordable,
     });
   }
   const moldRate = molding.reduce((sum, m) => sum + m.rate, 0);
@@ -994,8 +1030,10 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       cost: def.cost,
       yield: def.yield ?? 1,
       progress: state.brood?.[id] || 0,
-      // Larvae per second at this many chambers, at this charge.
-      rate: (units * (def.yield ?? 1)) / def.seconds,
+      // How much faster a full brood makes this go. One with nothing in it.
+      pace,
+      // Larvae per second at this many chambers, at this charge, at this pace.
+      rate: (units * pace * (def.yield ?? 1)) / def.seconds,
       affordable: Object.entries(def.cost).every(
         ([n, g]) => (state.nutrients[n] || 0) >= g - EPSILON,
       ),
@@ -1071,45 +1109,87 @@ export function computeDerived(state, dt = TICK_SECONDS) {
 
   // And the drones, which is where foraging lives now.
   //
-  // A trip, not a tap: the slot holds what this trip found and what it weighs,
-  // and the rate is that weight spread over the cycle it takes to walk it home.
-  // So the figure on screen is an average of something lumpy rather than a
-  // pressure — and it moves every twelve seconds, because the next patch was
-  // not as good as this one.
+  // TWO THINGS LAND DOES, and they are different things. It CAPS how many
+  // drones can be out at once — a hive with forty foragers and nine square
+  // metres has nine foragers and thirty-one standing around — and it decides
+  // how many PATCHES are worked at the same time, each its own find, rolled
+  // separately and worked by its own share of the drones.
+  //
+  // A trip, not a tap: a patch holds what it found and what that weighs, and
+  // its rate is that weight spread over the cycle it takes to walk it home. So
+  // every figure here is an average of something lumpy, and the patches drift
+  // out of step with each other rather than all stepping at once.
   //
   // Not scaled by charge or by energy: a drone type declares no upkeep yet, so
   // there is nothing for a brownout to take away from it. When one does, this
   // is where that multiplier goes.
+  const area = totalArea(state);
+  const capacity = landCapacity(state);
+  const patchesAvailable = patchCount(state);
+  const droneForage = {};
+  let roomLeft = capacity;
+
   for (const typeId of foragingTypes()) {
     const count = state.droneTypes?.[typeId] || 0;
     if (!count) continue;
     const def = DRONE_TYPES[typeId];
-    const slot = state.forage?.[droneForageKey(typeId)];
-    const biome = slot?.biomeId ? BIOMES[slot.biomeId] : null;
-    const where = biome ? ` in ${biome.name.toLowerCase()}` : '';
-    const perSecond = ((slot?.grams || 0) * count) / FORAGE_CYCLE;
 
-    forage[droneForageKey(typeId)] = {
-      droneId: typeId,
-      gather: def.gather,
-      biomeId: slot?.biomeId ?? null,
-      itemId: slot?.itemId ?? null,
-      organismId: null,
-      grams: slot?.grams || 0,
-      count,
-      rate: perSecond,
-      empty: !slot?.itemId,
-    };
+    // Declared order shares out the ground, the same rule the molding chambers
+    // use to decide what to press: predictable beats clever.
+    const working = Math.max(0, Math.min(count, roomLeft));
+    roomLeft -= working;
 
-    if (slot?.itemId && perSecond > EPSILON) {
-      itemFlow[slot.itemId] = (itemFlow[slot.itemId] || 0) + perSecond;
-      (itemSources[slot.itemId] ||= []).push({
-        label: `${def.name} ×${count}${where}`,
-        amount: perSecond,
+    // One patch per drone until the land runs out of patches. A single forager
+    // works one patch properly rather than a twelfth of twelve.
+    const held = state.patches?.[typeId] ?? [];
+    const open = Math.min(held.length || patchesAvailable, Math.max(1, Math.floor(working)));
+    const perPatch = open > 0 ? working / open : 0;
+
+    const patches = [];
+    let rate = 0;
+    for (let i = 0; i < held.length; i += 1) {
+      const patch = held[i];
+      const live = i < open;
+      const grams = patch.grams || 0;
+      const perSecond = live ? (grams * perPatch) / FORAGE_CYCLE : 0;
+      const biome = patch.biomeId ? BIOMES[patch.biomeId] : null;
+      patches.push({
+        index: i,
         droneId: typeId,
-        biomeId: slot.biomeId,
+        biomeId: patch.biomeId ?? null,
+        itemId: patch.itemId ?? null,
+        grams,
+        drones: live ? perPatch : 0,
+        rate: perSecond,
+        worked: live,
+        empty: !patch.itemId,
       });
+      rate += perSecond;
+
+      if (live && patch.itemId && perSecond > EPSILON) {
+        const where = biome ? ` in ${biome.name.toLowerCase()}` : '';
+        itemFlow[patch.itemId] = (itemFlow[patch.itemId] || 0) + perSecond;
+        (itemSources[patch.itemId] ||= []).push({
+          label: `${def.name}${where}`,
+          amount: perSecond,
+          droneId: typeId,
+          biomeId: patch.biomeId,
+        });
+      }
     }
+
+    droneForage[typeId] = {
+      droneId: typeId,
+      name: def.name,
+      gather: def.gather,
+      count,
+      working,
+      // Drones the land cannot find room for. The whole point of the cap.
+      landless: count - working,
+      patches,
+      open,
+      rate,
+    };
   }
 
   /* -- 6. digestion --------------------------------------------------------- */
@@ -1325,6 +1405,17 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     itemFlow,
     itemSources,
     forage,
+    // What the land is worth: how many drones it will keep working, how many
+    // patches it is worked in, and what each type is actually doing on it.
+    land: {
+      area,
+      capacity,
+      patches: patchesAvailable,
+      working: Object.values(droneForage).reduce((a, f) => a + f.working, 0),
+      landless: Object.values(droneForage).reduce((a, f) => a + f.landless, 0),
+      full: capacity > 0 && roomLeft <= EPSILON,
+    },
+    droneForage,
     itemNet,
     itemSpill,
     itemCap, // the whole larder, shared
@@ -1625,7 +1716,9 @@ export function tick(state, dt) {
     const broodStore = openStore(state, derived.storage);
     for (const b of derived.brood) {
       let progress = b.progress;
-      if (b.units > 0) progress += (b.units * dt) / b.seconds;
+      // The pace is read from derived rather than recomputed, so one step is
+      // worked at one pace however many larvae the step itself lays.
+      if (b.units > 0) progress += (b.units * b.pace * dt) / b.seconds;
       while (progress >= 1) {
         progress -= 1;
         const canPay = Object.entries(b.cost).every(
@@ -1692,16 +1785,36 @@ export function tick(state, dt) {
   // overshooting by however many chambers were mid-press.
   state.molding ??= {};
   if (derived.molding.length) {
+    // Bandwidth is spent a drone at a time, so it is tracked a drone at a time:
+    // the headroom is read once and then walked down as each one is pressed,
+    // which is what stops a hive on its last free cogit pressing four drones in
+    // the same step and waking up over budget.
+    let free = derived.cognition.free;
     for (const m of derived.molding) {
       let progress = m.progress;
-      if (m.active && m.units > 0) progress += (m.units * dt) / m.seconds;
+      if (m.active && m.units > 0) progress += (m.units * m.pace * dt) / m.seconds;
       while (progress >= 1) {
         progress -= 1;
-        const makes = nextMoldable(state);
+        // Re-read at the moment of completion rather than taken from `derived`,
+        // so a target reached, a store spent or a cogit taken mid-cycle stops
+        // the next one instead of overshooting by however many chambers were
+        // part-way through.
+        const makes = nextMoldable(state, free);
         if (!makes || (state.larvae || 0) < 1) break;
+        const cost = payableCost(state, DRONE_TYPES[makes].cost);
+        const payable = Object.entries(cost).every(
+          ([n, g]) => (state.nutrients[n] || 0) >= g - EPSILON,
+        );
+        // An attempt it cannot pay for is LOST, the same as a brood cycle that
+        // cannot find its protein. A chamber does not bank a queue of drones.
+        if (!payable) break;
+        for (const [n, g] of Object.entries(cost)) {
+          state.nutrients[n] = Math.max(0, (state.nutrients[n] || 0) - g);
+        }
         state.larvae -= 1;
         state.droneTypes[makes] = (state.droneTypes[makes] || 0) + 1;
         state.stats.molded = (state.stats.molded || 0) + 1;
+        free -= DRONE_TYPES[makes].cogitDraw || 0;
       }
       state.molding[m.id] = progress;
     }
