@@ -26,6 +26,7 @@ import { SAVE_VERSION } from './game/state.js';
 import { runOfflineCatchup, offline, skipOffline } from './game/offline.js';
 import {
   NUTRIENTS, FUELS, itemYield, parentsOf, payableCost, LOCKED_COST_MULTIPLIER,
+  isRevealed, visibleAs,
 } from './game/definitions/nutrients.js';
 import { ITEMS } from './game/definitions/items/index.js';
 import { ORGANISMS, preyFor } from './game/definitions/organisms.js';
@@ -151,6 +152,8 @@ window.hive = {
   canAfford,
   itemYield,
   parentsOf,
+  isRevealed: (id) => isRevealed(state, id),
+  visibleAs: (id) => visibleAs(state, id),
   research,
   ingestItem,
   formatMass,

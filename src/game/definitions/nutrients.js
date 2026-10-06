@@ -229,6 +229,31 @@ export function isRevealed(state, id) {
 }
 
 /**
+ * WHAT THE HIVE THINKS IT IS HOLDING.
+ *
+ * An unassayed micronutrient is a shadow tally: the hive is carrying the iron,
+ * but it cannot tell iron from the mineral mass around it, so every gram of it
+ * is also a gram of mineral mass. The player should never be shown the name of
+ * something the hive has not resolved, and a rule the player sets on mineral
+ * mass has to govern the iron riding inside it — otherwise barring a resource
+ * from the shared pool would quietly fail to bar most of its mass.
+ *
+ * So: the id the player sees this mass as. Itself once assayed, otherwise the
+ * parent fraction that is carrying it. Macros are always revealed, so the walk
+ * terminates; the guard is there for a composition that names a missing parent.
+ */
+export function visibleAs(state, id) {
+  let at = id;
+  for (let hop = 0; hop < 4; hop += 1) {
+    if (isRevealed(state, at)) return at;
+    const parent = parentsOf(at)[0];
+    if (!parent || parent === at) return at;
+    at = parent;
+  }
+  return at;
+}
+
+/**
  * Can this nutrient currently be burned for energy? A fuel may additionally
  * require a tech — fibre is 8 kJ/g of perfectly good energy that the hive
  * simply cannot open until it has cellulolysis.

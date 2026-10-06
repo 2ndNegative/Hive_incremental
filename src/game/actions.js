@@ -6,6 +6,7 @@ import {
   NUTRIENT_IDS,
   MICROS,
   isRevealed,
+  visibleAs,
   isUsableFuel,
   itemYield,
   settleReveal,
@@ -394,14 +395,28 @@ export function setGeneralBan(nutrientId, banned) {
   else delete state.generalBans[nutrientId];
 
   if (banned) {
-    const pooled = state.general?.[nutrientId] || 0;
+    // What this rule now covers: the nutrient itself plus every unassayed
+    // micronutrient riding inside it. A ban on mineral mass evicts the iron
+    // hiding in the pool under that name, so the gate has to count it too —
+    // looking only at the macro's own grams would skip the eviction entirely
+    // whenever the shadow tally is the thing filling the pool.
+    const covers = NUTRIENT_IDS.filter((id) => visibleAs(state, id) === nutrientId);
+    let pooled = 0;
+    for (const id of covers) pooled += state.general?.[id] || 0;
     if (pooled > EPSILON_GRAMS) {
       const derived = computeDerived(state);
       // reconcile() is what performs the eviction; this only reports it.
       const lost = openStore(state, derived.storage).reconcile();
-      const gone = lost[nutrientId] || 0;
+      let gone = 0;
+      for (const id of covers) {
+        const mass = lost[id] || 0;
+        if (mass <= EPSILON_GRAMS) continue;
+        state.spilled[id] = (state.spilled[id] || 0) + mass;
+        gone += mass;
+      }
       if (gone > EPSILON_GRAMS) {
-        state.spilled[nutrientId] = (state.spilled[nutrientId] || 0) + gone;
+        // Reported under the name the player set the rule on: the hive cannot
+        // tell them apart, which is the whole reason the rule reaches them.
         pushLog(
           `${formatMass(gone)} of ${NUTRIENTS[nutrientId].name.toLowerCase()} spilled out of ` +
             'general storage.',
@@ -422,14 +437,27 @@ export function generalAllows(nutrientId) {
   return !state.generalBans?.[nutrientId];
 }
 
-/** What is in the shared pool right now, heaviest first. */
+/**
+ * What is in the shared pool right now, heaviest first — as the HIVE sees it.
+ *
+ * An unassayed micronutrient is reported under the macro that is carrying it,
+ * because that is the only name the hive has for those grams yet. Listing them
+ * separately would name resources the player has not discovered and make the
+ * tooltip disagree with the rules dialog, which has always filtered them out.
+ * The grams still add up against the free space, because the roll-up moves the
+ * mass between lines rather than dropping it.
+ */
 export function generalContents() {
-  const out = [];
+  const tally = {};
   for (const id of NUTRIENT_IDS) {
     const grams = state.general?.[id] || 0;
-    if (grams > EPSILON_GRAMS) out.push({ id, def: NUTRIENTS[id], grams });
+    if (grams <= EPSILON_GRAMS) continue;
+    const shown = visibleAs(state, id);
+    tally[shown] = (tally[shown] || 0) + grams;
   }
-  return out.sort((a, b) => b.grams - a.grams);
+  return Object.entries(tally)
+    .map(([id, grams]) => ({ id, def: NUTRIENTS[id], grams }))
+    .sort((a, b) => b.grams - a.grams);
 }
 
 /* ------------------------------------------------------------------ territory */

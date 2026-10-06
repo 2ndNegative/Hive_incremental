@@ -50,6 +50,7 @@ import {
   MICROS,
   joulesPerGram,
   isRevealed,
+  visibleAs,
   isUsableFuel,
   itemYield,
   payableCost,
@@ -495,7 +496,7 @@ function computeCaps(state, charges) {
     caps[id] = dedicated[id] + mine;
     // A banned nutrient cannot reach the pool, so the pool is not headroom for
     // it — etaFor would otherwise promise a cost it can never save up for.
-    capsMax[id] = dedicated[id] + mine + (bans[id] ? 0 : generalFree);
+    capsMax[id] = dedicated[id] + mine + (bans[visibleAs(state, id)] ? 0 : generalFree);
   }
 
   let droneCap = BASE_DRONE_CAP;
@@ -1561,6 +1562,10 @@ export function openStore(state, storage) {
   // is the point: the pool is a scarce buffer, and a flood of water or fibre
   // will take all of it and leave nothing for the protein that needed it.
   const banned = state.generalBans || {};
+  // A rule is set on a name the player can see, so it has to govern the mass
+  // riding under that name: bar mineral mass and the unassayed iron inside it
+  // is barred too, or the rule would leak most of what it was meant to stop.
+  const isBanned = (id) => Boolean(banned[visibleAs(state, id)]);
   let used = 0;
   for (const id of NUTRIENT_IDS) used += state.general[id] || 0;
 
@@ -1588,7 +1593,7 @@ export function openStore(state, storage) {
         const shelfHeld = total - mine;
         const toShelf = Math.min(delta, Math.max(0, shelf - shelfHeld));
         let left = delta - toShelf;
-        const room = banned[id] ? 0 : Math.max(0, capacity - used);
+        const room = isBanned(id) ? 0 : Math.max(0, capacity - used);
         const toPool = Math.min(left, room);
         left -= toPool;
         if (toPool > 0) setGeneral(id, mine + toPool);
@@ -1615,9 +1620,9 @@ export function openStore(state, storage) {
       // A nutrient banned AFTER it had already pooled is evicted: what is in
       // the pool is overflow by definition, so it spills rather than moving
       // back onto a shelf that was already full.
-      for (const id of Object.keys(banned)) {
+      for (const id of NUTRIENT_IDS) {
         const mine = state.general[id] || 0;
-        if (!banned[id] || mine <= EPSILON) continue;
+        if (!isBanned(id) || mine <= EPSILON) continue;
         setGeneral(id, 0);
         state.nutrients[id] = Math.max(0, (state.nutrients[id] || 0) - mine);
         lost[id] = (lost[id] || 0) + mine;
@@ -1630,7 +1635,7 @@ export function openStore(state, storage) {
         if (mine !== (state.general[id] || 0)) setGeneral(id, mine);
         const over = total - mine - (dedicated[id] || 0);
         if (over <= EPSILON) continue;
-        const room = banned[id] ? 0 : Math.max(0, capacity - used);
+        const room = isBanned(id) ? 0 : Math.max(0, capacity - used);
         const toPool = Math.min(over, room);
         if (toPool > 0) {
           setGeneral(id, mine + toPool);

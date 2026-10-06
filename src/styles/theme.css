@@ -1458,7 +1458,13 @@ textarea.save-box {
   background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
+  /* NOT `overflow: hidden`. The tiles are laid out in percentages of this box,
+     so nothing of the map itself can escape it — but a tooltip hanging off a
+     tile is absolutely positioned inside one, and a clip here (or on the tile)
+     cuts it away to nothing. That is a silent failure: the tooltip is still
+     "visible" to the stylesheet and to any test that asks for its computed
+     visibility; there is simply none of it left to see. */
+  overflow: visible;
 }
 
 .terr-tile {
@@ -1469,7 +1475,8 @@ textarea.save-box {
   justify-content: flex-end;
   gap: 1px;
   padding: 6px 8px;
-  overflow: hidden;
+  /* The labels do their own clipping (below), so the tile does not have to —
+     see the note on .terr-map for why it must not. */
   /* The gap between tiles is a border rather than a margin, so the geometry
      stays exactly proportional — insetting the boxes would quietly shrink the
      small ones more than the large ones. */
@@ -1505,6 +1512,8 @@ textarea.save-box {
   font-size: 0.68rem;
   line-height: 1.2;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 900px) {
