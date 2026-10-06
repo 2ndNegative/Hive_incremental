@@ -48,6 +48,7 @@ import {
   setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
   togglePinned, resetPinned, setMolding, toggleMolding, setMoldTarget,
   claimCost, claimableArea, claimTerritory, abandonTerritory,
+  setGeneralBan, toggleGeneralBan, generalContents,
   CLAIM_COST_PER_SQUARE_METRE, DANGEROUS_CLAIM_MULTIPLIER,
 } from './game/actions.js';
 import {
@@ -231,6 +232,10 @@ window.hive = {
   adjustActive,
   activeCount: (id) => activeCount(state, id),
   openStore,
+  generalBans: () => ({ ...(state.generalBans || {}) }),
+  generalContents,
+  setGeneralBan,
+  toggleGeneralBan,
   structuresLive: STRUCTURE_ORDER.length,
   castesLive: CASTE_ORDER.filter((id) => CASTES[id].assignable).length,
 };

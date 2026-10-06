@@ -82,7 +82,7 @@ import {
 } from './definitions/drones.js';
 import { advanceForage, FORAGE_CYCLE } from './forage.js';
 import { advanceExpeditions, expeditionSeconds, EXPEDITION_OUTCOMES } from './expedition.js';
-import { formatMass } from './units.js';
+import { formatMass, formatArea } from './units.js';
 
 export const TICK_MS = 100;
 export const TICK_SECONDS = TICK_MS / 1000;
@@ -489,10 +489,13 @@ function computeCaps(state, charges) {
   // What it COULD hold if it took everything free in the pool. Not displayed —
   // this is the figure for working out whether a cost is reachable at all.
   const capsMax = {};
+  const bans = state.generalBans || {};
   for (const id of NUTRIENT_IDS) {
     const mine = held[id] || 0;
     caps[id] = dedicated[id] + mine;
-    capsMax[id] = dedicated[id] + mine + generalFree;
+    // A banned nutrient cannot reach the pool, so the pool is not headroom for
+    // it — etaFor would otherwise promise a cost it can never save up for.
+    capsMax[id] = dedicated[id] + mine + (bans[id] ? 0 : generalFree);
   }
 
   let droneCap = BASE_DRONE_CAP;
@@ -1553,6 +1556,11 @@ export function openStore(state, storage) {
   state.general ??= {};
   const dedicated = storage.dedicated;
   const capacity = storage.general;
+  // Nutrients the player has forbidden from the shared pool. A banned nutrient
+  // fills its own shelf and then spills, however much room the pool has — which
+  // is the point: the pool is a scarce buffer, and a flood of water or fibre
+  // will take all of it and leave nothing for the protein that needed it.
+  const banned = state.generalBans || {};
   let used = 0;
   for (const id of NUTRIENT_IDS) used += state.general[id] || 0;
 
@@ -1580,7 +1588,8 @@ export function openStore(state, storage) {
         const shelfHeld = total - mine;
         const toShelf = Math.min(delta, Math.max(0, shelf - shelfHeld));
         let left = delta - toShelf;
-        const toPool = Math.min(left, Math.max(0, capacity - used));
+        const room = banned[id] ? 0 : Math.max(0, capacity - used);
+        const toPool = Math.min(left, room);
         left -= toPool;
         if (toPool > 0) setGeneral(id, mine + toPool);
         state.nutrients[id] = total + toShelf + toPool;
@@ -1603,6 +1612,16 @@ export function openStore(state, storage) {
      */
     reconcile() {
       const lost = {};
+      // A nutrient banned AFTER it had already pooled is evicted: what is in
+      // the pool is overflow by definition, so it spills rather than moving
+      // back onto a shelf that was already full.
+      for (const id of Object.keys(banned)) {
+        const mine = state.general[id] || 0;
+        if (!banned[id] || mine <= EPSILON) continue;
+        setGeneral(id, 0);
+        state.nutrients[id] = Math.max(0, (state.nutrients[id] || 0) - mine);
+        lost[id] = (lost[id] || 0) + mine;
+      }
       // Anything over its shelf that is not already counted as pooled is
       // pooled now, or lost if there is nowhere to put it.
       for (const id of NUTRIENT_IDS) {
@@ -1611,7 +1630,8 @@ export function openStore(state, storage) {
         if (mine !== (state.general[id] || 0)) setGeneral(id, mine);
         const over = total - mine - (dedicated[id] || 0);
         if (over <= EPSILON) continue;
-        const toPool = Math.min(over, Math.max(0, capacity - used));
+        const room = banned[id] ? 0 : Math.max(0, capacity - used);
+        const toPool = Math.min(over, room);
         if (toPool > 0) {
           setGeneral(id, mine + toPool);
           mine += toPool;
@@ -1908,12 +1928,12 @@ export function tick(state, dt) {
       log(
         state,
         result.colonisable
-          ? `Found ${result.area.toFixed(1)} m² of ${result.name.toLowerCase()} — people are on it.`
-          : `Found ${result.area.toFixed(1)} m² of ${result.name.toLowerCase()}, which the hive cannot live in.`,
+          ? `Found ${formatArea(result.area)} m² of ${result.name.toLowerCase()} — people are on it.`
+          : `Found ${formatArea(result.area)} m² of ${result.name.toLowerCase()}, which the hive cannot live in.`,
         'warn',
       );
     } else {
-      log(state, `Found ${result.area.toFixed(1)} m² of ${result.name.toLowerCase()}. Unclaimed.`, 'unlock');
+      log(state, `Found ${formatArea(result.area)} m² of ${result.name.toLowerCase()}. Unclaimed.`, 'unlock');
     }
   }
 

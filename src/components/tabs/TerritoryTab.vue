@@ -25,7 +25,7 @@ import { ITEMS } from '../../game/definitions/items/index.js';
 import { CASTES, CASTE_ORDER } from '../../game/definitions/castes.js';
 import { DRONE_TYPES } from '../../game/definitions/drones.js';
 import { describeFind, describeSlot } from '../../game/forage.js';
-import { formatMass, formatMassFlow } from '../../game/units.js';
+import { formatMass, formatMassFlow, formatArea } from '../../game/units.js';
 import {
   claimCost, claimableArea, claimTerritory, abandonTerritory, DANGEROUS_CLAIM_MULTIPLIER,
 } from '../../game/actions.js';
@@ -92,6 +92,11 @@ const tiles = computed(() =>
       area: t.value,
       roomForName,
       roomForFigure,
+      // A tooltip on a tile at the right-hand edge of the map opens off the
+      // side of the window — and the tiles at that edge are the smallest ones,
+      // which are exactly the ones a player needs the tooltip to read. So the
+      // right-hand half of the map hangs its tooltips the other way.
+      tipRight: t.x + t.w > FRAME.w * 0.5,
       ink: needsLightText(def.colour) ? '#eef1f5' : '#0f1113',
       inkDim: needsLightText(def.colour) ? 'rgba(238,241,245,0.78)' : 'rgba(15,17,19,0.74)',
       style: {
@@ -99,7 +104,10 @@ const tiles = computed(() =>
         top: `${(t.y / FRAME.h) * 100}%`,
         width: `${(t.w / FRAME.w) * 100}%`,
         height: `${(t.h / FRAME.h) * 100}%`,
-        background: def.colour,
+        // `backgroundColor`, never the `background` shorthand: the shorthand
+        // resets `background-image`, and an inline style beats the stylesheet,
+        // so it would silently wipe the hatching off every unclaimed tile.
+        backgroundColor: def.colour,
       },
     };
   }),
@@ -305,7 +313,7 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
     <div class="panel-box" style="margin-bottom: 0.75rem">
       <div class="panel-head">
         <span>Holdings</span>
-        <span class="muted num">{{ area.toFixed(0) }} m²</span>
+        <span class="muted num">{{ formatArea(area) }} m²</span>
       </div>
 
       <div class="panel-body">
@@ -332,6 +340,7 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
             :key="t.id"
             class="terr-tile tip"
             :class="{
+              'tip-right': t.tipRight,
               'is-pinned': isPinned(`terr:${t.id}`),
               'is-unclaimed': t.unclaimed,
               'is-blocked': Boolean(t.blocked),
@@ -348,16 +357,21 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
               {{ t.def.name }}
             </span>
             <span v-if="t.roomForFigure" class="terr-tile-figure" :style="{ color: t.inkDim }">
-              <template v-if="t.unclaimed">{{ t.area.toFixed(1) }} m² · ?</template>
+              <template v-if="t.unclaimed">{{ formatArea(t.area) }} m² · ?</template>
               <template v-else>
-                {{ t.area.toFixed(0) }} m² · {{ (t.share * 100).toFixed(0) }}%
+                {{ formatArea(t.area) }} m² · {{ (t.share * 100).toFixed(0) }}%
               </template>
             </span>
             <span v-if="t.unclaimed && !t.roomForFigure" class="terr-tile-flag">?</span>
 
             <span class="tip-body">
+              <!-- Type and size first, because on a sliver too small to label
+                   the tooltip is the only place either of them appears. -->
               <span class="tip-title">
-                {{ t.def.name }}<span v-if="t.unclaimed" class="warn"> · unclaimed</span>
+                {{ t.def.name }} · {{ formatArea(t.area) }} m²<span
+                  v-if="t.unclaimed"
+                  class="warn"
+                > · unclaimed</span>
               </span>
               <span class="muted" style="display: block; margin-bottom: 0.3rem">
                 {{ CLIMATES[t.def.climate] }} · {{ t.def.desc }}
@@ -370,7 +384,7 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
               </span>
               <span class="tip-row">
                 <span>{{ t.unclaimed ? 'Mapped' : 'Held' }}</span>
-                <span>{{ t.unclaimed ? t.area.toFixed(1) : t.area.toFixed(0) }} m²</span>
+                <span>{{ formatArea(t.area) }} m²</span>
               </span>
               <span class="tip-row">
                 <span>Share of every roll</span>
@@ -400,7 +414,7 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
           <div v-for="h in land" :key="h.id" class="terr-key">
             <span class="terr-key-dot" :style="{ background: h.def.colour }"></span>
             <span class="terr-key-name">{{ h.def.name }}</span>
-            <span class="terr-key-num num">{{ h.area.toFixed(0) }} m²</span>
+            <span class="terr-key-num num">{{ formatArea(h.area) }} m²</span>
             <span class="terr-key-pct num">{{ ((shares[h.id] || 0) * 100).toFixed(0) }}%</span>
           </div>
         </div>
@@ -418,7 +432,7 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
           <span class="field-label">
             {{ e.name }} <span class="muted">×{{ e.count }}</span>
             <span class="field-help">
-              A trip takes {{ Math.round(e.seconds) }}s across {{ area.toFixed(0) }} m² of
+              A trip takes {{ Math.round(e.seconds) }}s across {{ formatArea(area) }} m² of
               holdings — the more ground the hive stands on, the longer it takes to reach
               anywhere new.
             </span>
@@ -436,7 +450,7 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
       <div class="panel-box claim-box">
         <div class="panel-head">
           <span>{{ claimPatch.def.name }}</span>
-          <span class="muted num">{{ claimPatch.area.toFixed(1) }} m² mapped</span>
+          <span class="muted num">{{ formatArea(claimPatch.area) }} m² mapped</span>
         </div>
 
         <div class="panel-body">
@@ -460,8 +474,8 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
               <span class="field-label">
                 How much
                 <span class="field-help">
-                  Up to {{ claimPatch.area.toFixed(1) }} m² mapped; the hive can pay for
-                  {{ claimPatch.most.toFixed(1) }} m² right now.
+                  Up to {{ formatArea(claimPatch.area) }} m² mapped; the hive can pay for
+                  {{ formatArea(claimPatch.most) }} m² right now.
                 </span>
               </span>
               <input
@@ -507,7 +521,7 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
             :disabled="!claimPatch.affordable"
             @click="doClaim"
           >
-            Claim {{ claimPatch.want.toFixed(1) }} m²
+            Claim {{ formatArea(claimPatch.want) }} m²
           </button>
           <button class="btn" style="width: auto; height: auto" @click="doAbandon">
             Forget it

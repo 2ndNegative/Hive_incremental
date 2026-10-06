@@ -128,3 +128,20 @@ export function formatLarvae(count) {
   const n = Math.floor(count || 0);
   return `${n} ${n === 1 ? 'larva' : 'larvae'}`;
 }
+
+/**
+ * Square metres of ground.
+ *
+ * Holdings used to be whole numbers, so everything printed them with no
+ * decimals — and then expeditions started finding 3.2 m² patches, a claim made
+ * a hive 39.2 m², and the screen said 39. The ground was there; the display was
+ * throwing it away, which reads exactly like a bug that eats your territory.
+ *
+ * So: a figure that IS whole prints whole, and one that is not keeps a decimal.
+ * The tolerance stops floating-point dust (39.000000001) printing as 39.0.
+ */
+export function formatArea(squareMetres) {
+  const area = Number(squareMetres) || 0;
+  const rounded = Math.round(area);
+  return Math.abs(area - rounded) < 0.05 ? `${rounded}` : area.toFixed(1);
+}

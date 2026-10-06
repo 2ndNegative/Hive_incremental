@@ -26,7 +26,10 @@ import {
   MANUAL_COMBO_PER_CLICK,
   MANUAL_COMBO_COOL_SECONDS,
 } from './engine.js';
-import { formatMass } from './units.js';
+import { formatMass, formatArea } from './units.js';
+
+/** Below this, a figure is dust rather than a quantity. */
+const EPSILON_GRAMS = 1e-9;
 import {
   biomeShares, BIOMES, isDangerous, isColonisable,
 } from './definitions/biomes.js';
@@ -369,6 +372,66 @@ export function clearFuelOverride(consumerKey) {
   releaseFuelLock(consumerKey);
 }
 
+/* -------------------------------------------------------------- general store */
+
+/**
+ * Forbid a nutrient from the shared pool, or let it back in.
+ *
+ * The pool is a buffer, not a cupboard: it is small, it is last-in-first-out,
+ * and whatever gets there first owns it. A hive gathering forest floor fills it
+ * with water and fibre within seconds and then has nowhere to put the protein
+ * that actually mattered. Banning is how the player says which overflow is
+ * worth catching.
+ *
+ * Banning something that is ALREADY pooled evicts it on the spot. That mass is
+ * overflow by definition — there was never room for it on its own shelf — so it
+ * spills rather than moving back, and the log says how much.
+ */
+export function setGeneralBan(nutrientId, banned) {
+  if (!NUTRIENTS[nutrientId]) return false;
+  state.generalBans ??= {};
+  if (banned) state.generalBans[nutrientId] = true;
+  else delete state.generalBans[nutrientId];
+
+  if (banned) {
+    const pooled = state.general?.[nutrientId] || 0;
+    if (pooled > EPSILON_GRAMS) {
+      const derived = computeDerived(state);
+      // reconcile() is what performs the eviction; this only reports it.
+      const lost = openStore(state, derived.storage).reconcile();
+      const gone = lost[nutrientId] || 0;
+      if (gone > EPSILON_GRAMS) {
+        state.spilled[nutrientId] = (state.spilled[nutrientId] || 0) + gone;
+        pushLog(
+          `${formatMass(gone)} of ${NUTRIENTS[nutrientId].name.toLowerCase()} spilled out of ` +
+            'general storage.',
+          'warn',
+        );
+      }
+    }
+  }
+  return true;
+}
+
+export function toggleGeneralBan(nutrientId) {
+  return setGeneralBan(nutrientId, !state.generalBans?.[nutrientId]);
+}
+
+/** Is this nutrient allowed into the shared pool? */
+export function generalAllows(nutrientId) {
+  return !state.generalBans?.[nutrientId];
+}
+
+/** What is in the shared pool right now, heaviest first. */
+export function generalContents() {
+  const out = [];
+  for (const id of NUTRIENT_IDS) {
+    const grams = state.general?.[id] || 0;
+    if (grams > EPSILON_GRAMS) out.push({ id, def: NUTRIENTS[id], grams });
+  }
+  return out.sort((a, b) => b.grams - a.grams);
+}
+
 /* ------------------------------------------------------------------ territory */
 
 /**
@@ -435,7 +498,7 @@ export function claimTerritory(biomeId, area) {
   state.stats.groundClaimed = (state.stats.groundClaimed || 0) + want;
 
   pushLog(
-    `Claimed ${want.toFixed(1)} m² of ${BIOMES[biomeId].name.toLowerCase()}.`,
+    `Claimed ${formatArea(want)} m² of ${BIOMES[biomeId].name.toLowerCase()}.`,
     'unlock',
   );
   return want;

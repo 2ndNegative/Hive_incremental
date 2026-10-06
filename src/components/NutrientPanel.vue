@@ -5,6 +5,7 @@ import { NUTRIENTS, MACROS, MICROS, ASSAY_GROUPS, isRevealed } from '../game/def
 import { formatMass, formatMassFlow, formatEnergy } from '../game/units.js';
 import {
   consumeBiomass, MANUAL_INTAKE, manualOdds, manualOddsSummary, manualCombo,
+  setGeneralBan, generalContents,
 } from '../game/actions.js';
 import { RANGE_AT } from '../game/discovery.js';
 import { ITEMS } from '../game/definitions/items/index.js';
@@ -82,6 +83,48 @@ const hiddenCount = computed(() => MICROS.filter((id) => !isRevealed(state, id))
 // out of sight until the hive has built some and started using it.
 const generalCapacity = computed(() => derived.value.storage.general);
 const generalUsed = computed(() => derived.value.storage.generalUsed);
+
+/**
+ * THE SHARED POOL, AND WHY IT NEEDS RULES.
+ *
+ * It is a buffer, not a cupboard: small, last-in-first-out, and whatever
+ * overflows into it first owns it. A hive working forest floor fills it with
+ * water and fibre in seconds and then has nowhere to catch the protein that
+ * actually mattered. So the row says what is IN there, and clicking it opens
+ * the list of what is allowed in.
+ */
+const generalRows = computed(() => generalContents());
+const generalFree = computed(() => Math.max(0, generalCapacity.value - generalUsed.value));
+const bannedCount = computed(() => Object.keys(state.generalBans || {}).length);
+
+/** The rules dialog, and everything it lists. */
+const rulesOpen = ref(false);
+const ruleSearch = ref('');
+
+const ruleRows = computed(() => {
+  const q = ruleSearch.value.trim().toLowerCase();
+  const out = [];
+  for (const group of groups.value) {
+    const rows = group.rows
+      .map((r) => r.id)
+      .filter((id) => isRevealed(state, id))
+      .filter((id) => !q || NUTRIENTS[id].name.toLowerCase().includes(q))
+      .map((id) => ({
+        id,
+        def: NUTRIENTS[id],
+        pooled: state.general?.[id] ?? 0,
+        banned: Boolean(state.generalBans?.[id]),
+      }));
+    if (rows.length) out.push({ key: group.key, name: group.name, rows });
+  }
+  return out;
+});
+
+function banAll(on) {
+  for (const group of ruleRows.value) {
+    for (const r of group.rows) setGeneralBan(r.id, on);
+  }
+}
 
 /**
  * A click no longer means a known mouthful. The drone picks up whatever is
@@ -166,6 +209,63 @@ const lastGather = computed(() => {
           <span class="muted">· {{ lastGather.biome.name.toLowerCase() }}</span>
         </template>
         <span v-else class="warn">Found nothing.</span>
+      </div>
+    </div>
+
+    <!-- THE SHARED POOL SITS AT THE TOP. It is the one line that is about
+         every resource rather than one of them, and it is the line that
+         explains why a store that read 2 kg / 2 kg a moment ago now reads
+         2.2 kg / 2.2 kg — so it belongs where the eye lands first, not
+         buried under thirty-five rows of micronutrient. -->
+    <div v-if="generalCapacity > 0" class="panel-body tight">
+      <div
+        class="res-row general-row tip tip-side"
+        :class="{ 'is-pinned': isPinned('general') }"
+        role="button"
+        tabindex="0"
+        v-on="pinHandlers('general')"
+        @click="rulesOpen = true"
+        @keydown.enter="rulesOpen = true"
+      >
+        <span class="res-name">
+          General storage
+          <span v-if="bannedCount" class="muted">· {{ bannedCount }} barred</span>
+        </span>
+        <span class="res-amount num">
+          <span :class="{ warn: generalUsed >= generalCapacity - 1e-9 }">
+            {{ formatMass(generalUsed) }}
+          </span>
+          <span class="cap"> / {{ formatMass(generalCapacity) }}</span>
+        </span>
+        <span class="res-bar" :class="{ 'is-full': generalUsed >= generalCapacity - 1e-9 }">
+          <span :style="{ width: `${generalCapacity > 0 ? (generalUsed / generalCapacity) * 100 : 0}%` }" />
+        </span>
+
+        <span class="tip-body">
+          <span class="tip-title">General storage</span>
+          <span class="muted" style="display: block; margin-bottom: 0.3rem">
+            Shared room, last in and first out. Nothing lives here — this is only what has
+            overflowed off its own shelf and not yet been spent.
+          </span>
+
+          <span v-for="g in generalRows" :key="g.id" class="tip-row">
+            <span>{{ g.def.name }}</span>
+            <span>{{ formatMass(g.grams) }}</span>
+          </span>
+          <span v-if="!generalRows.length" class="tip-row muted">
+            <span>Empty — nothing has overflowed</span><span>—</span>
+          </span>
+
+          <hr style="border-color: var(--border); margin: 0.3rem 0" />
+          <span class="tip-row">
+            <span>Free</span>
+            <span :class="generalFree > 0 ? 'good' : 'bad'">{{ formatMass(generalFree) }}</span>
+          </span>
+          <span v-if="bannedCount" class="tip-row warn">
+            <span>Barred from it</span><span>{{ bannedCount }}</span>
+          </span>
+          <span class="tip-hint">Click to choose what is allowed in.</span>
+        </span>
       </div>
     </div>
 
@@ -276,18 +376,73 @@ const lastGather = computed(() => {
       </div>
     </div>
 
-    <div v-if="generalCapacity > 0" class="panel-body tight">
-      <div class="res-row">
-        <span class="res-name">General storage</span>
-        <span class="res-amount num">
-          <span :class="{ warn: generalUsed >= generalCapacity - 1e-9 }">
-            {{ formatMass(generalUsed) }}
-          </span>
-          <span class="cap"> / {{ formatMass(generalCapacity) }}</span>
-        </span>
-        <span class="res-bar" :class="{ 'is-full': generalUsed >= generalCapacity - 1e-9 }">
-          <span :style="{ width: `${generalCapacity > 0 ? (generalUsed / generalCapacity) * 100 : 0}%` }" />
-        </span>
+    <!-- --------------------------------------------------- what may pool -->
+    <div v-if="rulesOpen" class="modal-backdrop" @click.self="rulesOpen = false">
+      <div class="panel-box rules-box">
+        <div class="panel-head">
+          <span>General storage</span>
+          <span class="muted num">{{ formatMass(generalUsed) }} / {{ formatMass(generalCapacity) }}</span>
+        </div>
+
+        <div class="panel-body">
+          <p class="muted" style="font-size: 0.78rem; margin: 0 0 0.5rem">
+            Shared room is a buffer, not a cupboard: small, and whatever overflows into it first
+            owns it. A hive working the forest floor fills it with water and fibre in seconds and
+            then has nowhere to catch the protein that mattered. Bar whatever is not worth
+            catching.
+          </p>
+          <p class="warn" style="font-size: 0.76rem; margin: 0 0 0.5rem">
+            Barring something that is already in here spills it — what is in the pool is overflow,
+            so there is no shelf for it to go back to.
+          </p>
+
+          <div class="filter-row">
+            <input
+              v-model="ruleSearch"
+              class="codex-search"
+              type="text"
+              placeholder="Filter resources…"
+            />
+            <button class="btn" style="width: auto; height: auto" @click="banAll(true)">
+              Bar all
+            </button>
+            <button class="btn" style="width: auto; height: auto" @click="banAll(false)">
+              Allow all
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-body tight rules-list">
+          <template v-for="group in ruleRows" :key="group.key">
+            <div class="group-head" style="cursor: default">
+              <span>{{ group.name }}</span>
+              <span class="muted">{{ group.rows.length }}</span>
+            </div>
+            <div v-for="r in group.rows" :key="r.id" class="field-row">
+              <span class="field-label">
+                {{ r.def.name }}
+                <span v-if="r.pooled > 0" class="field-help">
+                  {{ formatMass(r.pooled) }} in the pool now
+                </span>
+              </span>
+              <button
+                class="btn rule-toggle"
+                :class="{ 'is-barred': r.banned }"
+                :aria-pressed="r.banned ? 'true' : 'false'"
+                @click="setGeneralBan(r.id, !r.banned)"
+              >
+                {{ r.banned ? 'Barred' : 'Allowed' }}
+              </button>
+            </div>
+          </template>
+          <div v-if="!ruleRows.length" class="band-empty">Nothing matches that.</div>
+        </div>
+
+        <div class="panel-body">
+          <button class="btn" style="width: auto; height: auto" @click="rulesOpen = false">
+            Close
+          </button>
+        </div>
       </div>
     </div>
 

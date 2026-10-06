@@ -396,6 +396,12 @@ function migrate(raw) {
     raw.expedition ??= {};
   }
 
+  // v18 lets a nutrient be kept out of the shared pool. An old save forbids
+  // nothing, which is how the pool has always behaved.
+  if ((raw.version ?? 0) < 18) {
+    raw.generalBans ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

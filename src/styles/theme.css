@@ -2012,32 +2012,44 @@ textarea.save-box {
 
 /* ---------------------------------------------------- unclaimed territory */
 
-/* Ground the hive has mapped and not taken. Hatched rather than dimmed: a
-   flat tint reads as "small" on a treemap, and this is about ownership, not
-   quantity. */
+/* Ground the hive has mapped and not taken.
+   HATCHED ACROSS THE WHOLE TILE, not merely tinted. Unclaimed ground sits
+   right next to claimed ground of the SAME biome — same colour, same name —
+   so the difference has to be a texture rather than a shade: a shade reads as
+   "a bit smaller" on a treemap, and stripes read as "not yours". The stripe
+   colour carries which kind it is, so the border is a confirmation rather
+   than the only signal. */
 .terr-tile.is-unclaimed {
+  --hatch: rgba(224, 168, 74, 0.55); /* warn */
   cursor: pointer;
-  opacity: 0.62;
   box-shadow: inset 0 0 0 2px var(--warn);
   background-image: repeating-linear-gradient(
     45deg,
-    rgba(0, 0, 0, 0.42) 0,
-    rgba(0, 0, 0, 0.42) 5px,
-    transparent 5px,
-    transparent 11px
+    rgba(0, 0, 0, 0.5) 0 7px,
+    var(--hatch) 7px 9px,
+    transparent 9px 18px
   );
 }
 
 .terr-tile.is-unclaimed:hover {
-  opacity: 0.85;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.34) 0 7px,
+    var(--hatch) 7px 9px,
+    transparent 9px 18px
+  );
 }
 
+/* People are on it. */
 .terr-tile.is-dangerous {
+  --hatch: rgba(214, 90, 84, 0.62); /* bad */
   box-shadow: inset 0 0 0 2px var(--bad);
 }
 
-/* Ground it cannot have at all: no invitation to click. */
+/* Ground it cannot have at all: no invitation to click, and the stripes go
+   grey so a glance separates "pay for this" from "you never can". */
 .terr-tile.is-blocked {
+  --hatch: rgba(150, 158, 168, 0.5);
   cursor: not-allowed;
   box-shadow: inset 0 0 0 2px var(--muted);
 }
@@ -2067,4 +2079,44 @@ textarea.save-box {
   border: 1px solid var(--border-bright);
   border-radius: 4px;
   padding: 0.25rem 0.4rem;
+}
+
+/* ------------------------------------------------- the shared pool's rules */
+
+/* The pool's row is the one line in the panel that is about every resource
+   rather than one of them, and it is a button. Marked as both. */
+.general-row {
+  cursor: pointer;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-alt);
+}
+
+.general-row:hover {
+  background: var(--panel-hover);
+}
+
+.rules-box {
+  width: min(460px, calc(100vw - 2rem));
+  max-height: calc(100vh - 4rem);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+
+.rules-list {
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.rule-toggle {
+  width: 5.5rem;
+  height: auto;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.74rem;
+}
+
+.rule-toggle.is-barred {
+  color: var(--bad);
+  border-color: var(--bad);
 }

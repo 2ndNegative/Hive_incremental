@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 17;
+export const SAVE_VERSION = 18;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -71,6 +71,11 @@ export function createInitialState() {
     // it. See engine.js openStore — the pool is last in, first out, so this is
     // usually empty and fills only when a shelf overflows.
     general: {},
+
+    // Nutrients the player has forbidden from the shared pool, as a sparse set
+    // of ids. A banned nutrient fills its own shelf and then spills — it never
+    // takes general room from anything else. See engine.js openStore.
+    generalBans: {},
 
     // Harvested matter, still whole. Castes deliver here and digestion draws
     // from here; a hive that cannot digest fast enough visibly backs up.
