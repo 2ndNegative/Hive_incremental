@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 18;
+export const SAVE_VERSION = 19;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -76,6 +76,12 @@ export function createInitialState() {
     // of ids. A banned nutrient fills its own shelf and then spills — it never
     // takes general room from anything else. See engine.js openStore.
     generalBans: {},
+
+    // What the player has told each gathering route to look for, by biome:
+    // focus[gatherType][biomeId][itemKey] = true. A standing preference rather
+    // than a fact about the land, so it survives losing and retaking ground.
+    // See focus.js — a star claims a share of that route's trips there.
+    focus: {},
 
     // Harvested matter, still whole. Castes deliver here and digestion draws
     // from here; a hive that cannot digest fast enough visibly backs up.

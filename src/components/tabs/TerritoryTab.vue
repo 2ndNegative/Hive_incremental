@@ -32,6 +32,10 @@ import {
 import { NUTRIENTS, costWasSubstituted } from '../../game/definitions/nutrients.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
 import {
+  isStarred, isStarrable, starsFor, toggleStar, clearStars, focusedOdds, focusStrength,
+  FOCUS_SHARE,
+} from '../../game/focus.js';
+import {
   isNamed, rateLabel, rateConfidence, timesFound, preyKey, RANGE_AT, EXACT_AT,
 } from '../../game/discovery.js';
 
@@ -215,9 +219,22 @@ const offerings = computed(() =>
           id: p.itemId, key: p.itemId, name: ITEMS[p.itemId].name, weight: p.weight,
         }));
     const total = raw.reduce((a, e) => a + e.weight, 0);
+    // What a trip to this ground ACTUALLY comes back with once the stars are
+    // on. With nothing starred this is just the natural distribution again.
+    const odds = focusedOdds(state, gather.value, h.id, raw.map((e) => ({ ...e })));
+    const stars = starsFor(state, gather.value, h.id);
+    // A star on something this ground no longer offers. Kept rather than
+    // silently dropped — the player put it there — but it claims nothing, so
+    // the panel has to say so or it reads as a focus that stopped working.
+    const live = new Set(raw.map((e) => e.key));
+    const dead = stars.filter((k) => !live.has(k));
     return {
       ...h,
       share: shares.value[h.id] || 0,
+      starCount: stars.length - dead.length,
+      dead: dead.length,
+      // What each star is worth here, for the panel's one-line summary.
+      strength: focusStrength(stars.length - dead.length),
       entries: raw
         .map((e) => {
           const chance = total > 0 ? e.weight / total : 0;
@@ -227,9 +244,15 @@ const offerings = computed(() =>
           return {
             ...e,
             chance,
+            // What it is worth per trip with the stars applied. Shown beside
+            // the natural rate rather than instead of it, so a player can see
+            // what their own orders are doing rather than just the result.
+            focused: odds[e.key] ?? chance,
             named,
             seen,
             level,
+            starrable: isStarrable(state, h.id, e.key),
+            starred: isStarred(state, gather.value, h.id, e.key),
             label: named ? e.name : '???',
             rate: rateLabel(state, h.id, e.key, chance),
             // How much more work would sharpen the figure.
@@ -240,6 +263,17 @@ const offerings = computed(() =>
     };
   }),
 );
+
+/** Star or unstar one find for the selected route on one biome. */
+function star(biomeId, entry) {
+  if (!entry.starrable && !entry.starred) return;
+  toggleStar(state, gather.value, biomeId, entry.key);
+}
+
+/** Drop every star on one biome for the selected route. */
+function unfocus(biomeId) {
+  clearStars(state, gather.value, biomeId);
+}
 
 /** How much of the selected ground the hive has actually worked out. */
 const learned = computed(() => {
@@ -601,12 +635,29 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
           looking — a thing is named the first time it turns up anywhere, bracketed after
           {{ RANGE_AT }} finds on the same ground, and pinned down after {{ EXACT_AT }}.
         </p>
+        <p class="muted" style="font-size: 0.76rem; margin: 0.35rem 0 0">
+          Star anything the hive has pinned down and this route will spend
+          {{ (FOCUS_SHARE * 100).toFixed(0) }}% of its trips on that ground going after it. Stars
+          are set per biome and per route, so the forest can work one thing while the river works
+          another. A second star on the same ground splits the focus and weakens it — see the
+          figure beside each one.
+        </p>
       </div>
 
       <div v-for="o in offerings" :key="o.id" class="panel-body tight">
         <div class="offer-head">
           <span>{{ o.def.name }}</span>
-          <span class="muted num">{{ (o.share * 100).toFixed(0) }}% of the hive's land</span>
+          <span class="offer-head-right">
+            <span v-if="o.starCount" class="focus-note">
+              <span class="star-on">★</span>
+              {{ o.starCount }} focused · {{ (o.strength * 100).toFixed(0) }}% of trips
+              <button class="focus-clear" @click="unfocus(o.id)">clear</button>
+            </span>
+            <span v-if="o.dead" class="focus-note bad">
+              {{ o.dead }} star{{ o.dead === 1 ? '' : 's' }} on nothing this ground offers
+            </span>
+            <span class="muted num">{{ (o.share * 100).toFixed(0) }}% of the hive's land</span>
+          </span>
         </div>
 
         <div v-if="!o.entries.length" class="offer-empty warn">
@@ -631,6 +682,19 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
             <span class="offer-pct" :class="e.level === 'exact' ? 'muted' : 'offer-vague'">
               {{ e.rate }}
             </span>
+            <!-- What the orders did to it, beside what chance gives. Only on
+                 ground where the stars are actually doing something, so an
+                 unfocused biome reads exactly as it did before. -->
+            <span v-if="o.starCount && e.starred" class="offer-focused">
+              → {{ (e.focused * 100).toFixed(0) }}%
+            </span>
+            <button
+              v-if="e.starrable || e.starred"
+              class="star-btn"
+              :class="{ 'star-on': e.starred }"
+              :title="e.starred ? 'Stop focusing on this' : 'Focus this route here'"
+              @click.stop="star(o.id, e)"
+            >{{ e.starred ? '★' : '☆' }}</button>
 
             <span class="tip-body">
               <span class="tip-title">{{ e.label }}</span>
@@ -648,6 +712,19 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
               <span v-if="e.toNext > 0" class="tip-row muted" style="margin-top: 0.25rem">
                 <span>{{ e.level === 'unknown' ? 'Bracket the rate in' : 'Pin it down in' }}</span>
                 <span>{{ e.toNext }} more</span>
+              </span>
+              <template v-if="e.starred">
+                <hr style="border-color: var(--border); margin: 0.3rem 0" />
+                <span class="tip-row">
+                  <span class="star-on">★ Focused — chance per trip</span>
+                  <span class="star-on">{{ (e.focused * 100).toFixed(0) }}%</span>
+                </span>
+              </template>
+              <span v-else-if="e.starrable" class="tip-row muted" style="margin-top: 0.25rem">
+                <span>Pinned down — this can be focused</span><span>☆</span>
+              </span>
+              <span v-else-if="e.level !== 'exact'" class="tip-row muted" style="margin-top: 0.25rem">
+                <span>Focus needs the exact rate</span><span>{{ e.toNext }} more finds</span>
               </span>
               <template v-if="e.prey">
                 <hr style="border-color: var(--border); margin: 0.3rem 0" />

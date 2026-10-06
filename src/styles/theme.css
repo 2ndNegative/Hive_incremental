@@ -1602,6 +1602,71 @@ textarea.save-box {
   font-size: 0.68rem;
 }
 
+/* ---------------------------------------------------------------- focus
+
+   A star is the player telling a route what to look for on one biome. It sits
+   on the chip itself because that is where the thing being focused is named
+   and where its rate is quoted — the decision is "that one", not "pick from a
+   list of things you have pinned down somewhere". */
+
+.star-btn {
+  margin-left: 0.1rem;
+  padding: 0 0.1rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1;
+  cursor: pointer;
+  /* The hollow star is deliberately quiet: on well-worked ground almost every
+     chip carries one, and forty bright stars would read as decoration. */
+  opacity: 0.45;
+  transition: opacity 0.1s linear, color 0.1s linear;
+}
+
+.star-btn:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.star-on,
+.star-btn.star-on {
+  color: var(--warn);
+  opacity: 1;
+}
+
+.offer-chip .offer-focused {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--warn);
+}
+
+.offer-head-right {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.focus-note {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.focus-clear {
+  margin-left: 0.3rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.focus-clear:hover {
+  color: var(--text-strong);
+}
+
 .last-gather {
   padding: 0.3rem 0 0;
   font-size: 0.74rem;

@@ -402,6 +402,13 @@ function migrate(raw) {
     raw.generalBans ??= {};
   }
 
+  // v19 adds focus: stars telling a gathering route what to look for on a
+  // given biome. An old save has focused nothing, so every route rolls its
+  // ground exactly as it always did.
+  if ((raw.version ?? 0) < 19) {
+    raw.focus ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

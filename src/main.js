@@ -40,6 +40,10 @@ import {
   CACHE_GRAMS, PATCH_AREA,
 } from './game/expedition.js';
 import { FORAGE, poolFor } from './game/definitions/forage.js';
+import {
+  FOCUS_SHARE, focusStrength, isStarrable, isStarred, starsFor, setStar, toggleStar,
+  clearStars, focusedOdds,
+} from './game/focus.js';
 import * as forage from './game/forage.js';
 import * as discovery from './game/discovery.js';
 import {
@@ -138,6 +142,17 @@ window.hive = {
   patchCount: () => patchCount(state),
   forageTable: FORAGE,
   poolFor,
+  focus_: {
+    share: FOCUS_SHARE,
+    strength: focusStrength,
+    starrable: (biomeId, key) => isStarrable(state, biomeId, key),
+    starred: (gather, biomeId, key) => isStarred(state, gather, biomeId, key),
+    stars: (gather, biomeId) => starsFor(state, gather, biomeId),
+    set: (gather, biomeId, key, on) => setStar(state, gather, biomeId, key, on),
+    toggle: (gather, biomeId, key) => toggleStar(state, gather, biomeId, key),
+    clear: (gather, biomeId) => clearStars(state, gather, biomeId),
+    odds: (gather, biomeId) => focusedOdds(state, gather, biomeId, poolFor(gather, biomeId)),
+  },
   preyFor,
   forage,
   consumeBiomass,

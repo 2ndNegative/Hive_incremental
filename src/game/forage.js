@@ -25,6 +25,7 @@ import { preyFor, ORGANISMS } from './definitions/organisms.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
 import { DRONE_TYPES, foragingTypes } from './definitions/drones.js';
 import { recordFind, preyKey } from './discovery.js';
+import { pickFocused, keyOfEntry, focusedOdds } from './focus.js';
 import { ITEMS } from './definitions/items/index.js';
 
 
@@ -72,7 +73,11 @@ export function rollForage(state, casteId, random = Math.random) {
     // butchering into a dozen cuts, so it is an organism; a shoal of anchovies
     // or a single lanternfish is just the thing itself, and giving every small
     // species its own butchery table would say nothing the item does not.
-    const caught = pickWeighted([...preyFor(biome.id), ...poolFor('hunter', biome.id)], random);
+    const caught = pickFocused(
+      state, 'hunter', biome.id,
+      [...preyFor(biome.id), ...poolFor('hunter', biome.id)],
+      pickWeighted, random,
+    );
     if (caught?.organismId) {
       slot.organismId = caught.organismId;
       recordFind(state, biome.id, preyKey(caught.organismId));
@@ -83,7 +88,9 @@ export function rollForage(state, casteId, random = Math.random) {
     return slot;
   }
 
-  const found = pickWeighted(poolFor(def.gather, biome.id), random);
+  const found = pickFocused(
+    state, def.gather, biome.id, poolFor(def.gather, biome.id), pickWeighted, random,
+  );
   if (found) {
     slot.itemId = found.itemId;
     // One roll is one observation of this ground, whatever the caste then
@@ -135,7 +142,12 @@ export function rollPatch(state, typeId, patch, random = Math.random) {
   if (!biome) return patch; // no territory at all
   patch.biomeId = biome.id;
 
-  const found = pickWeighted(poolFor(def.gather, biome.id), random);
+  // Through the stars: a route the player has focused on this ground sends a
+  // share of its trips to what they asked for. See focus.js — an unfocused
+  // trip still rolls the whole ground, so nothing is ever locked out.
+  const found = pickFocused(
+    state, def.gather, biome.id, poolFor(def.gather, biome.id), pickWeighted, random,
+  );
   if (found) {
     patch.itemId = found.itemId;
     patch.grams = rollLoad(def, random);
@@ -257,8 +269,13 @@ export function expectedYield(state, casteId, nutrients, tech, efficiency = {}) 
     const total = pool.reduce((a, e) => a + e.weight, 0);
     if (total <= 0) continue; // this ground offers this caste nothing
 
+    // The focused distribution, not the natural one: a player who has told
+    // this route to fetch hazelnuts has changed what a drone is worth, and the
+    // figure that answers "is this drone paying for itself" has to know it.
+    const odds = focusedOdds(state, def.gather, biomeId, pool);
+
     for (const entry of pool) {
-      const chance = entry.weight / total;
+      const chance = odds[keyOfEntry(entry)] ?? entry.weight / total;
       let joules = 0;
       if (entry.organismId) {
         const org = ORGANISMS[entry.organismId];
