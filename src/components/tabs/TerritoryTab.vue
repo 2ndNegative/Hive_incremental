@@ -11,9 +11,12 @@
  * biome actually offers, so the consequences of a holding are visible before
  * the hive spends an hour discovering them.
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { state, derived, showInCodex } from '../../game/useGame.js';
-import { BIOMES, CLIMATES, holdings, totalArea, biomeShares, needsLightText } from '../../game/definitions/biomes.js';
+import {
+  BIOMES, CLIMATES, holdings, totalArea, biomeShares, needsLightText,
+  isDangerous, colonisationBlock,
+} from '../../game/definitions/biomes.js';
 import { squarify } from '../../game/treemap.js';
 import { FORAGERS_PER_SQUARE_METRE, AREA_PER_PATCH } from '../../game/definitions/biomes.js';
 import { GATHER_TYPES, poolFor } from '../../game/definitions/forage.js';
@@ -23,6 +26,10 @@ import { CASTES, CASTE_ORDER } from '../../game/definitions/castes.js';
 import { DRONE_TYPES } from '../../game/definitions/drones.js';
 import { describeFind, describeSlot } from '../../game/forage.js';
 import { formatMass, formatMassFlow } from '../../game/units.js';
+import {
+  claimCost, claimableArea, claimTerritory, abandonTerritory, DANGEROUS_CLAIM_MULTIPLIER,
+} from '../../game/actions.js';
+import { NUTRIENTS, costWasSubstituted } from '../../game/definitions/nutrients.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
 import {
   isNamed, rateLabel, rateConfidence, timesFound, preyKey, RANGE_AT, EXACT_AT,
@@ -39,15 +46,47 @@ const shares = computed(() => biomeShares(state));
  * tiles to come out roughly square.
  */
 const FRAME = { w: 1000, h: 300 };
+/**
+ * Ground an Explorer has mapped but the hive has not paid for, largest first.
+ * It sits on the SAME treemap as the holdings — a patch of unclaimed forest is
+ * next to the forest it was found from, which is the whole point of it — but
+ * hatched, dimmed and labelled, because it is not doing anything yet.
+ */
+const mapped = computed(() =>
+  Object.entries(state.unclaimed || {})
+    .filter(([, area]) => area > 0)
+    .map(([id, area]) => ({
+      id,
+      def: BIOMES[id],
+      area,
+      dangerous: isDangerous(id),
+      blocked: colonisationBlock(state, id),
+    }))
+    .sort((a, b) => b.area - a.area),
+);
+
 const tiles = computed(() =>
-  squarify(land.value.map((h) => ({ id: h.id, value: h.area })), FRAME.w, FRAME.h).map((t) => {
-    const def = BIOMES[t.id];
-    const share = shares.value[t.id] || 0;
+  squarify(
+    [
+      ...land.value.map((h) => ({ id: h.id, value: h.area })),
+      ...mapped.value.map((m) => ({ id: `unclaimed:${m.id}`, value: m.area })),
+    ],
+    FRAME.w,
+    FRAME.h,
+  ).map((t) => {
+    const unclaimed = t.id.startsWith('unclaimed:');
+    const biomeId = unclaimed ? t.id.slice('unclaimed:'.length) : t.id;
+    const def = BIOMES[biomeId];
+    const share = unclaimed ? 0 : shares.value[biomeId] || 0;
     // A tile too small for its own name hands the job to the legend below.
     const roomForName = t.w > 120 && t.h > 40;
     const roomForFigure = t.w > 74 && t.h > 22;
     return {
       id: t.id,
+      biomeId,
+      unclaimed,
+      dangerous: unclaimed && isDangerous(biomeId),
+      blocked: unclaimed ? colonisationBlock(state, biomeId) : null,
       def,
       share,
       area: t.value,
@@ -65,6 +104,62 @@ const tiles = computed(() =>
     };
   }),
 );
+
+/* ------------------------------------------------------------- claiming it */
+
+/** Which patch the claim dialog is open on, or null. */
+const claiming = ref(null);
+/** What the player has dialled in, in square metres. */
+const claimWant = ref(0);
+
+function openClaim(tile) {
+  if (!tile.unclaimed) return;
+  claiming.value = tile.biomeId;
+  claimWant.value = Math.min(
+    state.unclaimed?.[tile.biomeId] || 0,
+    Math.max(0, claimableArea(tile.biomeId)),
+  );
+}
+function closeClaim() {
+  claiming.value = null;
+}
+
+const claimPatch = computed(() => {
+  const id = claiming.value;
+  if (!id) return null;
+  const area = state.unclaimed?.[id] || 0;
+  if (area <= 0) return null;
+  const want = Math.max(0, Math.min(Number(claimWant.value) || 0, area));
+  const unit = claimCost(id, 1);
+  const bill = claimCost(id, want);
+  return {
+    id,
+    def: BIOMES[id],
+    area,
+    want,
+    unit,
+    bill,
+    substituted: costWasSubstituted(unit),
+    affordable: want > 0 && Object.entries(bill).every(([n, g]) => (state.nutrients[n] || 0) >= g),
+    most: claimableArea(id),
+    dangerous: isDangerous(id),
+    multiplier: DANGEROUS_CLAIM_MULTIPLIER,
+    blocked: colonisationBlock(state, id),
+  };
+});
+
+function doClaim() {
+  const patch = claimPatch.value;
+  if (!patch) return;
+  if (claimTerritory(patch.id, patch.want) > 0) closeClaim();
+}
+function doAbandon() {
+  if (claiming.value) abandonTerritory(claiming.value);
+  closeClaim();
+}
+
+/** What the explorers are doing, for the panel above the map. */
+const expeditions = computed(() => derived.value.expeditions ?? []);
 
 /** What the selected gather type would find on one biome, for its tooltip. */
 function topFinds(biomeId, limit = 4) {
@@ -236,25 +331,46 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
             v-for="t in tiles"
             :key="t.id"
             class="terr-tile tip"
-            :class="{ 'is-pinned': isPinned(`terr:${t.id}`) }"
+            :class="{
+              'is-pinned': isPinned(`terr:${t.id}`),
+              'is-unclaimed': t.unclaimed,
+              'is-blocked': Boolean(t.blocked),
+              'is-dangerous': t.dangerous,
+            }"
             :style="t.style"
+            :role="t.unclaimed ? 'button' : null"
+            :tabindex="t.unclaimed ? 0 : null"
             v-on="pinHandlers(`terr:${t.id}`)"
+            @click="openClaim(t)"
+            @keydown.enter="openClaim(t)"
           >
             <span v-if="t.roomForName" class="terr-tile-name" :style="{ color: t.ink }">
               {{ t.def.name }}
             </span>
             <span v-if="t.roomForFigure" class="terr-tile-figure" :style="{ color: t.inkDim }">
-              {{ t.area.toFixed(0) }} m² · {{ (t.share * 100).toFixed(0) }}%
+              <template v-if="t.unclaimed">{{ t.area.toFixed(1) }} m² · ?</template>
+              <template v-else>
+                {{ t.area.toFixed(0) }} m² · {{ (t.share * 100).toFixed(0) }}%
+              </template>
             </span>
+            <span v-if="t.unclaimed && !t.roomForFigure" class="terr-tile-flag">?</span>
 
             <span class="tip-body">
-              <span class="tip-title">{{ t.def.name }}</span>
+              <span class="tip-title">
+                {{ t.def.name }}<span v-if="t.unclaimed" class="warn"> · unclaimed</span>
+              </span>
               <span class="muted" style="display: block; margin-bottom: 0.3rem">
                 {{ CLIMATES[t.def.climate] }} · {{ t.def.desc }}
               </span>
+              <span v-if="t.unclaimed" class="tip-row">
+                <span :class="t.blocked ? 'bad' : 'warn'">
+                  {{ t.blocked || (t.dangerous ? 'People are on it.' : 'Mapped, not taken.') }}
+                </span>
+                <span>{{ t.blocked ? '—' : 'click to claim' }}</span>
+              </span>
               <span class="tip-row">
-                <span>Held</span>
-                <span>{{ t.area.toFixed(0) }} m²</span>
+                <span>{{ t.unclaimed ? 'Mapped' : 'Held' }}</span>
+                <span>{{ t.unclaimed ? t.area.toFixed(1) : t.area.toFixed(0) }} m²</span>
               </span>
               <span class="tip-row">
                 <span>Share of every roll</span>
@@ -275,6 +391,10 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
           </div>
         </div>
 
+        <p v-if="mapped.length" class="muted" style="font-size: 0.76rem; margin: 0.5rem 0 0">
+          The hatched tiles are ground the hive has MAPPED and not taken. Click one to claim it.
+        </p>
+
         <!-- The legend carries the slivers the map has no room to label. -->
         <div class="terr-legend">
           <div v-for="h in land" :key="h.id" class="terr-key">
@@ -283,6 +403,116 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
             <span class="terr-key-num num">{{ h.area.toFixed(0) }} m²</span>
             <span class="terr-key-pct num">{{ ((shares[h.id] || 0) * 100).toFixed(0) }}%</span>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ----------------------------------------------------------- expeditions -->
+    <div v-if="expeditions.length" class="panel-box" style="margin-bottom: 0.75rem">
+      <div class="panel-head">
+        <span>Out past the edge</span>
+        <span class="muted num">{{ expeditions.reduce((a, e) => a + e.count, 0) }}</span>
+      </div>
+      <div class="panel-body">
+        <div v-for="e in expeditions" :key="e.droneId" class="field-row">
+          <span class="field-label">
+            {{ e.name }} <span class="muted">×{{ e.count }}</span>
+            <span class="field-help">
+              A trip takes {{ Math.round(e.seconds) }}s across {{ area.toFixed(0) }} m² of
+              holdings — the more ground the hive stands on, the longer it takes to reach
+              anywhere new.
+            </span>
+          </span>
+          <span class="num muted">{{ (e.progress * 100).toFixed(0) }}%</span>
+        </div>
+        <div class="gut-meter" style="margin-top: 0.4rem">
+          <span :style="{ width: `${(expeditions[0].progress || 0) * 100}%` }" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ----------------------------------------------------- claiming the map -->
+    <div v-if="claimPatch" class="modal-backdrop" @click.self="closeClaim">
+      <div class="panel-box claim-box">
+        <div class="panel-head">
+          <span>{{ claimPatch.def.name }}</span>
+          <span class="muted num">{{ claimPatch.area.toFixed(1) }} m² mapped</span>
+        </div>
+
+        <div class="panel-body">
+          <p class="muted" style="font-size: 0.78rem; margin: 0 0 0.5rem">
+            {{ claimPatch.def.desc }}
+          </p>
+
+          <p v-if="claimPatch.blocked" class="notice is-warn" style="margin: 0 0 0.5rem">
+            <strong class="bad">{{ claimPatch.blocked }}</strong>
+            An Explorer can map it, and that is all. Something the hive has not grown yet would
+            have to change before any of this could be taken.
+          </p>
+          <p v-else-if="claimPatch.dangerous" class="notice is-warn" style="margin: 0 0 0.5rem">
+            <strong class="warn">People are on this ground.</strong>
+            It can be taken, at {{ claimPatch.multiplier }}× the usual price — the hive is not
+            moving into an empty field, it is moving in around something that will notice.
+          </p>
+
+          <template v-if="!claimPatch.blocked">
+            <div class="field-row">
+              <span class="field-label">
+                How much
+                <span class="field-help">
+                  Up to {{ claimPatch.area.toFixed(1) }} m² mapped; the hive can pay for
+                  {{ claimPatch.most.toFixed(1) }} m² right now.
+                </span>
+              </span>
+              <input
+                v-model.number="claimWant"
+                class="claim-input"
+                type="number"
+                min="0"
+                :max="claimPatch.area"
+                step="0.1"
+                aria-label="Square metres to claim"
+              />
+            </div>
+
+            <div class="stepper" style="margin-bottom: 0.5rem">
+              <button class="btn" style="width: auto; height: auto" @click="claimWant = claimPatch.most">
+                All it can pay for
+              </button>
+              <button class="btn" style="width: auto; height: auto" @click="claimWant = claimPatch.area">
+                All of it
+              </button>
+            </div>
+
+            <div class="data-table">
+              <div v-for="(grams, n) in claimPatch.bill" :key="n" class="field-row">
+                <span>{{ NUTRIENTS[n]?.name ?? n }}</span>
+                <span class="num" :class="(state.nutrients[n] || 0) >= grams ? '' : 'bad'">
+                  {{ formatMass(grams) }}
+                </span>
+              </div>
+            </div>
+            <p v-if="claimPatch.substituted" class="muted" style="font-size: 0.74rem; margin: 0.4rem 0 0">
+              Part of this bill is iron the hive cannot tell from the rest of the ash yet, so it
+              is paying in mineral mass at fifty times the amount. Assaying it cuts the price.
+            </p>
+          </template>
+        </div>
+
+        <div class="panel-body" style="display: flex; gap: 0.4rem">
+          <button
+            v-if="!claimPatch.blocked"
+            class="btn"
+            style="width: auto; height: auto"
+            :disabled="!claimPatch.affordable"
+            @click="doClaim"
+          >
+            Claim {{ claimPatch.want.toFixed(1) }} m²
+          </button>
+          <button class="btn" style="width: auto; height: auto" @click="doAbandon">
+            Forget it
+          </button>
+          <button class="btn" style="width: auto; height: auto" @click="closeClaim">Close</button>
         </div>
       </div>
     </div>

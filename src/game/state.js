@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 16;
+export const SAVE_VERSION = 17;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -103,6 +103,15 @@ export function createInitialState() {
     // is rolled separately, so a big holding is several places at once rather
     // than one place that happens to be bigger.
     patches: {},
+
+    // Ground an Explorer has MAPPED but the hive has not paid for, in square
+    // metres by biome. It shows on the territory map marked unclaimed and does
+    // nothing at all until it is claimed — see actions.js claimTerritory.
+    unclaimed: {},
+
+    // How far each exploring drone type is through its current expedition, 0
+    // to 1. The same shape as `brood` and `molding`.
+    expedition: {},
     insight: 0,
     drones: 0,
 
@@ -195,6 +204,10 @@ export function createInitialState() {
       dronesLost: 0,
       larvaeLost: 0,
       molded: 0,
+      explorersLost: 0,
+      cachesFound: 0,
+      groundFound: 0, // square metres mapped, claimed or not
+      groundClaimed: 0,
       peakDrones: 0,
       ticks: 0,
       devUsed: false,

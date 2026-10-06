@@ -98,10 +98,34 @@ export const DRONE_TYPES = {
     load: { min: 20, max: 45 },
     unlock: () => true,
   },
+
+  explorer: {
+    id: 'explorer',
+    name: 'Explorer',
+    caste: 'worker',
+    desc:
+      'Goes out past the edge of what the hive holds and maps what is there. Brings back ground ' +
+      'more often than food and nothing at all more often than either — and sometimes does not ' +
+      'come back. The only way the hive learns there is anywhere else.',
+    cogitDraw: 1,
+    // Manganese is unassayed at the start, so this is really 250 g of mineral
+    // mass until the hive can tell manganese from the rest of the ash.
+    cost: { fat: 250, manganese: 5, water: 200 },
+    // NOT a gather route: an expedition is a one-shot roll with several very
+    // different outcomes, not a trip with a weight. See engine.js.
+    expedition: {
+      seconds: 90,
+      // Ground already held is ground already walked, so the same expedition
+      // covers proportionally less of it. A hive ten times the size needs ten
+      // times the explorers to map at the same rate.
+      scaleArea: 36,
+    },
+    unlock: () => true,
+  },
 };
 
 /** Display order within a caste, and the order the engine will iterate. */
-export const DRONE_TYPE_ORDER = ['forager', 'scavenger'];
+export const DRONE_TYPE_ORDER = ['forager', 'scavenger', 'explorer'];
 
 /**
  * What the molding chambers should make next, or null if there is nothing they
@@ -151,6 +175,11 @@ export function moldStatus(state, id, free = Infinity) {
 /** The types that belong to a caste, in declared order. */
 export function typesInCaste(casteId) {
   return DRONE_TYPE_ORDER.filter((id) => DRONE_TYPES[id]?.caste === casteId);
+}
+
+/** The types that go out on expeditions, in declared order. */
+export function exploringTypes() {
+  return DRONE_TYPE_ORDER.filter((id) => DRONE_TYPES[id]?.expedition);
 }
 
 /** The types that work a forage route, in declared order. */

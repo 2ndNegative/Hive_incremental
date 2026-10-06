@@ -354,3 +354,145 @@ export function patchCount(state) {
   const byArea = Math.floor(area / AREA_PER_PATCH);
   return Math.max(1, Math.min(MAX_PATCHES, Math.max(kinds, byArea)));
 }
+
+/* ------------------------------------------------- what lies next to what */
+
+/**
+ * WHERE GROUND CAN BE REACHED FROM.
+ *
+ * An Explorer walks out of the hive's own holdings, so what it can find is
+ * decided by what the hive already stands on. A colony in a temperate forest
+ * finds more forest, the grassland at its edge, the stream running through it
+ * and — if it is unlucky — the road. It does not find a coral reef, because
+ * there is no walk from here to there.
+ *
+ * Weights are relative likelihoods, not percentages. A biome usually lists
+ * itself most heavily: ground is mostly surrounded by more of itself, and that
+ * is what makes a holding deepen before it broadens.
+ *
+ * THE TABLE IS SYMMETRIC. If forest borders grassland then grassland borders
+ * forest, whatever the two weights are — a rare biome lists a common neighbour
+ * heavily and is listed back lightly, which is right, but the EDGE exists both
+ * ways. Without that rule a biome can be a one-way door, and temperate
+ * rainforest was exactly that: it listed four neighbours and nothing listed it,
+ * so it could be walked out of and never into. adjacency-test.mjs enforces
+ * both this and the reachability that falls out of it.
+ *
+ * Marine entries exist so coastal ground has somewhere to look. A land hive
+ * cannot colonise them — see UNCOLONISABLE_FROM — but it can still find them,
+ * and being shown a kelp forest it cannot take is a better answer than being
+ * shown nothing.
+ */
+export const ADJACENCY = {
+  temperateForest: { temperateForest: 10, grassland: 5, wetland: 3, riverine: 3, taiga: 2, farmland: 3, lightUrban: 2, temperateRainforest: 2, lake: 2 },
+  temperateRainforest: { temperateRainforest: 10, temperateForest: 4, riverine: 3, wetland: 3, coast: 2 },
+  tropicalRainforest: { tropicalRainforest: 10, riverine: 4, wetland: 3, savanna: 3, farmland: 2 },
+  taiga: { taiga: 10, temperateForest: 4, tundra: 4, alpine: 3, lake: 3, wetland: 2 },
+  grassland: { grassland: 10, temperateForest: 4, savanna: 3, farmland: 5, riverine: 2, lightUrban: 3, desert: 1, wetland: 3, alpine: 2, coast: 2 },
+  savanna: { savanna: 10, grassland: 4, desert: 3, tropicalRainforest: 2, riverine: 2, farmland: 2 },
+  tundra: { tundra: 10, taiga: 4, alpine: 3, polarSea: 3, wetland: 2 },
+  desert: { desert: 10, savanna: 3, grassland: 2, alpine: 1, coast: 1, industrial: 1 },
+  alpine: { alpine: 10, taiga: 3, tundra: 3, grassland: 2, riverine: 2, desert: 1 },
+  wetland: { wetland: 10, riverine: 5, lake: 4, temperateForest: 3, estuary: 3, grassland: 2, temperateRainforest: 2, tropicalRainforest: 2, taiga: 2, tundra: 2 },
+  riverine: { riverine: 10, wetland: 5, lake: 4, temperateForest: 3, estuary: 3, farmland: 2, lightUrban: 2, temperateRainforest: 2, tropicalRainforest: 2, grassland: 2, savanna: 2, alpine: 2 },
+  lake: { lake: 10, wetland: 5, riverine: 4, taiga: 2, temperateForest: 2 },
+  coast: { coast: 10, estuary: 4, kelpForest: 4, continentalShelf: 3, grassland: 2, lightUrban: 2, denseUrban: 2, temperateRainforest: 1, desert: 1, coralReef: 2 },
+  estuary: { estuary: 10, coast: 5, wetland: 4, riverine: 4, denseUrban: 2, industrial: 2 },
+  kelpForest: { kelpForest: 10, coast: 4, continentalShelf: 4, coralReef: 1 },
+  coralReef: { coralReef: 10, continentalShelf: 4, kelpForest: 2, coast: 2 },
+  continentalShelf: { continentalShelf: 10, coast: 3, kelpForest: 3, coralReef: 2, openOcean: 3, polarSea: 2 },
+  openOcean: { openOcean: 10, continentalShelf: 4, twilightZone: 4, polarSea: 2 },
+  twilightZone: { twilightZone: 10, openOcean: 5, abyssalPlain: 4 },
+  abyssalPlain: { abyssalPlain: 10, twilightZone: 4, hydrothermalVent: 2 },
+  hydrothermalVent: { hydrothermalVent: 6, abyssalPlain: 8 },
+  polarSea: { polarSea: 10, openOcean: 3, tundra: 3, continentalShelf: 2 },
+  farmland: { farmland: 10, grassland: 5, lightUrban: 4, temperateForest: 3, riverine: 2, industrial: 2, tropicalRainforest: 1, savanna: 2 },
+  lightUrban: { lightUrban: 10, denseUrban: 5, farmland: 4, grassland: 3, riverine: 2, industrial: 3, temperateForest: 2, coast: 2 },
+  denseUrban: { denseUrban: 10, lightUrban: 6, industrial: 4, estuary: 2, coast: 2 },
+  industrial: { industrial: 10, denseUrban: 5, lightUrban: 4, estuary: 2, farmland: 2, desert: 1 },
+};
+
+/**
+ * Ground people are standing on. Not forbidden — a hive takes a park or a
+ * loading yard the same way it takes a meadow — but taking it is a different
+ * proposition, and the interface says so before the player commits.
+ */
+export const DANGEROUS_BIOMES = new Set(['farmland', 'lightUrban', 'denseUrban', 'industrial']);
+
+/**
+ * What a hive is built to live in. A colony that landed on soil cannot simply
+ * walk into the sea, however much of it an Explorer maps: that needs a body
+ * plan it does not have yet, which is a thing for the tech tree to sell it.
+ */
+export const REALMS = { land: 'land', freshwater: 'freshwater', marine: 'marine' };
+
+const MARINE = new Set([
+  'coast', 'estuary', 'kelpForest', 'coralReef', 'continentalShelf',
+  'openOcean', 'twilightZone', 'abyssalPlain', 'hydrothermalVent', 'polarSea',
+]);
+const FRESHWATER = new Set(['riverine', 'lake']);
+
+/** Which realm a biome belongs to. Wetland counts as land: it is walkable. */
+export function realmOf(id) {
+  if (MARINE.has(id)) return REALMS.marine;
+  if (FRESHWATER.has(id)) return REALMS.freshwater;
+  return REALMS.land;
+}
+
+/** Is this biome one the hive cannot colonise from where it started? */
+export function isColonisable(state, id) {
+  const realm = realmOf(id);
+  // Everything the hive currently holds is, by definition, somewhere it can
+  // live — so the realms it already stands in are the realms it can take.
+  for (const held of Object.keys(state.territory || {})) {
+    if ((state.territory[held] || 0) > 0 && realmOf(held) === realm) return true;
+  }
+  return false;
+}
+
+/** Why a found patch cannot be taken, in words, or null if it can. */
+export function colonisationBlock(state, id) {
+  if (isColonisable(state, id)) return null;
+  const realm = realmOf(id);
+  if (realm === REALMS.marine) return 'The hive cannot live in salt water.';
+  if (realm === REALMS.freshwater) return 'The hive cannot live submerged.';
+  return 'The hive cannot live there.';
+}
+
+/** Is this ground held by people? */
+export function isDangerous(id) {
+  return DANGEROUS_BIOMES.has(id);
+}
+
+/**
+ * Roll a biome an Explorer could plausibly have walked into, given what the
+ * hive holds. Two stages, the same shape as a forage roll: pick which of the
+ * hive's own holdings the expedition set out from, weighted by area, then pick
+ * a neighbour of that ground.
+ */
+export function rollAdjacent(state, random = Math.random) {
+  const shares = biomeShares(state);
+  const from = Object.entries(shares).map(([id, share]) => ({ id, weight: share }));
+  if (!from.length) return null;
+
+  let roll = random();
+  let origin = from[from.length - 1].id;
+  for (const entry of from) {
+    roll -= entry.weight;
+    if (roll <= 0) {
+      origin = entry.id;
+      break;
+    }
+  }
+
+  const near = ADJACENCY[origin];
+  if (!near) return origin;
+  let total = 0;
+  for (const w of Object.values(near)) total += w;
+  let pick = random() * total;
+  for (const [id, weight] of Object.entries(near)) {
+    pick -= weight;
+    if (pick <= 0) return id;
+  }
+  return origin;
+}

@@ -78,8 +78,11 @@ import {
   DRONE_TYPE_ORDER,
   nextMoldable,
   foragingTypes,
+  exploringTypes,
 } from './definitions/drones.js';
 import { advanceForage, FORAGE_CYCLE } from './forage.js';
+import { advanceExpeditions, expeditionSeconds, EXPEDITION_OUTCOMES } from './expedition.js';
+import { formatMass } from './units.js';
 
 export const TICK_MS = 100;
 export const TICK_SECONDS = TICK_MS / 1000;
@@ -1123,6 +1126,25 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // Not scaled by charge or by energy: a drone type declares no upkeep yet, so
   // there is nothing for a brownout to take away from it. When one does, this
   // is where that multiplier goes.
+  // EXPEDITIONS. Not a rate and not a yield: a count of drones out there, how
+  // long a trip takes this hive, and how far through the current one they are.
+  const expeditions = [];
+  for (const typeId of exploringTypes()) {
+    const count = state.droneTypes?.[typeId] || 0;
+    if (!count) continue;
+    const seconds = expeditionSeconds(state, typeId);
+    expeditions.push({
+      droneId: typeId,
+      name: DRONE_TYPES[typeId].name,
+      count,
+      seconds,
+      progress: state.expedition?.[typeId] || 0,
+      // Expeditions a minute, at this many explorers.
+      rate: seconds > 0 ? count / seconds : 0,
+      outcomes: EXPEDITION_OUTCOMES,
+    });
+  }
+
   const area = totalArea(state);
   const capacity = landCapacity(state);
   const patchesAvailable = patchCount(state);
@@ -1416,6 +1438,8 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       full: capacity > 0 && roomLeft <= EPSILON,
     },
     droneForage,
+    // What is out past the edge of the map, and how far through it is.
+    expeditions,
     itemNet,
     itemSpill,
     itemCap, // the whole larder, shared
@@ -1870,6 +1894,28 @@ export function tick(state, dt) {
   }
 
   advanceForage(state, dt);
+
+  // Expeditions come home. Every one of them is worth a line in the log: this
+  // is the only system in the hive where something either happens or does not,
+  // and a player who was not watching should be able to read what they missed.
+  for (const result of advanceExpeditions(state, dt)) {
+    if (result.outcome === 'nothing') continue; // not worth a line
+    if (result.outcome === 'lost') {
+      log(state, `An ${result.name} did not come back.`, 'error');
+    } else if (result.outcome === 'cache') {
+      log(state, `An expedition brought back ${formatMass(result.grams)} of ${result.name.toLowerCase()}.`, 'info');
+    } else if (result.outcome === 'hostile') {
+      log(
+        state,
+        result.colonisable
+          ? `Found ${result.area.toFixed(1)} m² of ${result.name.toLowerCase()} — people are on it.`
+          : `Found ${result.area.toFixed(1)} m² of ${result.name.toLowerCase()}, which the hive cannot live in.`,
+        'warn',
+      );
+    } else {
+      log(state, `Found ${result.area.toFixed(1)} m² of ${result.name.toLowerCase()}. Unclaimed.`, 'unlock');
+    }
+  }
 
   // The click combo bleeds away in real time. Offline catch-up runs the same
   // line with a dt of hours, which lands it at zero — which is right: nobody

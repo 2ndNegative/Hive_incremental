@@ -9,6 +9,7 @@ import {
   isUsableFuel,
   itemYield,
   settleReveal,
+  payableCost,
 } from './definitions/nutrients.js';
 import { STRUCTURES, maxLevelOf, isLeveled } from './definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
@@ -26,7 +27,9 @@ import {
   MANUAL_COMBO_COOL_SECONDS,
 } from './engine.js';
 import { formatMass } from './units.js';
-import { biomeShares } from './definitions/biomes.js';
+import {
+  biomeShares, BIOMES, isDangerous, isColonisable,
+} from './definitions/biomes.js';
 import { poolFor } from './definitions/forage.js';
 import { pickWeighted } from './forage.js';
 import { TOPBAR, TOPBAR_ORDER, DEFAULT_PINNED } from './definitions/topbar.js';
@@ -364,6 +367,85 @@ export function setFuelOverride(consumerKey, preferred, fallback) {
 export function clearFuelOverride(consumerKey) {
   delete state.energy.overrides[consumerKey];
   releaseFuelLock(consumerKey);
+}
+
+/* ------------------------------------------------------------------ territory */
+
+/**
+ * WHAT A SQUARE METRE COSTS.
+ *
+ * Mapping ground is free; standing on it is not. A claim is the hive growing
+ * itself out over the ground — water to move with, protein to build with, iron
+ * for the tissue that holds it together, and fibre for the bulk of it.
+ *
+ * Iron is unassayed at the start, so a young hive pays 50 g of mineral mass a
+ * square metre instead of 1 g of iron — see payableCost. That is the single
+ * biggest line on the bill until the assay is run, which is the point.
+ */
+export const CLAIM_COST_PER_SQUARE_METRE = { water: 400, protein: 60, fiber: 120, iron: 1 };
+
+/**
+ * What ground people are standing on costs on top. The hive is not taking an
+ * empty field; it is moving in around something that will notice.
+ */
+export const DANGEROUS_CLAIM_MULTIPLIER = 2.5;
+
+/** The bill for claiming `area` of this biome, as the hive can actually pay it. */
+export function claimCost(biomeId, area) {
+  const scale = area * (isDangerous(biomeId) ? DANGEROUS_CLAIM_MULTIPLIER : 1);
+  const raw = {};
+  for (const [n, per] of Object.entries(CLAIM_COST_PER_SQUARE_METRE)) raw[n] = per * scale;
+  return payableCost(state, raw);
+}
+
+/** The most of this patch the hive could pay for right now. */
+export function claimableArea(biomeId) {
+  const mapped = state.unclaimed?.[biomeId] || 0;
+  if (mapped <= 0) return 0;
+  const unit = claimCost(biomeId, 1);
+  let most = mapped;
+  for (const [n, per] of Object.entries(unit)) {
+    if (per <= 0) continue;
+    most = Math.min(most, (state.nutrients[n] || 0) / per);
+  }
+  return Math.max(0, Math.min(mapped, most));
+}
+
+/**
+ * Take `area` square metres of mapped ground. Pays the bill, moves the area out
+ * of `unclaimed` and into the holdings, and returns what it took — or 0 if the
+ * hive cannot have it or cannot pay.
+ */
+export function claimTerritory(biomeId, area) {
+  const mapped = state.unclaimed?.[biomeId] || 0;
+  const want = Math.min(Number(area) || 0, mapped);
+  if (!(want > 0) || !BIOMES[biomeId]) return 0;
+  if (!isColonisable(state, biomeId)) return 0;
+
+  const cost = claimCost(biomeId, want);
+  if (!canAfford(state, cost)) return 0;
+
+  const derived = computeDerived(state);
+  const store = openStore(state, derived.storage);
+  for (const [n, grams] of Object.entries(cost)) store.apply(n, -grams);
+
+  state.unclaimed[biomeId] = mapped - want;
+  if (state.unclaimed[biomeId] <= 1e-9) delete state.unclaimed[biomeId];
+  state.territory[biomeId] = (state.territory[biomeId] || 0) + want;
+  state.stats.groundClaimed = (state.stats.groundClaimed || 0) + want;
+
+  pushLog(
+    `Claimed ${want.toFixed(1)} m² of ${BIOMES[biomeId].name.toLowerCase()}.`,
+    'unlock',
+  );
+  return want;
+}
+
+/** Walk away from mapped ground, so a patch nobody wants stops cluttering the map. */
+export function abandonTerritory(biomeId) {
+  if (!state.unclaimed?.[biomeId]) return false;
+  delete state.unclaimed[biomeId];
+  return true;
 }
 
 /* --------------------------------------------------------------------- drones */

@@ -31,8 +31,13 @@ import { ITEMS } from './game/definitions/items/index.js';
 import { ORGANISMS, preyFor } from './game/definitions/organisms.js';
 import {
   BIOMES, BIOME_IDS, biomeShares, totalArea, holdings, landCapacity, patchCount,
-  FORAGERS_PER_SQUARE_METRE, AREA_PER_PATCH,
+  FORAGERS_PER_SQUARE_METRE, AREA_PER_PATCH, ADJACENCY, realmOf, isDangerous, isColonisable,
+  rollAdjacent,
 } from './game/definitions/biomes.js';
+import {
+  EXPEDITION_OUTCOMES, expeditionSeconds, resolveExpedition, advanceExpeditions,
+  CACHE_GRAMS, PATCH_AREA,
+} from './game/expedition.js';
 import { FORAGE, poolFor } from './game/definitions/forage.js';
 import * as forage from './game/forage.js';
 import * as discovery from './game/discovery.js';
@@ -42,6 +47,8 @@ import {
   reserveCogits, releaseCogits, releaseAllCogits, buildStructure,
   setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
   togglePinned, resetPinned, setMolding, toggleMolding, setMoldTarget,
+  claimCost, claimableArea, claimTerritory, abandonTerritory,
+  CLAIM_COST_PER_SQUARE_METRE, DANGEROUS_CLAIM_MULTIPLIER,
 } from './game/actions.js';
 import {
   STRUCTURES,
@@ -104,6 +111,25 @@ window.hive = {
   biomes: BIOMES,
   biomeIds: BIOME_IDS,
   biomeShares: () => biomeShares(state),
+  adjacency: ADJACENCY,
+  realmOf,
+  isDangerous,
+  isColonisable: (id) => isColonisable(state, id),
+  rollAdjacent: () => rollAdjacent(state),
+  expedition: {
+    outcomes: EXPEDITION_OUTCOMES,
+    seconds: (id) => expeditionSeconds(state, id),
+    resolve: (id) => resolveExpedition(state, id),
+    advance: (dt) => advanceExpeditions(state, dt),
+    cacheGrams: CACHE_GRAMS,
+    patchArea: PATCH_AREA,
+  },
+  claimCost: (id, area) => claimCost(id, area),
+  claimableArea: (id) => claimableArea(id),
+  claim: (id, area) => claimTerritory(id, area),
+  abandon: (id) => abandonTerritory(id),
+  claimPerSquareMetre: CLAIM_COST_PER_SQUARE_METRE,
+  dangerousClaimMultiplier: DANGEROUS_CLAIM_MULTIPLIER,
   totalArea: () => totalArea(state),
   holdings: () => holdings(state),
   landCapacity: () => landCapacity(state),

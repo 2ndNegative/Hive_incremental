@@ -389,6 +389,13 @@ function migrate(raw) {
     raw.droneMolding ??= {};
   }
 
+  // v17 adds expeditions and the unclaimed map. An old save has mapped nothing
+  // and has nobody out there, which is where a fresh one starts too.
+  if ((raw.version ?? 0) < 17) {
+    raw.unclaimed ??= {};
+    raw.expedition ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }
