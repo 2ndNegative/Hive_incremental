@@ -11,6 +11,7 @@ import {
   computeCognition,
   computeCharges,
   activeCount,
+  structureCost,
   openStore,
   stopLoop,
   BROWNOUT_SECONDS,
@@ -20,6 +21,12 @@ import {
   MANUAL_COMBO_MAX,
   larvaPace,
   LARVA_CARB_PER_SECOND,
+  raiseStructure,
+  advanceBuildQueue,
+  buildQueueCap,
+  queuedCount,
+  queueRoom,
+  BUILD_QUEUE_BASE,
 } from './game/engine.js';
 import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS } from './game/save.js';
 import { SAVE_VERSION } from './game/state.js';
@@ -54,6 +61,7 @@ import {
   togglePinned, resetPinned, setMolding, toggleMolding, setMoldTarget,
   claimCost, claimableArea, claimTerritory, abandonTerritory,
   setGeneralBan, toggleGeneralBan, generalContents,
+  queueBuild, unqueueBuild, moveQueued, clearBuildQueue,
   CLAIM_COST_PER_SQUARE_METRE, DANGEROUS_CLAIM_MULTIPLIER,
 } from './game/actions.js';
 import {
@@ -245,7 +253,21 @@ window.hive = {
   lockedCostMultiplier: LOCKED_COST_MULTIPLIER,
   payableCost: (cost) => payableCost(state, cost || {}),
   maxLevelOf,
+  structureCost: (id, n = 1) => structureCost(state, id, n),
   build: (id, n) => buildStructure(id, n),
+  queue: {
+    base: BUILD_QUEUE_BASE,
+    cap: () => buildQueueCap(state),
+    used: () => queuedCount(state),
+    room: () => queueRoom(state),
+    list: () => (state.buildQueue || []).map((e) => ({ ...e })),
+    add: (id, n) => queueBuild(id, n),
+    remove: (i, all) => unqueueBuild(i, all),
+    move: (i, d) => moveQueued(i, d),
+    clear: () => clearBuildQueue(),
+    advance: () => advanceBuildQueue(state),
+    raise: (id, n) => raiseStructure(state, id, n),
+  },
   setActive,
   adjustActive,
   activeCount: (id) => activeCount(state, id),

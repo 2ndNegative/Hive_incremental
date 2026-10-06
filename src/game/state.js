@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 19;
+export const SAVE_VERSION = 20;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -82,6 +82,12 @@ export function createInitialState() {
     // than a fact about the land, so it survives losing and retaking ground.
     // See focus.js — a star claims a share of that route's trips there.
     focus: {},
+
+    // What the hive has been told to build next, in order: [{ id, n }]. The
+    // head is attempted every tick and waits until it can be paid for, so the
+    // order is the player's priority rather than a suggestion. How long it may
+    // get is BUILD_QUEUE_BASE plus whatever research has widened it.
+    buildQueue: [],
 
     // Harvested matter, still whole. Castes deliver here and digestion draws
     // from here; a hive that cannot digest fast enough visibly backs up.

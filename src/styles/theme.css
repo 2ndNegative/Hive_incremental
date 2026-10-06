@@ -1672,6 +1672,116 @@ textarea.save-box {
   font-size: 0.74rem;
 }
 
+/* ------------------------------------------------------------- build queue
+
+   Sits above the bands rather than in one of them: it is about all of them, and
+   a player checking "what am I waiting on" should not have to remember which
+   band they queued it from. */
+
+.queue-strip {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.45rem 0.6rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.queue-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.queue-title {
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.queue-cap {
+  font-size: 0.78rem;
+  color: var(--text-strong);
+}
+
+.queue-clear {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.queue-clear:hover {
+  color: var(--text-strong);
+}
+
+.queue-empty {
+  padding-top: 0.3rem;
+  font-size: 0.75rem;
+}
+
+.queue-list {
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.18rem 0;
+  font-size: 0.78rem;
+}
+
+.queue-pos {
+  width: 1.1rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+/* The one being paid for. Everything below it is waiting on this, so it is the
+   only line whose timing means anything. */
+.queue-item.is-head .queue-name {
+  color: var(--text-strong);
+}
+
+.queue-name {
+  min-width: 10rem;
+}
+
+.queue-state {
+  flex: 1;
+  font-size: 0.74rem;
+}
+
+.queue-state.ok {
+  color: var(--good);
+}
+
+.queue-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0 0;
+}
+
+.queue-btn {
+  width: auto;
+  height: auto;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.74rem;
+}
+
+.queue-mine {
+  font-size: 0.72rem;
+  color: var(--warn);
+}
+
 /* ------------------------------------------------------- building bands */
 
 /* Horizontal bands on the Hive tab, one per building category, each folding

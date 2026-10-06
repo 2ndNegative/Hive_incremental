@@ -1918,6 +1918,11 @@ export function tick(state, dt) {
     state.castes.dormant = Math.max(0, state.castes.dormant + (state.drones - assigned));
   }
 
+  // The queue builds what it can now that this tick's income has landed. After
+  // the stores are settled and before the next derived snapshot, so a building
+  // that goes up here is paid for out of the mass that just arrived.
+  advanceBuildQueue(state);
+
   advanceForage(state, dt);
 
   // Expeditions come home. Every one of them is worth a line in the log: this
@@ -2003,3 +2008,149 @@ export function stopLoop() {
 }
 
 export { MACROS, MICROS, DRONE_PROTEIN_COST };
+
+/* ======================================================= raising a structure */
+
+/**
+ * GROW ONE OR MORE OF SOMETHING. The one place a structure ever actually goes
+ * up, so the button on the Hive tab and the build queue cannot drift apart —
+ * the queue is not a second way to build, it is the same way, called later.
+ *
+ * Takes the state being ticked rather than the live one, because the queue
+ * drains inside tick() and a test ticking a scratch hive must not grow
+ * buildings in the real one. `onLog` is how the caller says it; the two call
+ * sites write to different logs.
+ *
+ * Returns how many went up, which is 0 for anything refused.
+ */
+export function raiseStructure(state, id, count = 1, onLog = null) {
+  const def = STRUCTURES[id];
+  if (!def || !def.unlock(state)) return 0;
+
+  // A levelled structure is one thing you upgrade, so "build 5" means "take it
+  // five levels higher" and it stops at its cap rather than quietly overshooting.
+  const wanted = Math.min(count, maxLevelOf(id) - (state.structures[id] || 0));
+  if (wanted <= 0) return 0;
+
+  const cost = structureCost(state, id, wanted);
+  if (!canAfford(state, cost)) return 0;
+
+  const had = state.structures[id] || 0;
+  // How many were running BEFORE this. Absent means all of them, so this has to
+  // be read before the count moves.
+  const wasRunning = state.active?.[id] ?? had;
+  for (const [n, amount] of Object.entries(cost)) state.nutrients[n] -= amount;
+  state.structures[id] += wanted;
+  // Something newly built is switched on. Idling is a thing the player chooses,
+  // never a thing that happens to them.
+  state.active ??= {};
+  state.active[id] = isLeveled(id)
+    // A levelled entry is a flag. Upgrading something you deliberately shut
+    // down leaves it shut down; the first one ever raised comes up running.
+    ? (had === 0 || wasRunning > 0 ? state.structures[id] : 0)
+    : Math.min(state.structures[id], wasRunning + wanted);
+  state.stats.built += wanted;
+
+  // Something raised from nothing is raised lit, whatever the last one of its
+  // kind browned out to. Upgrading one that is already standing does NOT reset
+  // it: a dark Hivecore taken up a level is a bigger dark Hivecore.
+  if (had === 0) {
+    state.power ??= {};
+    state.power[id] = 1;
+  }
+  if (onLog) {
+    onLog(
+      def.leveled
+        ? `${def.name} raised to level ${state.structures[id]}.`
+        : `Grew ${wanted > 1 ? `${def.name} ×${wanted}` : def.name}.`,
+      'build',
+    );
+  }
+  return wanted;
+}
+
+/* ------------------------------------------------------------- build queue */
+
+/**
+ * THE BUILD QUEUE.
+ *
+ * A hive that cannot queue work makes the player sit and watch a number climb
+ * so they can press a button at the right moment. The queue is the hive being
+ * told what to do next and getting on with it — the resources are still the
+ * only constraint, and nothing here makes anything cheaper or faster.
+ *
+ * STRICTLY IN ORDER, head first. A queue that skipped past an item it could
+ * not afford to build the cheap thing behind it would quietly invert the
+ * player's priorities every time they lined up something expensive, which is
+ * exactly when the order matters most. So the head waits, and the player is
+ * the one who decides what goes first.
+ */
+export const BUILD_QUEUE_BASE = 2;
+
+/** How many builds can be lined up at once. Research widens it. */
+export function buildQueueCap(state) {
+  let cap = BUILD_QUEUE_BASE;
+  for (const id of RESEARCH_ORDER) {
+    if (state.tech?.[id]) cap += RESEARCH[id].queue || 0;
+  }
+  return cap;
+}
+
+/** How many builds are lined up right now. Entries hold runs of the same one. */
+export function queuedCount(state) {
+  return (state.buildQueue || []).reduce((sum, e) => sum + (e.n || 0), 0);
+}
+
+/** Room left in the queue. */
+export function queueRoom(state) {
+  return Math.max(0, buildQueueCap(state) - queuedCount(state));
+}
+
+/**
+ * Is this entry still something the hive could ever build? A queue outlives the
+ * situation it was written in — a structure can hit its level cap from the
+ * button while an upgrade for it is still sitting in the queue — and an entry
+ * that can never be built would otherwise block everything behind it forever.
+ */
+export function queueEntryLegal(state, id) {
+  const def = STRUCTURES[id];
+  if (!def || !def.unlock(state)) return false;
+  return maxLevelOf(id) - (state.structures[id] || 0) > 0;
+}
+
+/**
+ * Build what can be built off the head of the queue. Called once per tick.
+ *
+ * Several in one tick is deliberate: offline catch-up hands this hours at a
+ * time, and a queue that could only advance one step per tick would come back
+ * from a night away with the same two things still waiting on resources that
+ * arrived before dawn.
+ */
+export function advanceBuildQueue(state) {
+  const queue = state.buildQueue;
+  if (!Array.isArray(queue) || !queue.length) return 0;
+  let built = 0;
+
+  // Bounded by the queue's own length: every pass either builds something or
+  // drops something, and both shorten it.
+  for (let guard = queue.length * 2; guard > 0 && queue.length; guard -= 1) {
+    const head = queue[0];
+    if (!head || !(head.n > 0)) { queue.shift(); continue; }
+
+    if (!queueEntryLegal(state, head.id)) {
+      log(
+        state,
+        `${STRUCTURES[head.id]?.name ?? head.id} cannot be built any further — dropped from the queue.`,
+        'warn',
+      );
+      queue.shift();
+      continue;
+    }
+
+    if (!raiseStructure(state, head.id, 1, (text, type) => log(state, text, type))) break;
+    built += 1;
+    head.n -= 1;
+    if (head.n <= 0) queue.shift();
+  }
+  return built;
+}

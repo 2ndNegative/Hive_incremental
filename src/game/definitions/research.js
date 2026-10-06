@@ -10,6 +10,9 @@
 //   METABOLIC techs change what the hive can burn. Cellulolysis is the big one:
 //   fibre is 8 kJ/g sitting in every blade of grass and every plank of wood,
 //   and until the hive can cleave the bonds, none of it is fuel.
+//
+// A `queue` field widens the build queue by that many slots — see engine.js
+// buildQueueCap. The hive starts able to hold two jobs in mind at once.
 
 export const RESEARCH = {
   glycolysis: {
@@ -38,6 +41,15 @@ export const RESEARCH = {
     cost: { insight: 320 },
     unlocks: ['Reveals sodium, potassium, calcium, magnesium, phosphorus, chloride, sulfur', 'Mineral Vault'],
   },
+  stigmergy: {
+    id: 'stigmergy',
+    name: 'Stigmergy',
+    desc: 'Let the work carry its own instructions. A half-finished chamber tells the next drone what to do with it, so nothing has to be told twice.',
+    requires: ['glycolysis'],
+    cost: { insight: 260 },
+    queue: 2,
+    unlocks: ['+2 build queue slots'],
+  },
   scavenging: {
     id: 'scavenging',
     name: 'Scavenging',
@@ -61,6 +73,15 @@ export const RESEARCH = {
     requires: ['bulkMineralAssay'],
     cost: { insight: 1200 },
     unlocks: ['Reveals iron, zinc, copper, manganese'],
+  },
+  nestPlanning: {
+    id: 'nestPlanning',
+    name: 'Nest Planning',
+    desc: 'Hold the whole shape of the nest at once rather than the next chamber of it. The hive stops building what is in front of it and starts building what it will need.',
+    requires: ['stigmergy', 'bulkMineralAssay'],
+    cost: { insight: 1600 },
+    queue: 4,
+    unlocks: ['+4 build queue slots'],
   },
   lithovory: {
     id: 'lithovory',
@@ -117,9 +138,11 @@ export const RESEARCH_ORDER = [
   'glycolysis',
   'lipolysis',
   'bulkMineralAssay',
+  'stigmergy',
   'scavenging',
   'cellulolysis',
   'traceMetalAssay',
+  'nestPlanning',
   'lithovory',
   'predation',
   'lipidAssay',

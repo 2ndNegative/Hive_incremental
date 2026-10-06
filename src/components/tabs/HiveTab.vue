@@ -9,8 +9,14 @@ import {
 } from '../../game/definitions/structures.js';
 import { NUTRIENTS } from '../../game/definitions/nutrients.js';
 import { CASTES } from '../../game/definitions/castes.js';
-import { structureCost, canAfford, etaFor, affordableCount } from '../../game/engine.js';
-import { buildStructure, setActive, adjustActive } from '../../game/actions.js';
+import {
+  structureCost, canAfford, etaFor, affordableCount,
+  buildQueueCap, queuedCount, queueRoom,
+} from '../../game/engine.js';
+import {
+  buildStructure, setActive, adjustActive,
+  queueBuild, unqueueBuild, moveQueued, clearBuildQueue,
+} from '../../game/actions.js';
 import { formatMass, formatMassFlow, formatPower, formatCogits } from '../../game/units.js';
 import { formatEta } from '../../game/format.js';
 import CostList from '../CostList.vue';
@@ -105,6 +111,11 @@ const cards = computed(() =>
       count,
       cost,
       affordable,
+      // How many of this are already lined up, so the card can say so without
+      // the player having to read the strip at the top and match names.
+      queued: (state.buildQueue || [])
+        .filter((e) => e.id === id)
+        .reduce((sum, e) => sum + (e.n || 0), 0),
       eta: affordable ? null : formatEta(etaFor(state, derived.value, cost)),
       effects: effectLines(def),
       cycle: cycleOf(id),
@@ -221,6 +232,49 @@ function toggleBand(id) {
   state.ui.buildBands[id] = !state.ui.buildBands[id];
 }
 
+/* --------------------------------------------------------------- the queue */
+
+const queue = computed(() =>
+  (state.buildQueue || []).map((entry, index) => {
+    const def = STRUCTURES[entry.id];
+    const cost = structureCost(state, entry.id, 1);
+    return {
+      index,
+      id: entry.id,
+      n: entry.n,
+      name: def?.name ?? entry.id,
+      leveled: Boolean(def?.leveled),
+      cost,
+      // Only the head is ever being paid for, so only the head has a waiting
+      // time. Saying "in 4m" against everything behind it would be a lie: the
+      // third thing in the queue is not 4 minutes away, it is however long the
+      // two in front of it take plus its own.
+      affordable: canAfford(state, cost),
+      // formatEta gives null when nothing is coming in at all, and "affordable
+      // in" followed by a blank is the worst possible answer — it reads as a
+      // broken figure rather than as "nothing is arriving to pay for this".
+      eta: formatEta(etaFor(state, derived.value, cost)),
+    };
+  }),
+);
+
+const queueCap = computed(() => buildQueueCap(state));
+const queueUsed = computed(() => queuedCount(state));
+const queueFree = computed(() => queueRoom(state));
+
+/**
+ * How many a single press of ＋ lines up.
+ *
+ * The build amount is a statement of how much the player wants of something,
+ * so the queue honours it — clamped by what is left, because a ×25 press
+ * against two free slots should queue two rather than refuse.
+ */
+function queueAmount(card) {
+  const want = state.ui.buyAmount === 'max' ? queueFree.value : state.ui.buyAmount;
+  return Math.max(0, Math.min(want, queueFree.value, maxLevelOf(card.id)
+    - (state.structures[card.id] || 0) - card.queued));
+}
+
 /** Buildings whose category is missing or unknown — a rebuild tripwire. */
 const unfiled = computed(() => cards.value.filter((c) => !BUILDING_CATEGORIES[c.def.category]));
 
@@ -296,6 +350,46 @@ const overCapacity = computed(() =>
           {{ option === 'max' ? 'Max' : `×${option}` }}
         </button>
       </div>
+    </div>
+
+    <!-- What the hive has been told to build next. Strictly in order: the head
+         waits until it can be paid for rather than letting cheaper things
+         behind it jump the line, so this reads top to bottom as a plan. -->
+    <div v-if="!nothingBuildable" class="queue-strip">
+      <div class="queue-head">
+        <span class="queue-title">Build queue</span>
+        <span class="num queue-cap" :class="{ warn: queueFree === 0 }">
+          {{ queueUsed }} / {{ queueCap }}
+        </span>
+        <button v-if="queueUsed" class="queue-clear" @click="clearBuildQueue()">clear</button>
+      </div>
+
+      <div v-if="!queue.length" class="queue-empty muted">
+        Nothing lined up. Press ＋ on anything below and the hive will grow it the moment it can
+        pay for it — the queue spends nothing until then, and takes them in the order you set.
+      </div>
+
+      <ol v-else class="queue-list">
+        <li v-for="(q, i) in queue" :key="`${q.id}-${i}`" class="queue-item"
+            :class="{ 'is-head': i === 0 }">
+          <span class="queue-pos num">{{ i + 1 }}</span>
+          <span class="queue-name">
+            {{ q.name }}<span v-if="q.n > 1" class="muted"> ×{{ q.n }}</span>
+          </span>
+          <span class="queue-state" :class="q.affordable ? 'ok' : 'muted'">
+            <template v-if="i > 0">waiting its turn</template>
+            <template v-else-if="q.affordable">building now</template>
+            <template v-else-if="q.eta">affordable in {{ q.eta }}</template>
+            <template v-else>nothing coming in to pay for it</template>
+          </span>
+          <button class="btn switch-btn" :disabled="i === 0"
+                  title="Move it up the queue" @click="moveQueued(i, -1)">↑</button>
+          <button class="btn switch-btn" :disabled="i === queue.length - 1"
+                  title="Move it down the queue" @click="moveQueued(i, 1)">↓</button>
+          <button class="btn switch-btn" title="Take one off"
+                  @click="unqueueBuild(i, q.n === 1)">−</button>
+        </li>
+      </ol>
     </div>
 
     <div class="band-stack">
@@ -375,6 +469,21 @@ const overCapacity = computed(() =>
                 affordable in {{ card.eta }}
               </span>
             </button>
+
+            <!-- Lining it up instead of building it now. Outside the card
+                 for the same reason the switches are: the card is a button,
+                 and a button inside a button is a click the player cannot aim. -->
+            <div class="queue-row">
+              <button
+                class="btn queue-btn"
+                :disabled="queueAmount(card) <= 0"
+                :title="queueFree <= 0
+                  ? `The queue is full at ${queueCap}`
+                  : `Line up ${queueAmount(card)} to build when the hive can pay`"
+                @click="queueBuild(card.id, state.ui.buyAmount)"
+              >＋ Queue<span v-if="queueAmount(card) > 1" class="muted"> ×{{ queueAmount(card) }}</span></button>
+              <span v-if="card.queued" class="queue-mine num">{{ card.queued }} lined up</span>
+            </div>
 
             <!-- Switching buildings off is the way back out of overbuilding
                  something that eats. Outside the card, because the card is

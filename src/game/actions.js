@@ -21,6 +21,9 @@ import {
   canAfford,
   computeDerived,
   affordableCount,
+  raiseStructure,
+  queueRoom,
+  queuedCount,
   openStore,
   clickMultiplier,
   MANUAL_COMBO_MAX,
@@ -219,49 +222,81 @@ export function manualOddsSummary() {
 /* ----------------------------------------------------------------- structures */
 
 export function buildStructure(id, count = 1) {
+  const wanted = count === 'max' ? affordableCount(state, id) : count;
+  // The work itself lives in engine.js raiseStructure, which the build queue
+  // calls too — so a building raised from the queue and one raised from this
+  // button are the same event, down to the line in the log.
+  return raiseStructure(state, id, wanted, pushLog);
+}
+
+/* ------------------------------------------------------------- build queue */
+
+/**
+ * Line something up to be built when the hive can pay for it.
+ *
+ * Adds up to `count`, clamped by what is left in the queue and by how far the
+ * structure can still go — asking for five with two slots free queues two
+ * rather than refusing, because the player's intent is clear and a refusal
+ * here would just mean clicking again.
+ *
+ * Repeats of the same building merge into the entry in front of them, so a
+ * queue of three Nerve Nodes reads as one line rather than three.
+ *
+ * Returns how many were added.
+ */
+export function queueBuild(id, count = 1) {
   const def = STRUCTURES[id];
   if (!def || !def.unlock(state)) return 0;
+  state.buildQueue ??= [];
 
-  let wanted = count === 'max' ? affordableCount(state, id) : count;
-  // A levelled structure is one thing you upgrade, so "build 5" means "take it
-  // five levels higher" and it stops at its cap rather than quietly overshooting.
-  const headroom = maxLevelOf(id) - (state.structures[id] || 0);
-  wanted = Math.min(wanted, headroom);
-  if (wanted <= 0) return 0;
+  // What is already lined up counts against the cap AND against the structure's
+  // own ceiling: queuing a fifth level of something that caps at four is a
+  // promise the hive cannot keep, and it would sit at the head blocking
+  // everything behind it until the drain threw it out.
+  const pending = state.buildQueue
+    .filter((e) => e.id === id)
+    .reduce((sum, e) => sum + (e.n || 0), 0);
+  const headroom = maxLevelOf(id) - (state.structures[id] || 0) - pending;
 
-  const cost = structureCost(state, id, wanted);
-  if (!canAfford(state, cost)) return 0;
+  const want = count === 'max' ? queueRoom(state) : count;
+  const adding = Math.min(want, queueRoom(state), headroom);
+  if (adding <= 0) return 0;
 
-  const had = state.structures[id] || 0;
-  // How many were running BEFORE this. Absent means all of them, so this has to
-  // be read before the count moves.
-  const wasRunning = state.active?.[id] ?? had;
-  for (const [n, amount] of Object.entries(cost)) state.nutrients[n] -= amount;
-  state.structures[id] += wanted;
-  // Something newly built is switched on. Idling is a thing the player chooses,
-  // never a thing that happens to them.
-  state.active ??= {};
-  state.active[id] = isLeveled(id)
-    // A levelled entry is a flag. Upgrading something you deliberately shut
-    // down leaves it shut down; the first one ever raised comes up running.
-    ? (had === 0 || wasRunning > 0 ? state.structures[id] : 0)
-    : Math.min(state.structures[id], wasRunning + wanted);
-  state.stats.built += wanted;
+  const last = state.buildQueue[state.buildQueue.length - 1];
+  if (last && last.id === id) last.n += adding;
+  else state.buildQueue.push({ id, n: adding });
+  return adding;
+}
 
-  // Something raised from nothing is raised lit, whatever the last one of its
-  // kind browned out to. Upgrading one that is already standing does NOT reset
-  // it: a dark Hivecore taken up a level is a bigger dark Hivecore.
-  if (had === 0) {
-    state.power ??= {};
-    state.power[id] = 1;
-  }
-  pushLog(
-    def.leveled
-      ? `${def.name} raised to level ${state.structures[id]}.`
-      : `Grew ${wanted > 1 ? `${def.name} ×${wanted}` : def.name}.`,
-    'build',
-  );
-  return wanted;
+/**
+ * Take one entry out. `all` drops the whole run of that building; otherwise a
+ * single unit comes off, so a queued ×3 can be walked back one at a time.
+ */
+export function unqueueBuild(index, all = false) {
+  const queue = state.buildQueue;
+  if (!Array.isArray(queue) || !queue[index]) return 0;
+  const entry = queue[index];
+  const taken = all ? entry.n : 1;
+  entry.n -= taken;
+  if (entry.n <= 0) queue.splice(index, 1);
+  return taken;
+}
+
+/** Move one entry up or down the queue. The order is the whole point of it. */
+export function moveQueued(index, delta) {
+  const queue = state.buildQueue;
+  if (!Array.isArray(queue)) return false;
+  const to = index + delta;
+  if (!queue[index] || to < 0 || to >= queue.length) return false;
+  const [entry] = queue.splice(index, 1);
+  queue.splice(to, 0, entry);
+  return true;
+}
+
+export function clearBuildQueue() {
+  const n = queuedCount(state);
+  state.buildQueue = [];
+  return n;
 }
 
 /**

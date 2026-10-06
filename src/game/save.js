@@ -409,6 +409,12 @@ function migrate(raw) {
     raw.focus ??= {};
   }
 
+  // v20 adds the build queue. An old save has nothing lined up, which is how
+  // every hive behaved until now.
+  if ((raw.version ?? 0) < 20) {
+    raw.buildQueue ??= [];
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }
