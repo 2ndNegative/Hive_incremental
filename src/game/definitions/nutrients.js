@@ -298,7 +298,7 @@ export const LOCKED_COST_MULTIPLIER = 50;
  */
 export function payableCost(state, cost) {
   if (!cost) return {};
-  let swapped = false;
+  const swapped = new Set();
   const out = {};
   for (const [id, grams] of Object.entries(cost)) {
     if (!grams) continue;
@@ -312,13 +312,35 @@ export function payableCost(state, cost) {
       continue;
     }
     out[parent] = (out[parent] || 0) + grams * LOCKED_COST_MULTIPLIER;
-    swapped = true;
+    swapped.add(parent);
   }
   // Marked rather than inferred, so the interface can say WHY a cost looks the
-  // way it does without re-deriving it.
-  if (swapped) Object.defineProperty(out, 'substituted', { value: true, enumerable: false });
+  // way it does without re-deriving it — and WHICH line it applies to, because
+  // the convention is to colour that one figure rather than explain it in a
+  // sentence underneath. See substitutedEntries.
+  if (swapped.size) {
+    Object.defineProperty(out, 'substituted', { value: true, enumerable: false });
+    Object.defineProperty(out, 'substitutedInto', { value: swapped, enumerable: false });
+  }
   return out;
 }
+
+/**
+ * WHICH entries of a resolved cost are standing in for something else.
+ *
+ * THE CONVENTION: a bulk resource being spent because the hive cannot yet see
+ * the element it is really paying for is drawn in WARNING YELLOW, and nothing
+ * else is. No sentence, no footnote — the colour is the whole signal, and it
+ * means one thing everywhere it appears: this number is inflated, and an assay
+ * will shrink it.
+ *
+ * Returns a Set of nutrient ids. Empty when nothing was swapped.
+ */
+export function substitutedEntries(cost) {
+  return cost?.substitutedInto ?? EMPTY_SET;
+}
+
+const EMPTY_SET = new Set();
 
 /** Did resolving this cost swap a locked nutrient for its parent? */
 export function costWasSubstituted(cost) {

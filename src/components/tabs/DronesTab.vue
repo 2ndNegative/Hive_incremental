@@ -24,7 +24,7 @@ import {
 } from '../../game/definitions/drones.js';
 import { GATHER_TYPES } from '../../game/definitions/forage.js';
 import { STRUCTURES } from '../../game/definitions/structures.js';
-import { NUTRIENTS, payableCost, costWasSubstituted } from '../../game/definitions/nutrients.js';
+import { NUTRIENTS, payableCost, substitutedEntries } from '../../game/definitions/nutrients.js';
 import { toggleMolding, setMoldTarget } from '../../game/actions.js';
 import { formatCogits, formatMass, formatMassFlow } from '../../game/units.js';
 
@@ -41,18 +41,18 @@ const STATUS = {
 /** A mold cost as the hive can actually pay it, locked nutrients swapped out. */
 function costLine(def) {
   const cost = payableCost(state, def.cost);
-  const parts = Object.entries(cost).map(
-    ([n, g]) => `${formatMass(g)} ${NUTRIENTS[n]?.name.toLowerCase() ?? n}`,
-  );
+  const swapped = substitutedEntries(cost);
+  // One entry per nutrient rather than one joined string, so the ones the hive
+  // is paying in bulk can be coloured on their own. See the convention on
+  // substitutedEntries: yellow means "this figure is inflated, and an assay
+  // will shrink it", and that is the whole of the explanation.
+  const parts = Object.entries(cost).map(([n, g]) => ({
+    n,
+    text: `${formatMass(g)} ${NUTRIENTS[n]?.name.toLowerCase() ?? n}`,
+    standingIn: swapped.has(n),
+  }));
   if (!parts.length) return null;
-  return {
-    text: parts.join(' + '),
-    // Charged to a parent macro because the real thing is still unassayed.
-    substituted: costWasSubstituted(cost),
-    real: Object.keys(def.cost || {})
-      .map((n) => NUTRIENTS[n]?.name.toLowerCase() ?? n)
-      .join(' + '),
-  };
+  return { parts };
 }
 
 const bands = computed(() =>
@@ -243,9 +243,13 @@ function commitTarget(id) {
                   {{ t.terms.join(' · ') }}
                 </span>
                 <span v-if="t.cost" class="job-desc muted" style="display: block">
-                  costs {{ t.cost.text }} a press<template v-if="t.cost.substituted">
-                  — it is really built out of {{ t.cost.real }}, and the hive is shovelling the
-                  parent at it until the assay is run</template>
+                  costs <template v-for="(part, i) in t.cost.parts" :key="part.n"><span
+                    v-if="i > 0"> + </span><span
+                    :class="{ 'cost-unassayed': part.standingIn }"
+                    :title="part.standingIn
+                      ? 'Bulk, standing in for an element the hive cannot pick out yet. Assaying it cuts the price fifty-fold.'
+                      : null"
+                  >{{ part.text }}</span></template> a press
                 </span>
                 <span v-if="t.count && t.rate > 0" class="job-desc good" style="display: block">
                   {{ formatMassFlow(t.rate) }} coming in across {{ t.patches }}

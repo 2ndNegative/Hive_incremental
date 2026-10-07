@@ -800,12 +800,15 @@ textarea.save-box {
   flex-wrap: wrap;
 }
 
-/* Why a build cost is quoted in mineral mass rather than the element the
-   building is actually made of. */
-.cost-substituted {
-  display: block;
-  width: 100%;
-  font-size: 0.68rem;
+/* ONE COLOUR, ONE MEANING.
+   A bulk resource being spent in place of an element the hive cannot pick out
+   yet — see payableCost and substitutedEntries in definitions/nutrients.js — is
+   drawn in warning yellow, on every screen that quotes a price: the build
+   cards, the drone rows, the claim dialog. Nothing is written underneath it.
+   The figure is inflated fifty-fold and an assay will shrink it, and once the
+   player has learned that once, a sentence repeating it under every card is
+   noise. Nothing ELSE uses this class. */
+.cost-unassayed {
   color: var(--warn);
 }
 

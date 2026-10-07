@@ -348,9 +348,25 @@ is a real decision, `brutal` for a thing that should hurt to repeat (nothing use
    **500 g of mineral mass** before it. The rung is the post-assay price; an early hive pays
    fifty times that. Storage is a different question — the Gizzard holds ash precisely
    because ash is what unsorted mineral mass *is*.
+
+   **On screen, that substituted figure is yellow.** See *One colour, one meaning* below.
 6. **When a number really is bespoke, write it.** `build()` and `flat()` both take a raw
    number as well as a rung name — and expect to justify it in a comment, because the next
    person rebalancing the ladder will not see it.
+
+### One colour, one meaning
+
+A bulk resource being spent in place of an element the hive cannot pick out yet is drawn in
+**warning yellow**, and nothing else is. It means one thing wherever it appears — *this
+figure is inflated fifty-fold, and an assay will shrink it* — and it appears on every screen
+that quotes a price: the build cards, the drone rows, the claim dialog.
+
+No sentence underneath. The explanation lives in a `title` for anyone who hovers, and once
+the player has met the colour once, a footnote repeating it under every card is noise.
+
+`payableCost` records *which* entries it swapped (`substitutedEntries`), so the colour lands
+on the one figure that is standing in rather than on the whole price. The class is
+`.cost-unassayed` and nothing else uses it.
 
 ### Changing it
 

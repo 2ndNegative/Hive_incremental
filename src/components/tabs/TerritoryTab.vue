@@ -29,7 +29,7 @@ import { formatMass, formatMassFlow, formatArea } from '../../game/units.js';
 import {
   claimCost, claimableArea, claimTerritory, abandonTerritory, DANGEROUS_CLAIM_MULTIPLIER,
 } from '../../game/actions.js';
-import { NUTRIENTS, costWasSubstituted } from '../../game/definitions/nutrients.js';
+import { NUTRIENTS, substitutedEntries } from '../../game/definitions/nutrients.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
 import {
   isStarred, isStarrable, starsFor, toggleStar, clearStars, focusedOdds, focusStrength,
@@ -151,7 +151,9 @@ const claimPatch = computed(() => {
     want,
     unit,
     bill,
-    substituted: costWasSubstituted(unit),
+    // Which lines of the bill are bulk standing in for an element the hive
+    // cannot see yet. Coloured, not explained — see substitutedEntries.
+    standingIn: substitutedEntries(unit),
     affordable: want > 0 && Object.entries(bill).every(([n, g]) => (state.nutrients[n] || 0) >= g),
     most: claimableArea(id),
     dangerous: isDangerous(id),
@@ -535,15 +537,18 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
             <div class="data-table">
               <div v-for="(grams, n) in claimPatch.bill" :key="n" class="field-row">
                 <span>{{ NUTRIENTS[n]?.name ?? n }}</span>
-                <span class="num" :class="(state.nutrients[n] || 0) >= grams ? '' : 'bad'">
+                <span
+                  class="num"
+                  :class="claimPatch.standingIn.has(n) ? 'cost-unassayed'
+                    : (state.nutrients[n] || 0) >= grams ? '' : 'bad'"
+                  :title="claimPatch.standingIn.has(n)
+                    ? 'Bulk, standing in for an element the hive cannot pick out yet. Assaying it cuts the price fifty-fold.'
+                    : null"
+                >
                   {{ formatMass(grams) }}
                 </span>
               </div>
             </div>
-            <p v-if="claimPatch.substituted" class="muted" style="font-size: 0.74rem; margin: 0.4rem 0 0">
-              Part of this bill is iron the hive cannot tell from the rest of the ash yet, so it
-              is paying in mineral mass at fifty times the amount. Assaying it cuts the price.
-            </p>
           </template>
         </div>
 
