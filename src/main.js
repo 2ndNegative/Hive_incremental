@@ -21,6 +21,9 @@ import {
   MANUAL_COMBO_MAX,
   larvaPace,
   LARVA_CARB_PER_SECOND,
+  computeHydration,
+  computeRation,
+  RATION_KEY,
   raiseStructure,
   advanceBuildQueue,
   buildQueueCap,
@@ -39,6 +42,7 @@ import { ITEMS } from './game/definitions/items/index.js';
 import { ORGANISMS, preyFor } from './game/definitions/organisms.js';
 import {
   BIOMES, BIOME_IDS, biomeShares, totalArea, holdings, landCapacity, patchCount,
+  ARIDITY, aridity, aridityOf,
   FORAGERS_PER_SQUARE_METRE, AREA_PER_PATCH, ADJACENCY, realmOf, isDangerous, isColonisable,
   rollAdjacent,
 } from './game/definitions/biomes.js';
@@ -249,6 +253,12 @@ window.hive = {
   fuelSwitchSeconds: FUEL_SWITCH_SECONDS,
   fuelLock: (key) => fuelLockFor(state, key),
   larvaCarbPerSecond: LARVA_CARB_PER_SECOND,
+  hydration: () => computeHydration(state),
+  ration: () => computeRation(state, computeDerived(state).efficiency),
+  rationKey: RATION_KEY,
+  aridityTable: ARIDITY,
+  aridityOf,
+  aridity: () => aridity(state),
   larvaPace: () => larvaPace(state),
   lockedCostMultiplier: LOCKED_COST_MULTIPLIER,
   payableCost: (cost) => payableCost(state, cost || {}),

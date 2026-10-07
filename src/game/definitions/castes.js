@@ -22,20 +22,64 @@
 //   insight      insight per second per assigned drone
 //   slots        null = unlimited, otherwise a key that structures provide
 
-export const BASAL_WATTS = 20;
+/**
+ * WHAT A DRONE EATS, per second, as chemical energy.
+ *
+ * Drones used to draw watts out of the pool like a building does, which made
+ * them a line on the electricity bill and nothing else — twenty watts against a
+ * Hivecore's fifty thousand, invisible. They do not draw watts any more: they
+ * eat, directly out of the stores, and the hive chooses what to feed them on.
+ *
+ * The figure is 0.15 g/s of carbohydrate — 0.15 × 17 kJ/g — and everything else
+ * is priced against it by its own energy density, so the same ration costs
+ * 0.069 g/s of fat or 0.319 g/s of fibre. A biome with no sugar in it can still
+ * feed a hive; it just has to feed it something else.
+ *
+ * For scale: a forager brings back 2.7 g/s of forage, worth about 16 kW once a
+ * generator has opened it. Its ration is 2.55 kW of that, so a drone returns
+ * roughly six times what it eats — and an idle drone is now a real cost rather
+ * than a rounding error.
+ */
+export const DRONE_RATION_JOULES = 2550;
 
 /**
- * Water the hive loses per drone per second, regardless of what it is doing.
- * Most forage is already 80% water, so siphons only really earn their keep once
- * the hive moves onto dry matter — grain, bone, mineral.
+ * Water the hive loses per drone per second, before the land has its say.
+ *
+ * Multiplied by the aridity of the ground the hive holds (see biomes.js), so
+ * this is the figure for temperate forest and farmland. A wetland hive loses a
+ * third of it; a desert hive loses four times it, on ground whose forage is dry
+ * to begin with. That spread is the whole point: water is the resource that
+ * makes WHERE the hive lives matter, and it can only do that if it is nearly
+ * free in some places and genuinely hard in others.
  */
-export const BASAL_WATER_PER_SECOND = 0.1;
+export const BASAL_WATER_PER_SECOND = 0.4;
+
+/**
+ * How much water the hive wants to be holding, per drone.
+ *
+ * Not a cost — a target. Hydration is water held against this, and everything
+ * the hive DOES is scaled by it. At 250 g a forty-drone hive wants 10 kg
+ * against the Hivecore's 20 kg, which is comfortable; an eighty-drone hive
+ * wants its entire storage, so growth past that point forces a water building
+ * rather than a hard wall.
+ */
+export const WATER_PER_DRONE_TARGET = 250;
+
+/**
+ * What a bone-dry hive still manages.
+ *
+ * NOT zero, and deliberately generous. A hive that cannot forage cannot fetch
+ * water, cannot rehydrate, and never recovers — a death spiral nobody enjoys
+ * finding out about after an hour away. A parched hive crawls at 40% and can
+ * always dig itself out.
+ */
+export const HYDRATION_FLOOR = 0.4;
 
 export const CASTES = {
   dormant: {
     id: 'dormant',
     name: 'Dormant',
-    desc: 'Unassigned. Still costs basal energy, still eats into your reserves.',
+    desc: 'Unassigned. Still has to be fed, still drinks, still does nothing.',
     unlock: () => true,
     assignable: false,
     slots: null,

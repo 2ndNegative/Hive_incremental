@@ -7,6 +7,7 @@ import { save, saveStatus } from '../game/save.js';
 import TopBarPicker from './TopBarPicker.vue';
 import EnergyChip from './topbar/EnergyChip.vue';
 import DrawChip from './topbar/DrawChip.vue';
+import HydrationChip from './topbar/HydrationChip.vue';
 import CognitionChip from './topbar/CognitionChip.vue';
 import LarvaeChip from './topbar/LarvaeChip.vue';
 import InsightChip from './topbar/InsightChip.vue';
@@ -22,6 +23,7 @@ import InsightChip from './topbar/InsightChip.vue';
 const CHIPS = {
   energy: EnergyChip,
   draw: DrawChip,
+  hydration: HydrationChip,
   cognition: CognitionChip,
   larvae: LarvaeChip,
   insight: InsightChip,

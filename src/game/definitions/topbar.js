@@ -23,7 +23,7 @@
 // exists.
 
 import { formatNumber } from '../format.js';
-import { formatEnergy, formatPower, formatCogits } from '../units.js';
+import { formatEnergy, formatPower, formatCogits, formatMass, formatMassFlow } from '../units.js';
 
 /**
  * How many resources the bar will carry before it starts leaving things out.
@@ -31,7 +31,10 @@ import { formatEnergy, formatPower, formatCogits } from '../units.js';
  * Pinned ones are never left out, so this is really a cap on the overflow: a
  * player who pins nine things gets nine, and takes responsibility for it.
  */
-export const TOPBAR_SLOTS = 7;
+// Eight, not seven: hydration is a SIXTH thing a hive always wants nailed up,
+// and leaving the count alone would have squeezed the overflow — the part that
+// surfaces whatever is currently going wrong — down to a single slot.
+export const TOPBAR_SLOTS = 8;
 
 /**
  * Every top-bar resource.
@@ -86,6 +89,38 @@ export const TOPBAR = {
         rate: short < -1e-9 ? short : 0,
         rateText: short < -1e-9 ? `${formatPower(short)} short` : null,
         note: e.ratio < 0.999 ? `${Math.floor(e.ratio * 100)}% of demand met` : null,
+      };
+    },
+  },
+
+  /**
+   * HYDRATION EARNS A SLOT BECAUSE IT CAN KILL A HIVE UNWATCHED.
+   *
+   * Everything else on this bar is a thing the player chose to spend. Water is
+   * a thing that leaves on its own, faster on dry ground, and the first sign of
+   * a problem is that the whole colony is quietly running slower — which reads
+   * as a balance mistake rather than as thirst unless the bar says otherwise.
+   */
+  hydration: {
+    id: 'hydration',
+    name: 'Hydration',
+    desc: 'Water held against what the colony needs. Everything it does is scaled by this.',
+    read: (state, derived) => {
+      const h = derived.hydration;
+      const net = derived.net?.water ?? 0;
+      const pct = Math.round(h.ratio * 100);
+      return {
+        text: `${pct}%`,
+        sub: null,
+        tone: h.ratio >= 1 ? 'good' : h.ratio > 0.6 ? 'warn' : 'bad',
+        store: `${formatMass(h.held)} of ${formatMass(h.target)}`,
+        rate: net,
+        rateText: Math.abs(net) > 1e-9 ? `${formatMassFlow(net)}` : null,
+        note: h.ratio < 1
+          ? `everything is running at ${Math.round(h.multiplier * 100)}%`
+          : h.aridity > 1.05
+            ? `arid ground — losing ${formatMassFlow(-h.draw)}`
+            : null,
       };
     },
   },
@@ -149,7 +184,7 @@ export const TOPBAR = {
 };
 
 /** Declaration order. Pinned resources appear in this order and stay put. */
-export const TOPBAR_ORDER = ['energy', 'draw', 'cognition', 'larvae', 'insight'];
+export const TOPBAR_ORDER = ['energy', 'draw', 'hydration', 'cognition', 'larvae', 'insight'];
 
 /** What a new hive starts with nailed to the bar: everything there is. */
 export const DEFAULT_PINNED = [...TOPBAR_ORDER];

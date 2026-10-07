@@ -282,6 +282,21 @@ export const STRUCTURES = {
     storage: { fiber: 500 },
   },
 
+  cistern: {
+    id: 'cistern',
+    name: 'Cistern',
+    category: 'storage',
+    desc:
+      'A sealed reservoir of standing water, grown deep and kept out of the sun. The hive is '
+      + 'mostly water and loses it constantly; without somewhere to keep a reserve, a dry spell '
+      + 'is felt in everything the colony does within the hour.',
+    unlock: () => true,
+    cost: (n) => ({ fiber: geo(340, 1.3)(n), protein: geo(50, 1.3)(n) }),
+    storage: { water: 10_000 },
+    // Cheap to keep. It is a bag, not an organ.
+    upkeepWatts: 5,
+  },
+
   crop: {
     id: 'crop',
     name: 'Crop Chamber',
@@ -455,6 +470,7 @@ export const STRUCTURE_ORDER = [
   'lipidDroplet',
   'glycogenGranule',
   'celluloseBale',
+  'cistern',
   'crop',
   'vacuole',
 ];

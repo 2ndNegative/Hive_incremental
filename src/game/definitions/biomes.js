@@ -419,6 +419,67 @@ export const ADJACENCY = {
  */
 export const DANGEROUS_BIOMES = new Set(['farmland', 'lightUrban', 'denseUrban', 'industrial']);
 
+/* ------------------------------------------------------------------ aridity */
+
+/**
+ * HOW HARD IT IS TO STAY WET HERE. A multiplier on what every drone loses.
+ *
+ * This is the number that makes water a real resource rather than a timer. A
+ * forager drags back 2.7 g/s of forage and forest forage is four fifths water,
+ * so a wet hive drinks its own food and could never run dry whatever the loss
+ * is set to. The only way water can bite is for the ground to decide it — and
+ * the spread has to be wide, because the same ground that is arid is also the
+ * ground whose forage is dry to begin with. Both ends compound, which is the
+ * point: a desert hive is short of water twice over.
+ *
+ * Anything submerged or soaking is nearly free. Anything paved, frozen or high
+ * is dear — ice and tarmac are both deserts as far as a drone is concerned.
+ */
+export const ARIDITY = {
+  // Standing in it.
+  wetland: 0.3, riverine: 0.3, lake: 0.3, estuary: 0.3,
+  coast: 0.3, kelpForest: 0.3, coralReef: 0.3, continentalShelf: 0.3,
+  openOcean: 0.3, twilightZone: 0.3, abyssalPlain: 0.3,
+  hydrothermalVent: 0.3, polarSea: 0.3,
+
+  // Damp ground and deep litter.
+  temperateForest: 1, temperateRainforest: 0.6, tropicalRainforest: 0.6,
+  taiga: 1, farmland: 1,
+
+  // Open, exposed, or frozen hard.
+  grassland: 1.6, savanna: 1.6, lightUrban: 1.6, tundra: 1.6,
+
+  // Paved, or thin cold air.
+  denseUrban: 2.2, industrial: 2.2, alpine: 2.2,
+
+  // The headline case.
+  desert: 4,
+};
+
+/** A biome's aridity, defaulting to temperate so a new biome is never free. */
+export function aridityOf(id) {
+  return ARIDITY[id] ?? 1;
+}
+
+/**
+ * The aridity of everything the hive holds, weighted by area.
+ *
+ * A weighted average rather than a worst case, so a hive that holds desert AND
+ * wetland is comfortable. That is what turns water into a reason to care about
+ * territory composition instead of a reason to avoid a biome.
+ */
+export function aridity(state) {
+  const shares = biomeShares(state);
+  let total = 0;
+  let any = false;
+  for (const [id, share] of Object.entries(shares)) {
+    if (share <= 0) continue;
+    any = true;
+    total += share * aridityOf(id);
+  }
+  return any ? total : 1;
+}
+
 /**
  * What a hive is built to live in. A colony that landed on soil cannot simply
  * walk into the sea, however much of it an Explorer maps: that needs a body

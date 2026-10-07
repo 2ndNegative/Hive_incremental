@@ -65,14 +65,16 @@ import {
 import {
   CASTES,
   CASTE_ORDER,
-  BASAL_WATTS,
+  DRONE_RATION_JOULES,
   BASAL_WATER_PER_SECOND,
+  WATER_PER_DRONE_TARGET,
+  HYDRATION_FLOOR,
   MULTIPLIERS,
 } from './definitions/castes.js';
 import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import { ORGANISMS } from './definitions/organisms.js';
-import { BIOMES, totalArea, landCapacity, patchCount } from './definitions/biomes.js';
+import { BIOMES, totalArea, landCapacity, patchCount, aridity } from './definitions/biomes.js';
 import { BASE_COGIT_CAPACITY, COGIT_PER_DRONE } from './definitions/cognition.js';
 import {
   DRONE_TYPES,
@@ -664,6 +666,122 @@ function chooseFuel(state, key, order, rate) {
     : { nutrient: next, switched: true, hold: FUEL_SWITCH_SECONDS };
 }
 
+/* ------------------------------------------------------ water and the ration */
+
+/**
+ * EVERY DRONE THE HIVE IS ACTUALLY HOLDING.
+ *
+ * Deliberately `droneTypes` and not `state.drones`. The old caste population is
+ * parked for the rebuild and capped at BASE_DRONE_CAP, so counting it would
+ * charge a hive of forty foragers for three — the ration and the thirst would
+ * both be rounding errors, which is the exact failure this system exists to
+ * stop. Both are counted off the live population, the same one cognition bills
+ * and the land caps.
+ */
+export function droneCount(state) {
+  let total = 0;
+  for (const id of DRONE_TYPE_ORDER) total += state.droneTypes?.[id] || 0;
+  return total;
+}
+
+/**
+ * HOW WET THE HIVE IS, and what that costs it.
+ *
+ * Water is the only resource whose absence is felt everywhere at once rather
+ * than in one system, which is the whole of its identity: everything else stops
+ * a particular thing, and water slows the colony down.
+ *
+ * `target` is 250 g a drone. Above it there is no penalty at all — a dead zone
+ * on purpose, so a healthy hive is never nagged — and below it the multiplier
+ * falls in a straight line to the floor. Straight rather than curved because a
+ * curve would hide the first 20% of the problem, and the first 20% is when the
+ * player can still cheaply fix it.
+ *
+ * `draw` is what the hive is losing a second, and it is the land that decides
+ * it: see biomes.js ARIDITY.
+ */
+export function computeHydration(state) {
+  const drones = droneCount(state);
+  const target = drones * WATER_PER_DRONE_TARGET;
+  const held = state.nutrients?.water || 0;
+  // A hive with nobody in it is not thirsty.
+  const ratio = target > EPSILON ? Math.min(1, held / target) : 1;
+  const multiplier = ratio >= 1 ? 1 : HYDRATION_FLOOR + (1 - HYDRATION_FLOOR) * ratio;
+  const dryness = aridity(state);
+  return {
+    drones,
+    held,
+    target,
+    ratio,
+    multiplier,
+    aridity: dryness,
+    draw: drones * BASAL_WATER_PER_SECOND * dryness,
+    parched: ratio < 1,
+  };
+}
+
+/** The consumer key the drone ration's fuel choice is filed under. */
+export const RATION_KEY = 'drones';
+
+/**
+ * WHAT THE DRONES ARE EATING, and whether there is enough of it.
+ *
+ * The hive owes DRONE_RATION_JOULES a drone a second, as chemical energy, and
+ * pays it in whichever fuel the Metabolism tab is pointed at — so the bill is
+ * fixed in joules and variable in grams. A sugar hive pays 0.15 g/s a drone; a
+ * hive living on fat pays 0.069. That is the point of letting the player
+ * choose: ground with no sugar on it can still feed a colony.
+ *
+ * It uses the same preferred/fallback pair and the same changeover cooldown the
+ * generators use, because it is the same decision and should not need learning
+ * twice.
+ *
+ * Short rations do NOT kill. They scale the colony down the same way thirst
+ * does, for the same reason — a hive that starves to death while the player is
+ * asleep is a hive nobody comes back to.
+ */
+export function computeRation(state, efficiency = {}) {
+  const drones = droneCount(state);
+  const joules = drones * DRONE_RATION_JOULES;
+  const empty = {
+    drones,
+    joules,
+    nutrient: null,
+    grams: 0,
+    wantGrams: 0,
+    ratio: 1,
+    multiplier: 1,
+    hungry: false,
+  };
+  if (joules <= EPSILON) return empty;
+
+  const { preferred, fallback } = fuelChoiceFor(state, RATION_KEY);
+  const order = [preferred, fallback].filter(
+    (n, i, arr) => n && arr.indexOf(n) === i && isUsableFuel(state, n),
+  );
+  // Rate in grams of the preferred fuel, which is all chooseFuel needs it for.
+  const nominal = order[0] ? joules / Math.max(EPSILON, joulesPerGram(order[0])) : 0;
+  const nutrient = chooseFuel(state, RATION_KEY, order, nominal).nutrient;
+  if (!nutrient) return { ...empty, ratio: 0, multiplier: HYDRATION_FLOOR, hungry: true };
+
+  const perGram = joulesPerGram(nutrient) * (efficiency[nutrient] ?? 1);
+  const wantGrams = perGram > EPSILON ? joules / perGram : 0;
+  const have = state.nutrients?.[nutrient] || 0;
+  // Per second: what it wants against what a second of eating could find.
+  const grams = Math.min(wantGrams, have);
+  const ratio = wantGrams > EPSILON ? grams / wantGrams : 1;
+  return {
+    drones,
+    joules,
+    nutrient,
+    grams,
+    wantGrams,
+    ratio,
+    multiplier: ratio >= 1 ? 1 : HYDRATION_FLOOR + (1 - HYDRATION_FLOOR) * ratio,
+    hungry: ratio < 1,
+  };
+}
+
 /**
  * Turn authored state into every number the game and UI need.
  *
@@ -686,6 +804,23 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   const slots = computeSlots(state, charges);
   const cognition = computeCognition(state, charges);
 
+  /* -- 1a. water, food, and how well the hive is doing ----------------------- */
+
+  // WORKED OUT FIRST, because both of them scale almost everything below.
+  //
+  // These are not energy. The hive does not generate hydration and cannot bank
+  // it as watts: it is holding enough water or it is not, and it is being fed
+  // or it is not. Both come out as a number between the floor and 1, and both
+  // multiply what the colony can DO — never what the generators make, because a
+  // hive that cannot make energy cannot fetch water or food, and that is a hole
+  // with no bottom.
+  const hydration = computeHydration(state);
+  const ration = computeRation(state, efficiency);
+
+  // One number, because they compound honestly: a hive that is both parched and
+  // hungry is in twice the trouble, and should feel it.
+  const vigour = hydration.multiplier * ration.multiplier;
+
   /* -- 1b. molding ----------------------------------------------------------- */
 
   // WHAT A MOLDING CHAMBER WANTS TO MAKE, settled before anything is billed —
@@ -704,7 +839,10 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // hundred-millisecond one.
   // How much faster a full brood runs. Used by both the molding block here and
   // the brood block further down, so it is worked out once, up here.
-  const pace = larvaPace(state);
+  // Scaled by vigour, so thirst and hunger slow the chambers along with
+  // everything else rather than leaving the nursery the one part of a parched
+  // hive still running at full speed.
+  const pace = larvaPace(state) * vigour;
 
   // A chamber will not press a drone the hive has no bandwidth left to hold
   // coherent, and will not press one it cannot pay for. Both are checked here,
@@ -752,9 +890,10 @@ export function computeDerived(state, dt = TICK_SECONDS) {
 
   /* -- 2. energy demand ---------------------------------------------------- */
 
+  // NOTHING PER-DRONE IN HERE ANY MORE. Drones used to draw twenty watts each
+  // out of the pool; they eat instead now, straight out of the stores, and the
+  // hive picks what off the Metabolism tab. See the ration below.
   const demands = []; // { key, label, watts }
-  const basal = (state.drones || 0) * BASAL_WATTS;
-  if (basal > 0) demands.push({ key: 'basal', label: `Basal metabolism ×${state.drones}`, watts: basal });
 
   for (const id of CASTE_ORDER) {
     const assigned = state.castes[id] || 0;
@@ -772,8 +911,8 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // array IS the priority rule: whatever the supply runs out on browns out, and
   // everything after it goes dark.
   //
-  // Basal metabolism and the castes stay ahead of all of it. A building going
-  // dark is recoverable; a drone that starves is gone.
+  // The castes stay ahead of all of it. A building going dark is recoverable;
+  // a drone that starves is gone.
   for (const id of priority) {
     const running = activeCount(state, id);
     const def = STRUCTURES[id];
@@ -819,7 +958,14 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     // Grams still unclaimed this step. Two generator types pointed at the same
     // store must not each spend all of it.
     const left = {};
-    const unclaimed = (n) => (left[n] ??= state.nutrients[n] || 0);
+    // THE DRONES EAT FIRST. A building that goes dark comes back when the
+    // power does; a colony that went hungry so a generator could run has lost
+    // something it cannot get back by switching the generator off again.
+    const unclaimed = (n) =>
+      (left[n] ??= Math.max(
+        0,
+        (state.nutrients[n] || 0) - (ration.nutrient === n ? ration.grams * dt : 0),
+      ));
 
     for (const id of STRUCTURE_ORDER) {
       const per = STRUCTURES[id].metabolism;
@@ -827,8 +973,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       const count = state.structures?.[id] || 0;
       const running = activeCount(state, id);
       const units = working(state, charges, id);
-      const rate = per * units; // what it can process right now
-      massRate += rate;
+      const rate = per * units; // what it can process right now, per gram
 
       const key = `structure:${id}`;
       const { preferred, fallback, overridden } = fuelChoiceFor(state, key);
@@ -846,9 +991,22 @@ export function computeDerived(state, dt = TICK_SECONDS) {
 
       const drew = {}; // nutrient -> grams per second this generator took
       let watts = 0;
-      let gramsLeft = rate * dt;
+      // How fast this particular fuel goes through, and how much survives the
+      // trip. Data on the nutrient rather than a special case here: sugar runs
+      // at three times the rate and loses a tenth doing it, which is what makes
+      // it the thing to switch to when the lights go out and the thing that
+      // empties first. See nutrients.js carb.
+      const burnRate = using ? (NUTRIENTS[using]?.burnRate ?? 1) : 1;
+      const burnLoss = using ? (NUTRIENTS[using]?.burnEfficiency ?? 1) : 1;
+      // What it will ACTUALLY pull off the shelf, which is the figure the
+      // interface quotes and the one a player checks a store against. Sugar at
+      // three times the rate means three times the grams, and reporting the
+      // nominal rate here would have the hive eating 60 g/s while the screen
+      // said 20.
+      massRate += rate * burnRate;
+      let gramsLeft = rate * burnRate * dt;
       if (using) {
-        const perGram = joulesPerGram(using) * efficiency[using];
+        const perGram = joulesPerGram(using) * efficiency[using] * burnLoss;
         const taken = perGram > EPSILON ? Math.min(gramsLeft, unclaimed(using)) : 0;
         if (taken > EPSILON) {
           left[using] -= taken;
@@ -1066,7 +1224,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     const assigned = state.castes[id] || 0;
     const def = CASTES[id];
     if (!assigned || !def.assignable) continue;
-    const scale = (1 + (def.mult ? mult[def.mult] || 0 : 0)) * energyRatio;
+    const scale = (1 + (def.mult ? mult[def.mult] || 0 : 0)) * energyRatio * vigour;
 
     if (def.gather && def.harvestRate) {
       const slot = state.forage?.[id];
@@ -1177,7 +1335,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       const patch = held[i];
       const live = i < open;
       const grams = patch.grams || 0;
-      const perSecond = live ? (grams * perPatch) / FORAGE_CYCLE : 0;
+      const perSecond = live ? (grams * perPatch * vigour) / FORAGE_CYCLE : 0;
       const biome = patch.biomeId ? BIOMES[patch.biomeId] : null;
       patches.push({
         index: i,
@@ -1234,7 +1392,9 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     reachableTotal += amount;
   }
 
-  const digestCapacity = digestion * dt;
+  // A parched or hungry colony breaks matter down more slowly too — the gut is
+  // tissue like everything else.
+  const digestCapacity = digestion * vigour * dt;
   const digestShare = reachableTotal > EPSILON ? Math.min(1, digestCapacity / reachableTotal) : 0;
   const digestRatio = digestShare; // 1 = the gut keeps up with everything
 
@@ -1317,15 +1477,34 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     });
   }
 
+  // The drones eat. Taken as mass out of whatever the hive is feeding them on,
+  // never as watts — see computeRation. Shown as what it WANTS, so a hive that
+  // is short reads as short rather than as thrifty.
+  if (ration.nutrient && ration.grams > EPSILON) {
+    burn[ration.nutrient] = (burn[ration.nutrient] || 0) + ration.grams;
+    (flowSources[ration.nutrient] ||= []).push({
+      label: ration.hungry
+        ? `Drones ×${ration.drones} (short)`
+        : `Drones ×${ration.drones}`,
+      amount: -ration.wantGrams,
+    });
+  }
+
   // Water is lost continuously and is not an energy source, so it is drawn
-  // directly rather than going through the fuel allocation above.
+  // directly rather than going through the fuel allocation above. How much
+  // depends on the ground: see biomes.js ARIDITY.
   const waterLoss = Math.min(
-    (state.drones || 0) * BASAL_WATER_PER_SECOND,
+    hydration.draw,
     (state.nutrients.water || 0) / Math.max(dt, EPSILON),
   );
   if (waterLoss > 0) {
     burn.water = (burn.water || 0) + waterLoss;
-    (flowSources.water ||= []).push({ label: `Transpiration ×${state.drones}`, amount: -waterLoss });
+    (flowSources.water ||= []).push({
+      label: hydration.aridity > 1.05
+        ? `Transpiration ×${hydration.drones} (arid ground, ×${hydration.aridity.toFixed(1)})`
+        : `Transpiration ×${hydration.drones}`,
+      amount: -hydration.draw,
+    });
   }
 
   const net = {};
@@ -1424,6 +1603,12 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       deathRate: larvaeStarving && hunger >= LARVA_STARVE_GRACE ? 1 / LARVA_DEATH_SECONDS : 0,
       lost: state.stats?.larvaeLost || 0,
     },
+    // How wet and how fed the colony is, and the one number the two come to.
+    // Everything the hive DOES is multiplied by `vigour`; nothing it GENERATES
+    // is, which is what keeps a bad patch recoverable.
+    hydration,
+    ration,
+    vigour,
     burn,
     inflow,
     net,

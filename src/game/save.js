@@ -415,6 +415,17 @@ function migrate(raw) {
     raw.buildQueue ??= [];
   }
 
+  // v21 feeds the drones. They used to draw watts out of the pool like a
+  // building; now they eat, and the hive picks what off the Metabolism tab.
+  // An old save gets the ration pointed at sugar, which is what it would have
+  // been eating anyway — but its generators keep whatever the player chose,
+  // because that was their decision and not a default to be overwritten.
+  if ((raw.version ?? 0) < 21) {
+    raw.energy ??= {};
+    raw.energy.overrides ??= {};
+    raw.energy.overrides.drones ??= { preferred: 'carb', fallback: 'fat' };
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

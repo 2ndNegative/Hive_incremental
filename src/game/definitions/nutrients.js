@@ -97,7 +97,16 @@ export const NUTRIENTS = {
     kjPerGram: 17,
     baseCap: 0,
     fuel: true,
-    desc: 'Fast, abundant fuel. Plants are full of it.',
+    // THE SURGE FUEL. A generator pushes sugar through three times as fast as
+    // anything else and wastes a tenth of it doing so: 30 g/s at 17 kJ/g and
+    // 90% is 459 kW against fat's 370 kW, so carbohydrate out-produces fat
+    // while it lasts — and it does not last, because the same shelf of sugar
+    // holds 30 MJ where a shelf of fat holds 74 MJ and empties three times
+    // faster. Fat is what the hive lives on; sugar is what it reaches for when
+    // the lights start going out.
+    burnRate: 3,
+    burnEfficiency: 0.9,
+    desc: 'Fast, abundant fuel. Burns three times as fast as anything else, and a tenth of it is wasted in the hurry.',
   },
   fiber: {
     id: 'fiber',

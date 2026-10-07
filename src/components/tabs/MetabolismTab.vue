@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { state, derived } from '../../game/useGame.js';
 import { NUTRIENTS, NUTRIENT_IDS, isUsableFuel } from '../../game/definitions/nutrients.js';
-import { fuelChoiceFor } from '../../game/engine.js';
+import { fuelChoiceFor, RATION_KEY } from '../../game/engine.js';
 import { setGlobalFuel, setFuelOverride, clearFuelOverride } from '../../game/actions.js';
 import { formatEnergy, formatPower, formatMass, formatMassFlow } from '../../game/units.js';
 
@@ -29,6 +29,28 @@ const usableFuels = computed(() => fuels.value.filter((f) => f.usable));
  * rewrite every consumer had one and every one of them was a lie.
  */
 const generators = computed(() => derived.value.generators.filter((g) => g.count > 0));
+
+/**
+ * The drones, which are the other thing in the hive that chooses a fuel.
+ *
+ * They do not draw watts — they eat, straight out of the stores — so the choice
+ * here is literally what the colony lives on. It matters most where the ground
+ * decides it for you: a hive on kelp or open water has no sugar worth the name
+ * and has to run on fat, and a hive deep in a forest can live on fibre if it
+ * has learned to open it.
+ */
+const dronesFeed = computed(() => {
+  const r = derived.value.ration;
+  const choice = fuelChoiceFor(state, RATION_KEY);
+  return {
+    key: RATION_KEY,
+    ...r,
+    preferred: choice.preferred,
+    fallback: choice.fallback,
+    overridden: choice.overridden,
+    onFallback: Boolean(r.nutrient && r.nutrient !== choice.preferred),
+  };
+});
 
 /** The queue: who is being paid, in the order they are paid. Read-only. */
 const consumers = computed(() =>
@@ -199,6 +221,40 @@ function formatReserve(seconds) {
           <span class="muted" style="width: 5.5rem; text-align: right">—</span>
         </div>
 
+        <div v-if="dronesFeed.drones > 0" class="fuel-row">
+          <span class="field-label">
+            Drones ×{{ dronesFeed.drones }}
+            <span class="field-help">
+              {{ formatPower(dronesFeed.joules) }} of food
+              <template v-if="dronesFeed.nutrient">
+                · eating {{ formatMassFlow(-dronesFeed.wantGrams) }}
+                {{ NUTRIENTS[dronesFeed.nutrient].name.toLowerCase() }}
+              </template>
+              <template v-if="dronesFeed.hungry">
+                · <span class="bad">
+                  short — only {{ Math.round(dronesFeed.ratio * 100) }}% of the ration, so the
+                  colony is working at {{ Math.round(dronesFeed.multiplier * 100) }}%
+                </span>
+              </template>
+              <template v-else-if="dronesFeed.onFallback">
+                · <span class="warn">on its fallback</span>
+              </template>
+            </span>
+          </span>
+          <select class="fuel-select" :value="dronesFeed.preferred"
+                  @change="setPreferred(dronesFeed.key, $event.target.value)">
+            <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
+          </select>
+          <select class="fuel-select" :value="dronesFeed.fallback"
+                  @change="setFallback(dronesFeed.key, $event.target.value)">
+            <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
+          </select>
+          <button class="btn" style="width: 5.5rem" :disabled="!dronesFeed.overridden"
+                  @click="clearFuelOverride(dronesFeed.key)">
+            {{ dronesFeed.overridden ? 'Reset' : 'default' }}
+          </button>
+        </div>
+
         <div v-for="g in generators" :key="g.key" class="fuel-row">
           <span class="field-label">
             {{ g.name }} <template v-if="g.count > 1">×{{ g.count }}</template>
@@ -259,10 +315,12 @@ function formatReserve(seconds) {
       </div>
       <div class="panel-body" style="padding-bottom: 0">
         <p class="muted" style="font-size: 0.78rem; margin: 0">
-          The drones are kept alive first, then the buildings band by band down the Hive tab —
-          Core, Cognition, Gathering, Production, Digestion, Storage — and left to right inside
-          each band. When there is not enough to go round, a building settles at the share it is
-          actually being paid, and everything below it gets nothing.
+          Nothing but buildings draws on this. The drones are not on the list at all any more —
+          they eat, out of the stores, and they eat before a generator gets to burn anything.
+          What is left goes band by band down the Hive tab — Core, Cognition, Gathering,
+          Production, Digestion, Storage — and left to right inside each band. When there is not
+          enough to go round, a building settles at the share it is actually being paid, and
+          everything below it gets nothing.
         </p>
       </div>
       <div class="panel-body">

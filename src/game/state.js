@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 20;
+export const SAVE_VERSION = 21;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -199,9 +199,16 @@ export function createInitialState() {
     // Which nutrient the hive metabolises, and what it falls back to when the
     // first runs dry. `overrides` keys are "caste:<id>" or "structure:<id>".
     energy: {
-      preferred: 'carb',
-      fallback: 'fat',
-      overrides: {},
+      // Fat is the deep tank and sugar is the sprint, so the generators sit on
+      // fat by default and reach for sugar when it runs out. The drones are
+      // the other way round: sugar is what a body actually runs on, and it is
+      // the one place the hive would rather spend it. Both are one dropdown
+      // away on the Metabolism tab — this is only where they start.
+      preferred: 'fat',
+      fallback: 'carb',
+      overrides: {
+        drones: { preferred: 'carb', fallback: 'fat' },
+      },
     },
 
     // Which fuel each generator is actually on, and how long it is held there.
