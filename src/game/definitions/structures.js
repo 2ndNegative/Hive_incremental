@@ -1,20 +1,20 @@
 // Hive structures.
 //
 // ============================================================================
-// THE WHOLE OF `STRUCTURES` BELOW IS PARKED PENDING THE BUILDING REBUILD.
+// SIXTEEN OF THESE ARE LIVE. The rest are PARKED pending the building rebuild.
 //
-// None of it is referenced by the game any more: `STRUCTURE_ORDER` is empty, so
-// the engine computes no capacity, no upkeep, no slots and no multipliers from
-// any of it, and the Hive tab lists none of it. It is kept, rather than
-// deleted, because much of it is probably adaptable — the cost ladder,
-// the capMult/slots/throughput shape and several of the buildings themselves
-// are likely to survive the rebuild in some form.
+// `STRUCTURE_ORDER` is the definition of live: the engine computes capacity,
+// upkeep, slots and multipliers from the ids in that list and the Hive tab
+// lists exactly those. Everything else in this file is kept rather than
+// deleted, because much of it is adaptable — the capMult/slots/throughput shape
+// and several of the buildings themselves are likely to survive in some form.
 //
 // `DEPRECATED_STRUCTURE_ORDER` still seeds `state.structures`, so an existing
 // save round-trips its counts instead of silently losing them.
 //
-// When the rebuild lands: give each surviving structure a `category` from
-// BUILDING_CATEGORIES and move its id into STRUCTURE_ORDER.
+// To bring one back: give it a `category` from BUILDING_CATEGORIES, check its
+// cost and `time` rungs still make sense, and move its id into
+// STRUCTURE_ORDER.
 // ============================================================================
 //
 // Built out of nutrient mass, not an abstract currency — a Nerve Node costs
@@ -46,6 +46,16 @@
 //                was priced in protein, every decision in the game was the same
 //                decision. So each one takes a lot of fibre and a little of
 //                whatever else it is structurally made of.
+//   time         how long the next one takes to grow, as a NAMED RUNG from
+//                definitions/times.js — never a number of seconds. What the
+//                rung names is a quantity of WORK; the hive gets through it at
+//                `derived.buildPace`, so larvae make building faster and thirst
+//                makes it slower, and the headline figure is the no-brood worst
+//                case. It also compounds with how many the hive already has, on
+//                the gentlest curve in the game: the fiftieth is 2.7× the
+//                first, against fourteen million times the cost. Read the rules
+//                at the top of times.js — rule 1 especially, because the whole
+//                point is that COST gates and TIME only textures.
 //   caps         flat capacity added per unit, in grams
 //   capMult      multiplicative capacity bonus per unit, by nutrient group
 //   throughput   watts added to the metabolic ceiling
@@ -106,6 +116,7 @@
 //   cannot have two. `maxLevel` caps it.
 
 import { build } from './costs.js';
+import { duration } from './times.js';
 
 export const STRUCTURES = {
   /* ------------------------------------------------------------------ live -- */
@@ -122,6 +133,7 @@ export const STRUCTURES = {
       'what the hivemind can hold in flight at once — and costs a great deal to keep lit.',
     unlock: () => true,
     cost: build('steep', { fiber: 'large', protein: 'small', fat: 'slight' }),
+    time: 'glacial',
     cogitCapacity: 5,
 
     // THE HIVE'S ONLY STORAGE.
@@ -191,6 +203,7 @@ export const STRUCTURES = {
       'feeding it and it stops being anything at all, quickly.',
     unlock: () => true,
     cost: build('steady', { fiber: 'large', protein: 'modest', fat: 'slight' }),
+    time: 'long',
     brood: { seconds: 20, cost: { protein: 60 }, yield: 1 },
     upkeepWatts: 25_000,
   },
@@ -205,6 +218,7 @@ export const STRUCTURES = {
       + 'is most of what the colony is short of.',
     unlock: () => true,
     cost: build('steady', { fiber: 'medium', potassium: 'tiny' }),
+    time: 'long',
     insightCap: 400,
     upkeepWatts: 50_000,
   },
@@ -219,6 +233,7 @@ export const STRUCTURES = {
       + 'where an idea comes from.',
     unlock: () => true,
     cost: build('steady', { fiber: 'modest', protein: 'medium', potassium: 'slight' }),
+    time: 'glacial',
     // Insight per second per unit, scaled by how well it is being paid and by
     // the bandwidth the hive has left over — see cogitFocus in engine.js.
     insight: 0.2,
@@ -234,6 +249,7 @@ export const STRUCTURES = {
       'job. Switch a drone type on in the Drones tab and this is what makes it.',
     unlock: () => true,
     cost: build('steady', { fiber: 'large', protein: 'small', iron: 'tiny' }),
+    time: 'long',
     upkeepWatts: 25_000, // idling, with nothing it is allowed to make
     activeWatts: 100_000, // pressing
     molding: { seconds: 20 },
@@ -251,6 +267,7 @@ export const STRUCTURES = {
     // on the whole drone economy, so it should be bought a node at a time and
     // felt each time, not stacked twenty deep in one go.
     cost: build('steady', { fiber: 'large', protein: 'modest', fat: 'slight' }),
+    time: 'middling',
     cogitCapacity: 5,
     // THE RULE THAT MAKES DRONES WORTH HAVING. Five cogits holds five drones
     // coherent, and five foragers earn about 80 kW. A node has to cost a
@@ -270,6 +287,7 @@ export const STRUCTURES = {
       'it is the first thing the hive empties again.',
     unlock: () => true,
     cost: build('steady', { fiber: 'medium', protein: 'slight', water: 'modest' }),
+    time: 'short',
     generalStorage: 1_000, // grams, shared across every nutrient
   },
 
@@ -282,6 +300,7 @@ export const STRUCTURES = {
       'but protein, and holds it far better than anything that holds everything.',
     unlock: () => true,
     cost: build('steady', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
+    time: 'short',
     storage: { protein: 200 },
   },
 
@@ -294,6 +313,7 @@ export const STRUCTURES = {
       'keep, and the cheapest to keep it in — fat needs no water around it.',
     unlock: () => true,
     cost: build('steady', { fiber: 'medium', protein: 'small', fat: 'slight' }),
+    time: 'short',
     storage: { fat: 200 },
   },
 
@@ -306,6 +326,7 @@ export const STRUCTURES = {
       'What the brood eats comes out of here.',
     unlock: () => true,
     cost: build('steady', { fiber: 'medium', protein: 'small', carb: 'small' }),
+    time: 'short',
     storage: { carb: 200 },
   },
 
@@ -328,6 +349,7 @@ export const STRUCTURES = {
     // four-hundred-gram lumps, so a two-hundred-gram shelf of it would not even
     // hold one building's worth.
     cost: build('steady', { fiber: 'medium', protein: 'small' }),
+    time: 'short',
     storage: { fiber: 500 },
   },
 
@@ -341,6 +363,7 @@ export const STRUCTURES = {
       + 'hive has since learned to pick out of it is kept somewhere more careful.',
     unlock: () => true,
     cost: build('steady', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
+    time: 'short',
     // ASH ONLY, on purpose. `ash` is the unsorted mineral fraction; sodium,
     // iron and the rest are their own nutrients the moment an assay resolves
     // them, and they are not stored here. A hive that has assayed everything
@@ -360,6 +383,7 @@ export const STRUCTURES = {
       + 'is felt in everything the colony does within the hour.',
     unlock: () => true,
     cost: build('gentle', { fiber: 'medium', protein: 'small' }),
+    time: 'short',
     storage: { water: 10_000 },
     // Cheap to keep. It is a bag, not an organ.
     upkeepWatts: 5,
@@ -374,6 +398,7 @@ export const STRUCTURES = {
       'beyond what it can hold spoils where it lies.',
     unlock: () => true,
     cost: build('gentle', { fiber: 'large', protein: 'modest' }),
+    time: 'short',
     itemStorage: 2_000,
   },
 
@@ -387,6 +412,7 @@ export const STRUCTURES = {
       'just matter.',
     unlock: () => true,
     cost: build('gentle', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
+    time: 'middling',
     metabolism: 10, // grams per second
   },
 
@@ -399,6 +425,7 @@ export const STRUCTURES = {
       'without one, everything gathered simply piles up in the larder and rots there.',
     unlock: () => true,
     cost: build('gentle', { fiber: 'large', protein: 'small', water: 'medium' }),
+    time: 'middling',
     // Eighty grams a second, for nothing. Digestion is not a machine the hive
     // runs — it is a gut, and a gut works on what is in it. Charging watts for
     // it would make the opening unwinnable: a hive with no generator could not
@@ -420,6 +447,7 @@ export const STRUCTURES = {
     desc: 'Bulk storage lining. Expands every macronutrient reserve the hive holds.',
     unlock: () => true,
     cost: build('gentle', { protein: 'large' }),
+    time: 'short',
     capMult: { bulk: 0.5 },
     upkeepWatts: 5,
   },
@@ -429,6 +457,7 @@ export const STRUCTURES = {
     desc: 'Oxidation chamber. Raises the ceiling on how fast the hive can burn mass for energy.',
     unlock: () => true,
     cost: build('steady', { protein: 'large', fat: 'medium' }),
+    time: 'middling',
     throughput: 5000,
     upkeepWatts: 0,
   },
@@ -438,6 +467,7 @@ export const STRUCTURES = {
     desc: 'Dedicated analysis tissue. Banks more insight and makes every analyst sharper.',
     unlock: () => true,
     cost: build('steady', { protein: 'heavy', iron: 'tiny' }),
+    time: 'middling',
     insightCap: 600,
     mult: { analyst: 0.2 },
     upkeepWatts: 40,
@@ -448,6 +478,7 @@ export const STRUCTURES = {
     desc: 'Sequestration cells for inorganic elements. Without these, assayed minerals spill as fast as they arrive.',
     unlock: (state) => state.tech.bulkMineralAssay,
     cost: build('steady', { protein: 'heavy', iron: 'slight' }),
+    time: 'short',
     capMult: { mineral: 1.0 },
     upkeepWatts: 25,
   },
@@ -457,6 +488,7 @@ export const STRUCTURES = {
     desc: 'Stabilised organic scaffolding. Vitamins degrade in open storage; this is what stops them.',
     unlock: (state) => state.tech.lipidAssay,
     cost: build('steady', { protein: 'heavy', fat: 'large' }),
+    time: 'middling',
     capMult: { vitamin: 1.0 },
     upkeepWatts: 60,
   },
@@ -466,6 +498,7 @@ export const STRUCTURES = {
     desc: 'A worked opening into the substrate. Each one supports an excavator at the face.',
     unlock: (state) => state.tech.lithovory,
     cost: build('gentle', { protein: 'heavy', iron: 'slight' }),
+    time: 'middling',
     slots: { excavator: 1 },
     upkeepWatts: 20,
   },
@@ -475,6 +508,7 @@ export const STRUCTURES = {
     desc: 'A concealed approach onto a game trail. Each one supports one hunter in the field.',
     unlock: (state) => state.tech.predation,
     cost: build('steady', { protein: 'massive', fat: 'large' }),
+    time: 'long',
     slots: { hunter: 1 },
     mult: { hunter: 0.1 },
     upkeepWatts: 35,
@@ -592,3 +626,23 @@ export const DEPRECATED_STRUCTURE_ORDER = [
   'boreShaft',
   'ambushBurrow',
 ];
+
+/**
+ * EVERY STRUCTURE DECLARES A BUILD TIME, checked here at module load.
+ *
+ * `cost` resolves its rungs eagerly inside build(), so a typo there is already
+ * an error the first time the game starts. `time` is a bare string, so without
+ * this it would be an error the first time somebody tried to build that one
+ * building — and a missing rung is not even an error at that point, it is a
+ * structure that goes up instantly. Loud, at load, is the right volume.
+ *
+ * Parked structures are checked too. One of them coming back should not also be
+ * the moment its build time is discovered to be missing.
+ */
+for (const [id, def] of Object.entries(STRUCTURES)) {
+  try {
+    duration(def.time);
+  } catch (err) {
+    throw new Error(`Structure "${id}": ${err.message}`);
+  }
+}

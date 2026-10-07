@@ -62,6 +62,7 @@ import {
   isLeveled,
   maxLevelOf,
 } from './definitions/structures.js';
+import { buildWork as workOf } from './definitions/times.js';
 import {
   CASTES,
   CASTE_ORDER,
@@ -1702,6 +1703,11 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     hydration,
     ration,
     vigour,
+    // How fast the hive works through a build, in pace-seconds per second. The
+    // same number the chambers run on — see times.js rule 4 — so a nursery
+    // speeds up construction exactly as it speeds up everything else, and the
+    // Hive tab has one figure to read rather than reassembling it.
+    buildPace: pace,
     burn,
     inflow,
     net,
@@ -2212,10 +2218,10 @@ export function tick(state, dt) {
     state.castes.dormant = Math.max(0, state.castes.dormant + (state.drones - assigned));
   }
 
-  // The queue builds what it can now that this tick's income has landed. After
-  // the stores are settled and before the next derived snapshot, so a building
-  // that goes up here is paid for out of the mass that just arrived.
-  advanceBuildQueue(state);
+  // The queue works through what it can now that this tick's income has landed.
+  // After the stores are settled and before the next derived snapshot, so a job
+  // that starts here is paid for out of the mass that just arrived.
+  advanceBuildQueue(state, dt, derived.buildPace);
 
   advanceForage(state, dt);
 
@@ -2306,18 +2312,42 @@ export { MACROS, MICROS, DRONE_PROTEIN_COST };
 /* ======================================================= raising a structure */
 
 /**
- * GROW ONE OR MORE OF SOMETHING. The one place a structure ever actually goes
- * up, so the button on the Hive tab and the build queue cannot drift apart —
- * the queue is not a second way to build, it is the same way, called later.
+ * MOVE MASS FOR A COST, one way or the other. `sign` is -1 to charge and +1 to
+ * refund, and the two have to be the same arithmetic or a cancelled build would
+ * quietly make or lose matter.
+ *
+ * A REFUND IS NOT GUARANTEED TO LAND IN FULL. It goes back as a straight
+ * addition, so it can leave a nutrient over its shelf; the store reconcile in
+ * tick() then spills whatever the hive has nowhere to put. That is the same
+ * thing that happens to any other overflow and it is the honest answer —
+ * cancelling a Hivecore into a full fibre store cannot magically find room —
+ * but it does mean "full refund" means "the whole cost handed back", not "the
+ * whole cost kept".
+ */
+function moveCost(state, cost, sign) {
+  for (const [n, amount] of Object.entries(cost)) {
+    if (n === 'insight') state.insight = Math.max(0, (state.insight || 0) + sign * amount);
+    else state.nutrients[n] = Math.max(0, (state.nutrients[n] || 0) + sign * amount);
+  }
+}
+
+/**
+ * PUT ONE OR MORE OF SOMETHING UP, HAVING ALREADY PAID FOR IT.
+ *
+ * The one place a structure's count ever actually moves, so nothing can drift:
+ * the instant path below, and the construction queue that pays first and
+ * finishes minutes later, both end up here. It does NOT check or charge a cost
+ * — the caller owns that — so calling it directly is how the queue hands over a
+ * build it paid for when the job began.
  *
  * Takes the state being ticked rather than the live one, because the queue
  * drains inside tick() and a test ticking a scratch hive must not grow
- * buildings in the real one. `onLog` is how the caller says it; the two call
- * sites write to different logs.
+ * buildings in the real one. `onLog` is how the caller says it; the call sites
+ * write to different logs.
  *
  * Returns how many went up, which is 0 for anything refused.
  */
-export function raiseStructure(state, id, count = 1, onLog = null) {
+export function placeStructure(state, id, count = 1, onLog = null) {
   const def = STRUCTURES[id];
   if (!def || !def.unlock(state)) return 0;
 
@@ -2326,14 +2356,10 @@ export function raiseStructure(state, id, count = 1, onLog = null) {
   const wanted = Math.min(count, maxLevelOf(id) - (state.structures[id] || 0));
   if (wanted <= 0) return 0;
 
-  const cost = structureCost(state, id, wanted);
-  if (!canAfford(state, cost)) return 0;
-
   const had = state.structures[id] || 0;
   // How many were running BEFORE this. Absent means all of them, so this has to
   // be read before the count moves.
   const wasRunning = state.active?.[id] ?? had;
-  for (const [n, amount] of Object.entries(cost)) state.nutrients[n] -= amount;
   // `had + wanted`, not `+= wanted`: a structure id that is not already a key —
   // a new building on an old save, or a hand-built test fixture — would make
   // that NaN, and a NaN count spreads silently through every capacity in the
@@ -2367,23 +2393,70 @@ export function raiseStructure(state, id, count = 1, onLog = null) {
   return wanted;
 }
 
+/* --------------------------------------------------------- building, in time */
+
+/**
+ * GROW SOMETHING NOW, PAYING FOR IT ON THE SPOT.
+ *
+ * The instant path. NOTHING IN THE GAME USES IT ANY MORE — every build the
+ * player makes goes through the construction queue below, because every build
+ * takes time. It is kept because it is the honest expression of "this structure
+ * exists now, and it was paid for", which is what the debug handle and the test
+ * fixtures want: a suite that needs a hive with four generators in it should say
+ * so in one line rather than ticking twenty minutes of game time.
+ *
+ * Returns how many went up, which is 0 for anything refused.
+ */
+export function raiseStructure(state, id, count = 1, onLog = null) {
+  const def = STRUCTURES[id];
+  if (!def || !def.unlock(state)) return 0;
+  const wanted = Math.min(count, maxLevelOf(id) - (state.structures[id] || 0));
+  if (wanted <= 0) return 0;
+
+  const cost = structureCost(state, id, wanted);
+  if (!canAfford(state, cost)) return 0;
+
+  moveCost(state, cost, -1);
+  return placeStructure(state, id, wanted, onLog);
+}
+
 /* ------------------------------------------------------------- build queue */
 
 /**
- * THE BUILD QUEUE.
+ * THE CONSTRUCTION QUEUE.
  *
- * A hive that cannot queue work makes the player sit and watch a number climb
- * so they can press a button at the right moment. The queue is the hive being
- * told what to do next and getting on with it — the resources are still the
- * only constraint, and nothing here makes anything cheaper or faster.
+ * Two things at once, and they are easier to read as one system than as two:
  *
- * STRICTLY IN ORDER, head first. A queue that skipped past an item it could
- * not afford to build the cheap thing behind it would quietly invert the
- * player's priorities every time they lined up something expensive, which is
- * exactly when the order matters most. So the head waits, and the player is
- * the one who decides what goes first.
+ *   state.buildQueue   what the hive has been TOLD to build, in order
+ *   state.building     what it is actually growing right now
+ *
+ * A job leaves the queue, is paid for, and becomes `state.building` — then the
+ * hive works through it over the next minutes. The queue is a plan; `building`
+ * is the work.
+ *
+ * STRICTLY IN ORDER, head first. A queue that skipped past an item it could not
+ * afford to build the cheap thing behind it would quietly invert the player's
+ * priorities every time they lined up something expensive, which is exactly
+ * when the order matters most. So the head waits, and the player is the one who
+ * decides what goes first.
+ *
+ * ONE AT A TIME. The hive grows one structure and then the next; there is no
+ * parallel construction. That is what makes the ORDER of the queue matter at
+ * all — with two or three jobs running at once the list would be a set rather
+ * than a sequence, and moving something up it would mean nothing.
+ *
+ * PAID WHEN THE JOB STARTS, not when it is queued and not when it finishes.
+ *
+ *   — Not when queued: lining five things up would empty the stores instantly
+ *     and the queue would be a way of spending money, not of planning.
+ *   — Not when finished: a job could then sit at 99% for an hour because fibre
+ *     dipped, and the player would have waited twenty minutes for nothing.
+ *
+ *   Paying at the start means the head of the queue waits for affordability
+ *   exactly as it always did, and once the hive has committed the mass the
+ *   build is certain. Cancelling hands the mass back — see cancelBuild.
  */
-export const BUILD_QUEUE_BASE = 2;
+export const BUILD_QUEUE_BASE = 3;
 
 /** How many builds can be lined up at once. Research widens it. */
 export function buildQueueCap(state) {
@@ -2394,9 +2467,16 @@ export function buildQueueCap(state) {
   return cap;
 }
 
-/** How many builds are lined up right now. Entries hold runs of the same one. */
+/**
+ * How many builds the hive is holding in mind right now.
+ *
+ * The one under construction counts. It is a job the hive is committed to, and
+ * a cap that let the player line up three MORE while something was being grown
+ * would be a cap of four wearing a label that said three.
+ */
 export function queuedCount(state) {
-  return (state.buildQueue || []).reduce((sum, e) => sum + (e.n || 0), 0);
+  const lined = (state.buildQueue || []).reduce((sum, e) => sum + (e.n || 0), 0);
+  return lined + (state.building ? 1 : 0);
 }
 
 /** Room left in the queue. */
@@ -2405,10 +2485,23 @@ export function queueRoom(state) {
 }
 
 /**
+ * How many of ONE building are already promised — queued, plus the one on the
+ * bench. Both the queue button and the Hive tab need this to work out headroom:
+ * a Hivecore at level 19 with level 20 under construction has none left, even
+ * though `state.structures` still says 19.
+ */
+export function inFlightCount(state, id) {
+  const lined = (state.buildQueue || [])
+    .filter((e) => e.id === id)
+    .reduce((sum, e) => sum + (e.n || 0), 0);
+  return lined + (state.building?.id === id ? 1 : 0);
+}
+
+/**
  * Is this entry still something the hive could ever build? A queue outlives the
- * situation it was written in — a structure can hit its level cap from the
- * button while an upgrade for it is still sitting in the queue — and an entry
- * that can never be built would otherwise block everything behind it forever.
+ * situation it was written in — a structure can hit its level cap while an
+ * upgrade for it is still sitting in the queue — and an entry that can never be
+ * built would otherwise block everything behind it forever.
  */
 export function queueEntryLegal(state, id) {
   const def = STRUCTURES[id];
@@ -2416,22 +2509,74 @@ export function queueEntryLegal(state, id) {
   return maxLevelOf(id) - (state.structures[id] || 0) > 0;
 }
 
-/**
- * Build what can be built off the head of the queue. Called once per tick.
- *
- * Several in one tick is deliberate: offline catch-up hands this hours at a
- * time, and a queue that could only advance one step per tick would come back
- * from a night away with the same two things still waiting on resources that
- * arrived before dawn.
- */
-export function advanceBuildQueue(state) {
-  const queue = state.buildQueue;
-  if (!Array.isArray(queue) || !queue.length) return 0;
-  let built = 0;
+/* ---------------------------------------------------------------- build time */
 
-  // Bounded by the queue's own length: every pass either builds something or
-  // drops something, and both shorten it.
-  for (let guard = queue.length * 2; guard > 0 && queue.length; guard -= 1) {
+/**
+ * HOW MUCH WORK the next one of something is, in pace-seconds.
+ *
+ * Not seconds: the hive gets through pace-seconds at `derived.buildPace`, so
+ * this is the figure for a hive with no brood at all and the real time is this
+ * divided by how well the colony is doing. See the rules at the top of
+ * definitions/times.js.
+ */
+export function buildWorkFor(state, id) {
+  const def = STRUCTURES[id];
+  if (!def) return 0;
+  return workOf(def.time, state.structures?.[id] || 0);
+}
+
+/**
+ * The same as wall-clock seconds at a given pace. `Infinity` when the hive has
+ * stopped dead, which is the truth and reads correctly through formatEta (it
+ * gives back nothing rather than a number).
+ */
+export function buildSecondsFor(state, id, pace = 1) {
+  const work = buildWorkFor(state, id);
+  if (!(pace > EPSILON)) return Infinity;
+  return work / pace;
+}
+
+/**
+ * Where the current build is, for the interface. `null` when nothing is being
+ * grown, so the strip can simply not render a bar.
+ *
+ * `work` is what the job was when it started, and it is stored on the job
+ * rather than recomputed: a build that began as the fourth Cistern stays the
+ * fourth Cistern's length even if a fifth somehow appears mid-job, and a bar
+ * whose total moved under it would jump backwards.
+ */
+export function buildProgress(state, pace = 1) {
+  const job = state.building;
+  if (!job) return null;
+  const work = job.work > 0 ? job.work : 1;
+  const left = Math.max(0, job.remaining || 0);
+  return {
+    id: job.id,
+    name: STRUCTURES[job.id]?.name ?? job.id,
+    leveled: isLeveled(job.id),
+    progress: Math.max(0, Math.min(1, 1 - left / work)),
+    work: job.work,
+    remaining: left,
+    // What it will actually take from here, at the pace the hive is managing
+    // now. It moves as the colony grows, which is the point.
+    seconds: pace > EPSILON ? left / pace : Infinity,
+    stalled: !(pace > EPSILON),
+    paid: { ...(job.paid || {}) },
+  };
+}
+
+/**
+ * Take the next job off the queue and start paying for it.
+ *
+ * Returns true when something went onto the bench. False means the head is
+ * waiting — either the hive cannot pay for it yet, or there is nothing lined
+ * up — and in both cases the queue is left exactly as it was.
+ */
+function startNextBuild(state) {
+  const queue = state.buildQueue;
+  if (!Array.isArray(queue)) return false;
+
+  while (queue.length) {
     const head = queue[0];
     if (!head || !(head.n > 0)) { queue.shift(); continue; }
 
@@ -2445,10 +2590,91 @@ export function advanceBuildQueue(state) {
       continue;
     }
 
-    if (!raiseStructure(state, head.id, 1, (text, type) => log(state, text, type))) break;
-    built += 1;
+    const cost = structureCost(state, head.id, 1);
+    if (!canAfford(state, cost)) return false; // it waits, and keeps its place
+
+    moveCost(state, cost, -1);
+    state.building = {
+      id: head.id,
+      // Plain numbers and a plain object: this survives a JSON round trip, so a
+      // half-grown Hivecore is still half-grown after a reload.
+      work: buildWorkFor(state, head.id),
+      remaining: buildWorkFor(state, head.id),
+      paid: { ...cost },
+    };
     head.n -= 1;
     if (head.n <= 0) queue.shift();
+    return true;
+  }
+  return false;
+}
+
+/**
+ * GIVE UP ON THE CURRENT BUILD and hand the mass back.
+ *
+ * A full refund, because a build that is paid up front and cancellable at a
+ * loss is a trap: the player would have to decide whether to start something
+ * BEFORE knowing whether a better use for the mass turns up, with a penalty for
+ * guessing wrong. The time already spent is lost, which is penalty enough and
+ * the only one that cannot be gamed.
+ *
+ * Whether the refund all fits is a separate question — see moveCost.
+ *
+ * Returns the abandoned job, or null.
+ */
+export function cancelBuild(state, onLog = null) {
+  const job = state.building;
+  if (!job) return null;
+  moveCost(state, job.paid || {}, +1);
+  state.building = null;
+  if (onLog) {
+    onLog(`${STRUCTURES[job.id]?.name ?? job.id} abandoned. The mass goes back.`, 'warn');
+  }
+  return job;
+}
+
+/**
+ * WORK THROUGH THE QUEUE. Called once per tick, with the pace the hive is
+ * managing this tick.
+ *
+ * `dt * pace` is a quantity of work this tick affords, and it is spent down the
+ * queue rather than on one job: a tick that finishes a job and has time left
+ * over starts the next one with the remainder. That matters for exactly one
+ * reason, which is that it makes the whole thing frame-rate independent — a
+ * hive ticked once a second and a hive ticked ten times a second get through
+ * the same construction, and offline catch-up gets through what the hours it
+ * was away actually bought.
+ *
+ * Returns how many structures went up.
+ */
+export function advanceBuildQueue(state, dt = 0, pace = 1) {
+  let work = Math.max(0, dt) * Math.max(0, pace);
+  let built = 0;
+
+  // The cap is single digits, so the queue cannot hand out more than a handful
+  // of jobs per call however long the tick; the guard is only here so that a
+  // bug in one of the branches below cannot spin forever.
+  for (let guard = 256; guard > 0; guard -= 1) {
+    if (!state.building && !startNextBuild(state)) break;
+
+    const job = state.building;
+    const spent = Math.min(job.remaining, work);
+    job.remaining -= spent;
+    work -= spent;
+
+    if (job.remaining > EPSILON) break; // still growing, and out of time
+
+    // Done. placeStructure can still refuse — the level cap could have been
+    // reached from the debug handle while this was growing — and a refusal must
+    // not silently eat the mass the job was paid for.
+    if (placeStructure(state, job.id, 1, (text, type) => log(state, text, type))) {
+      built += 1;
+      state.building = null;
+    } else {
+      cancelBuild(state, (text, type) => log(state, text, type));
+    }
+
+    if (work <= EPSILON) break;
   }
   return built;
 }

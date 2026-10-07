@@ -1722,6 +1722,10 @@ textarea.save-box {
   color: var(--text-strong);
 }
 
+.queue-pace {
+  font-size: 0.72rem;
+}
+
 .queue-clear {
   margin-left: auto;
   padding: 0;
@@ -1798,6 +1802,51 @@ textarea.save-box {
 .queue-mine {
   font-size: 0.72rem;
   color: var(--warn);
+}
+
+/* ------------------------------------------------- the job on the bench
+
+   The one structure actually being grown. Sits above the queue and reads
+   differently from it on purpose: the queue is a plan and this is work in
+   progress, so it gets the bar and the countdown and the lines below it
+   get neither. */
+.queue-job {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 0.78rem;
+}
+
+.queue-job.is-stalled {
+  border-color: var(--bad);
+}
+
+.job-name {
+  min-width: 10rem;
+  color: var(--text-strong);
+}
+
+.job-bar {
+  flex: 1;
+  min-width: 4rem;
+}
+
+.job-left {
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+/* How long the next one takes, under the cost on a building card. Quieter than
+   the cost, because cost is what gates a build and time only textures it. */
+.action-grow {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
 }
 
 /* ------------------------------------------------------- building bands */

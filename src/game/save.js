@@ -426,6 +426,13 @@ function migrate(raw) {
     raw.energy.overrides.drones ??= { preferred: 'carb', fallback: 'fat' };
   }
 
+  // v22 gives buildings a build time. An old save has nothing on the bench —
+  // everything it ever built went up the instant it was paid for — so it comes
+  // back with an empty slot and starts its first timed job off the queue.
+  if ((raw.version ?? 0) < 22) {
+    raw.building = null;
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

@@ -20,8 +20,8 @@ import {
   structureCost,
   canAfford,
   computeDerived,
-  affordableCount,
-  raiseStructure,
+  cancelBuild,
+  inFlightCount,
   queueRoom,
   queuedCount,
   openStore,
@@ -221,12 +221,27 @@ export function manualOddsSummary() {
 
 /* ----------------------------------------------------------------- structures */
 
+/**
+ * BUILD SOMETHING. Which now means: line it up.
+ *
+ * There is no instant build any more — everything takes time, so every build in
+ * the game starts life as a queue entry and the card on the Hive tab is simply
+ * the shortest way to add one. This is a thin alias on purpose: a second path
+ * that put a structure up without going through the queue would be a second set
+ * of rules about payment, ordering and cancellation.
+ *
+ * 'max' means "fill the queue with this", not "as many as the hive can afford".
+ * Affordability is no longer the limit on how many of something you can ask
+ * for — the queue is — and a Max press that quietly spent everything the hive
+ * had would be the old behaviour wearing the new label.
+ */
 export function buildStructure(id, count = 1) {
-  const wanted = count === 'max' ? affordableCount(state, id) : count;
-  // The work itself lives in engine.js raiseStructure, which the build queue
-  // calls too — so a building raised from the queue and one raised from this
-  // button are the same event, down to the line in the log.
-  return raiseStructure(state, id, wanted, pushLog);
+  return queueBuild(id, count);
+}
+
+/** Give up on whatever is being grown. The mass goes back — see engine.js. */
+export function abandonBuild() {
+  return cancelBuild(state, pushLog);
 }
 
 /* ------------------------------------------------------------- build queue */
@@ -249,14 +264,12 @@ export function queueBuild(id, count = 1) {
   if (!def || !def.unlock(state)) return 0;
   state.buildQueue ??= [];
 
-  // What is already lined up counts against the cap AND against the structure's
+  // What is already promised counts against the cap AND against the structure's
   // own ceiling: queuing a fifth level of something that caps at four is a
   // promise the hive cannot keep, and it would sit at the head blocking
-  // everything behind it until the drain threw it out.
-  const pending = state.buildQueue
-    .filter((e) => e.id === id)
-    .reduce((sum, e) => sum + (e.n || 0), 0);
-  const headroom = maxLevelOf(id) - (state.structures[id] || 0) - pending;
+  // everything behind it until the drain threw it out. The one on the bench
+  // counts as promised too — its level is paid for, it just has not landed.
+  const headroom = maxLevelOf(id) - (state.structures[id] || 0) - inFlightCount(state, id);
 
   const want = count === 'max' ? queueRoom(state) : count;
   const adding = Math.min(want, queueRoom(state), headroom);

@@ -29,6 +29,10 @@ import {
   RATION_KEY,
   raiseStructure,
   advanceBuildQueue,
+  buildWorkFor,
+  buildSecondsFor,
+  buildProgress,
+  inFlightCount,
   buildQueueCap,
   queuedCount,
   queueRoom,
@@ -59,6 +63,9 @@ import {
   build as buildCost, flat as flatCost,
 } from './game/definitions/costs.js';
 import {
+  TIME, TIME_ORDER, BUILD_COUNT_EXPONENT, duration, nearestTime, buildWork,
+} from './game/definitions/times.js';
+import {
   FOCUS_SHARE, focusStrength, isStarrable, isStarred, starsFor, setStar, toggleStar,
   clearStars, focusedOdds,
 } from './game/focus.js';
@@ -67,7 +74,7 @@ import * as discovery from './game/discovery.js';
 import {
   research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary, MANUAL_INTAKE,
   manualCombo,
-  reserveCogits, releaseCogits, releaseAllCogits, buildStructure,
+  reserveCogits, releaseCogits, releaseAllCogits, buildStructure, abandonBuild,
   setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
   togglePinned, resetPinned, setMolding, toggleMolding, setMoldTarget,
   claimCost, claimableArea, claimTerritory, abandonTerritory,
@@ -295,12 +302,37 @@ window.hive = {
     used: () => queuedCount(state),
     room: () => queueRoom(state),
     list: () => (state.buildQueue || []).map((e) => ({ ...e })),
+    inFlight: (id) => inFlightCount(state, id),
     add: (id, n) => queueBuild(id, n),
     remove: (i, all) => unqueueBuild(i, all),
     move: (i, d) => moveQueued(i, d),
     clear: () => clearBuildQueue(),
-    advance: () => advanceBuildQueue(state),
+    // dt and pace, so a poke at the console can hand it an hour of a hive that
+    // is doing well. Defaults to one second at the pace the hive has.
+    advance: (dt = 1, pace = computeDerived(state).buildPace) => advanceBuildQueue(state, dt, pace),
+    // Straight past the queue and the clock. For setting a hive up, not for
+    // playing one — see raiseStructure.
     raise: (id, n) => raiseStructure(state, id, n),
+  },
+  buildTime: {
+    rungs: TIME,
+    order: TIME_ORDER,
+    exponent: BUILD_COUNT_EXPONENT,
+    duration,
+    nearest: nearestTime,
+    workOf: buildWork,
+    work: (id) => buildWorkFor(state, id),
+    seconds: (id) => buildSecondsFor(state, id, computeDerived(state).buildPace),
+    pace: () => computeDerived(state).buildPace,
+    now: () => buildProgress(state, computeDerived(state).buildPace),
+    cancel: () => abandonBuild(),
+    // Every live building, by what it takes right now. The balance view.
+    table: () => STRUCTURE_ORDER.map((id) => ({
+      id,
+      rung: STRUCTURES[id].time,
+      work: Math.round(buildWorkFor(state, id)),
+      seconds: Math.round(buildSecondsFor(state, id, computeDerived(state).buildPace)),
+    })),
   },
   setActive,
   adjustActive,

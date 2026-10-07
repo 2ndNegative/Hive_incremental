@@ -455,6 +455,159 @@ on the one figure that is standing in rather than on the whole price. The class 
   `definitions/nutrients.js`, not the ladder. At 50× it is the dominant term in any mineral
   cost an unassayed hive pays.
 
+## How long things take
+
+`definitions/times.js`, the companion to `costs.js` and built the same way: every structure
+declares a **named duration**, never a number of seconds.
+
+```js
+cistern: { cost: build('gentle', { fiber: 'medium', protein: 'small' }), time: 'short' }
+```
+
+### Cost gates. Time textures.
+
+This is the governing rule and every number below follows from it. The thing standing
+between the hive and its next building should almost always be the **mass**, because mass is
+what the player has levers on — where the drones are, what is being burnt, which biome is
+being worked. Time only stops an affordable thing from being *instant*.
+
+Before build time existed, a hive that could pay for six Vacuoles had six Vacuoles in the
+same instant: a windfall turned straight into finished buildings, and the build queue was an
+auto-buy list. Now the queue is a plan the hive works through, a windfall is a head start
+rather than a shopping spree, and the difference between a shelf and a Hivecore is something
+the player feels rather than reads.
+
+### The duration ladder
+
+| rung | pace-seconds | what it is for |
+|---|---|---|
+| `moment` | 30 | nothing yet — room below `brief` |
+| `brief` | 60 | nothing yet |
+| `short` | 120 | storage. A bag is a bag. |
+| `middling` | 300 | working organs — generators, nodes, a caecum |
+| `long` | 720 | chambers and the Memory Bank |
+| `glacial` | 1800 | a mind: the Hivecore and the Interlocutor, nothing else |
+
+About ×2.2 a step, the same spacing and for the same reason as `AMOUNT` — below ×1.6 a rung
+stops being a distinguishable choice, and much above ×2.5 everything bunches.
+
+Read those as the figure for a hive with **no brood at all**. See below.
+
+### A growing hive builds faster
+
+What a rung names is a quantity of **pace-seconds**, not wall-clock seconds, and the hive
+gets through them at `derived.buildPace` — which is `larvaPace × vigour`, the same number
+already driving the brood and molding chambers. So larvae speed up construction along with
+everything else, and thirst or hunger slow it.
+
+| tier | 0 larvae | 5 | 20 | 45 |
+|---|---|---|---|---|
+| `glacial` | 30m | 15m | 10m | 7m30 |
+| `long` | 12m | 6m | 4m | 3m |
+| `middling` | 5m | 2m30 | 1m40 | 1m15 |
+| `short` | 2m | 1m | 40s | 30s |
+
+The headline number being the worst case is the right way round: a player who has just
+landed should find a Hivecore slow, and a player with a working nursery should find it brisk.
+
+It also means progress is stored as **work remaining** rather than as a deadline, so a brood
+hatching halfway through a build finishes the rest of it faster — which is the behaviour
+anyone would expect, and one a stored finish-time could not give.
+
+### The count curve is the gentlest in the game
+
+`(1 + n) ** 0.25`, as `BUILD_COUNT_EXPONENT`. The fiftieth Cistern takes 2.7× as long to
+grow as the first; on the cost side, `steady` makes the fiftieth cost fourteen *million*
+times the first. That asymmetry is the governing rule expressed as arithmetic — cost is
+allowed to run away, time is not. The alternatives were measured and rejected:
+
+| nth | `(1+n)^0.25` | `1+0.15√n` | `√(1+n)` | cost ×1.4 |
+|---|---|---|---|---|
+| 1st | 1.00 | 1.00 | 1.00 | 1.0 |
+| 5th | 1.50 | 1.30 | 2.24 | 3.8 |
+| 10th | 1.78 | 1.45 | 3.16 | 20.7 |
+| 25th | 2.24 | 1.73 | 5.00 | 3,214 |
+| 50th | 2.66 | 2.05 | 7.07 | 14.5 million |
+
+`√(1+n)` is already a wall at twenty-five. `1+0.15√n` is so flat that a hive with fifty of
+something may as well have one. The quarter-power sits where the slowdown is felt and never
+fought.
+
+### Measured against affordability
+
+Build time only earns its place if neither axis dominates. On a forest hive with glycolysis
+and lipolysis, five larvae, after 240 s of settling:
+
+| building | small hive (12 drones) | mid hive (30 drones) | build |
+|---|---|---|---|
+| Vacuole | 12s to afford | 4s | 1m00 |
+| Brood Chamber | 1m11 | 42s | 6m00 |
+| Nerve Node | 2m20 | 4m10 | 2m30 |
+| Metabolic Generator | 10m39 | 2m46 | 2m30 |
+| Interlocutor | 24m22 | 5m35 | 15m00 |
+
+Cheap storage is time-bound, the expensive organs stay cost-bound, and the two cross
+somewhere around the Nerve Node. That mix is the target; if a rebalance makes one column
+dominate everywhere, the rungs are wrong.
+
+### The rules
+
+1. **Cost gates, time textures.** The rungs top out at half an hour rather than hours, the
+   count curve is almost flat, and the whole thing divides by how well the hive is doing.
+   Build time must never become the thing the mid-game is waiting on.
+2. **The spacing is about ×2.2**, as in the amount ladder, and for the same reason.
+3. **The count curve is the gentlest in the game.** `BUILD_COUNT_EXPONENT` is the single
+   most dangerous number in the file; raising it to 0.5 changes what the game is about.
+4. **A rung is work, not wall-clock.** Divided by `derived.buildPace` as the work is done,
+   never baked in.
+5. **Pick the rung from what the thing *is*, not from what it costs.** A Cistern is quick
+   because it is a bag; an Interlocutor is slow because it is a second mind. Where the two
+   disagree, the thing's nature wins — cost already says "expensive", and having time say it
+   again just doubles the same statement.
+6. **When a number really is bespoke, write it.** `duration` takes a raw number of seconds,
+   and expect to justify it in a comment.
+
+Every structure's rung is resolved **at module load** (the loop at the bottom of
+`structures.js`), parked ones included. A missing `time` is not merely an error at build
+time — it is a building that goes up instantly, which nothing else would notice.
+
+### The construction queue
+
+Build time turns the queue from an auto-buy list into a real construction queue, and the
+rules that make it legible are:
+
+- **Two pieces of state.** `state.buildQueue` is what the hive has been *told* to build, in
+  order; `state.building` is what it is actually growing. A job leaves the queue, is paid
+  for, and becomes the one on the bench.
+- **One job at a time.** That is what makes the *order* of the queue mean anything — with
+  three jobs running at once the list would be a set rather than a sequence, and moving
+  something up it would mean nothing.
+- **Paid when the job starts.** Not when queued, or lining five things up would empty the
+  stores and the queue would be a way of spending mass rather than of planning. Not on
+  completion, or a job could sit at 99% for an hour because fibre dipped. Paying at the
+  start means the head waits for affordability exactly as it always did, and once the hive
+  has committed the mass the build is certain.
+- **Cancelling refunds in full.** The time already spent is lost, which is penalty enough
+  and the only one that cannot be gamed. Whether the refund all *fits* is a separate
+  question — it goes back as a straight addition, so a full store spills it like any other
+  overflow.
+- **The job on the bench counts against the cap.** A cap that let the player line up three
+  more while something was growing would be a cap of four wearing a label that said three.
+  `BUILD_QUEUE_BASE` is 3, which Stigmergy takes to 5 and Nest Planning to 9.
+- **There is no instant build.** `buildStructure` is an alias on `queueBuild`, and the card
+  on the Hive tab lines something up rather than raising it. `raiseStructure` still exists
+  and still pays on the spot, for the debug handle and the test fixtures — a suite that
+  wants a hive with four generators should say so in a line rather than ticking twenty
+  minutes of game time.
+
+### Changing it
+
+- *"Everything takes too long"* → lower the rungs in `TIME`.
+- *"Repeat buildings bog down"* → `BUILD_COUNT_EXPONENT`. Read rule 3 first.
+- *"Larvae matter too much / too little to building"* → `LARVA_PACE_SCALE` in `engine.js`,
+  which also moves the brood and molding chambers. There is no build-only dial on purpose.
+- *"This one building is wrong"* → change its rung. That is the only per-building edit.
+
 ## Balance
 
 ```bash
