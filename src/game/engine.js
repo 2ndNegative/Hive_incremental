@@ -145,6 +145,50 @@ export function larvaPace(state) {
   return 1 + Math.sqrt(Math.max(0, state.larvae || 0) / LARVA_PACE_SCALE);
 }
 
+/* ------------------------------------------------------------- cogit focus */
+
+/**
+ * How many spare cogits it takes to double the hive's thinking.
+ *
+ * The same shape and the same scale as LARVA_PACE_SCALE, deliberately: the two
+ * are the same idea pointed at different things, and a player who has learned
+ * one should not have to learn the other.
+ */
+export const COGIT_FOCUS_SCALE = 5;
+
+/**
+ * WHAT THE HIVE DOES WITH BANDWIDTH IT IS NOT USING.
+ *
+ * Cognition was a ceiling and nothing else: a cogit either held a drone
+ * coherent or sat there. So the correct play was always to fill every cogit
+ * with drones, and a Nerve Node was a drone slot wearing a different hat.
+ *
+ * Now the slack thinks. Every cogit the hive is not spending on a drone widens
+ * what it can hold in mind and speeds up what it works out — the same
+ * square-root curve a full brood gives the chambers, so the first few spare
+ * cogits matter a great deal and the fiftieth does not.
+ *
+ *   free   0 → ×1.0      free  20 → ×3.0
+ *   free   5 → ×2.0      free  45 → ×4.0
+ *
+ * That makes bandwidth a REAL choice for the first time. A hive can run forty
+ * drones and learn nothing, or run twenty and think twice as fast, and neither
+ * is wrong. It also gives a young hive something to do with a Nerve Node it
+ * cannot yet fill.
+ *
+ * Over budget is not negative: a hive that has overcommitted its cogits is
+ * already punished by being over budget, and compounding that into "and you
+ * also forget things" is a hole with no bottom.
+ */
+export function cogitFocusFrom(free) {
+  return 1 + Math.sqrt(Math.max(0, free) / COGIT_FOCUS_SCALE);
+}
+
+/** The same, for a caller that has not already computed cognition. */
+export function cogitFocus(state) {
+  return cogitFocusFrom(computeCognition(state).free);
+}
+
 /* --------------------------------------------------------------- the click */
 
 /**
@@ -821,6 +865,13 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // hungry is in twice the trouble, and should feel it.
   const vigour = hydration.multiplier * ration.multiplier;
 
+  // Spare bandwidth is thinking time. Applied to BOTH what the hive can hold
+  // and what it works out, so an idle cogit is never simply wasted — see
+  // cogitFocusFrom. Worked out here, once, because the cap is read in several
+  // places and they must all agree.
+  const focus = cogitFocusFrom(cognition.free);
+  const focusedInsightCap = insightCap * focus;
+
   /* -- 1b. molding ----------------------------------------------------------- */
 
   // WHAT A MOLDING CHAMBER WANTS TO MAKE, settled before anything is billed —
@@ -1272,6 +1323,15 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     if (def.insight) insightRate += def.insight * assigned * scale;
   }
 
+  // Buildings that think. Scaled by how well each is being paid, the same as
+  // everything else a structure does — a browned-out Interlocutor argues more
+  // slowly — and multiplied below by whatever bandwidth is going spare.
+  for (const id of STRUCTURE_ORDER) {
+    const per = STRUCTURES[id].insight;
+    if (!per) continue;
+    insightRate += per * working(state, charges, id);
+  }
+
   // And the drones, which is where foraging lives now.
   //
   // TWO THINGS LAND DOES, and they are different things. It CAPS how many
@@ -1540,7 +1600,13 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     storage,
     capMult,
     droneCap,
-    insightCap,
+    // The focused figure, not the raw one: everything that reads a ceiling
+    // should read the same ceiling, and `insightCap` is what tick() clamps to.
+    insightCap: focusedInsightCap,
+    // What it would be with every cogit spoken for, and what the slack is
+    // worth — so the interface can say where the difference came from.
+    insightCapBase: insightCap,
+    cogitFocus: focus,
     slots,
     cognition,
     demands,
@@ -1640,7 +1706,10 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     harvestRate,
     digestRate,
     ingestRate,
-    insightRate,
+    // Scaled by the same slack. A hive thinking with twenty spare cogits both
+    // holds three times as much and gets there three times as fast.
+    insightRate: insightRate * focus,
+    insightRateBase: insightRate,
     growthRate,
     revealed,
     unlocked,

@@ -260,6 +260,37 @@ tools/
 unlocks, affordability — is computed in `engine.js`, which is why the panel can never
 disagree with what the simulation applies.
 
+## Slack is a resource
+
+Two things in the hive pay you for **not** spending them, on the same curve:
+
+| | what it is | what it speeds up |
+|---|---|---|
+| **Larvae** | brood sitting in the chambers | brood and molding, via `larvaPace` |
+| **Spare cogits** | bandwidth not holding a drone | insight ceiling *and* rate, via `cogitFocus` |
+
+Both are `1 + √(n / 5)`, so the first few matter a great deal and the fiftieth does not:
+
+| spare | multiplier |
+|---|---|
+| 0 | ×1.0 |
+| 5 | ×2.0 |
+| 20 | ×3.0 |
+| 45 | ×4.0 |
+
+They share a shape and a scale deliberately — a player who has learned one should not have
+to learn the other.
+
+The cogit half is what makes bandwidth a real decision. Before it, cognition was a ceiling
+and nothing else: a cogit either held a drone coherent or sat there, so the correct play was
+always to fill every one and a Nerve Node was a drone slot wearing a different hat. Now a
+hive can run forty drones and learn nothing, or twenty and think twice as fast, and neither
+is wrong. It also gives a young hive something to do with a Nerve Node it cannot yet fill.
+
+Being **over** budget does not push it below ×1. A hive that has overcommitted its cogits is
+already punished by being over budget; compounding that into *"and you also forget things"*
+is a hole with no bottom.
+
 ## What things cost
 
 Every build cost in the game is a **named amount** of an **exactly named resource**, plus a

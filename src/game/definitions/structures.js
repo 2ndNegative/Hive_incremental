@@ -49,6 +49,10 @@
 //   caps         flat capacity added per unit, in grams
 //   capMult      multiplicative capacity bonus per unit, by nutrient group
 //   throughput   watts added to the metabolic ceiling
+//   insightCap   flat insight storage added per unit
+//   insight      insight per second per unit. Scaled by how well the building
+//                is being paid AND by cogitFocus — see engine.js: bandwidth the
+//                hive is not spending on drones is bandwidth it thinks with.
 //   upkeepWatts  continuous energy draw per unit
 //   slots        caste capacity added per unit
 //   mult         multiplier channel bonuses per unit
@@ -189,6 +193,36 @@ export const STRUCTURES = {
     cost: build('steady', { fiber: 'large', protein: 'modest', fat: 'slight' }),
     brood: { seconds: 20, cost: { protein: 60 }, yield: 1 },
     upkeepWatts: 25_000,
+  },
+
+  memoryBank: {
+    id: 'memoryBank',
+    name: 'Memory Bank',
+    category: 'cognition',
+    desc:
+      'Laid-down tissue the hive writes into and does not overwrite. It works nothing out by '
+      + 'itself — it is the difference between having had a thought and still having it, which '
+      + 'is most of what the colony is short of.',
+    unlock: () => true,
+    cost: build('steady', { fiber: 'medium', potassium: 'tiny' }),
+    insightCap: 400,
+    upkeepWatts: 50_000,
+  },
+
+  interlocutor: {
+    id: 'interlocutor',
+    name: 'Interlocutor',
+    category: 'cognition',
+    desc:
+      'Two knots of nervous tissue grown to disagree with each other. Nothing new comes in; the '
+      + 'hive simply argues with itself about what it already has, and occasionally that is '
+      + 'where an idea comes from.',
+    unlock: () => true,
+    cost: build('steady', { fiber: 'modest', protein: 'medium', potassium: 'slight' }),
+    // Insight per second per unit, scaled by how well it is being paid and by
+    // the bandwidth the hive has left over — see cogitFocus in engine.js.
+    insight: 0.2,
+    upkeepWatts: 100_000,
   },
 
   moldingChamber: {
@@ -497,6 +531,8 @@ export const STRUCTURE_ORDER = [
   'hivecore',
   'broodChamber',
   'nodeCluster',
+  'memoryBank',
+  'interlocutor',
   'moldingChamber',
   'metabolicGenerator',
   'caecum',

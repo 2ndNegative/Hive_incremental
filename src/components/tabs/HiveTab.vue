@@ -32,6 +32,7 @@ function effectLines(def) {
   }
   if (def.throughput) lines.push(`+${formatPower(def.throughput)} metabolic ceiling`);
   if (def.insightCap) lines.push(`+${def.insightCap} insight storage`);
+  if (def.insight) lines.push(`+${def.insight}/s insight`);
   if (def.cogitCapacity) lines.push(`+${formatCogits(def.cogitCapacity)} cognition`);
   if (def.cogitDraw) lines.push(`${formatCogits(def.cogitDraw)} cognition occupied`);
   if (def.metabolism) lines.push(`metabolises ${formatMassFlow(def.metabolism)} into energy`);

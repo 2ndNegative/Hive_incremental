@@ -24,6 +24,18 @@ import { formatNumber } from '../../game/format.js';
       <span class="tip-row">
         <span>Ceiling</span><span>{{ formatNumber(derived.insightCap) }}</span>
       </span>
+      <!-- Where the difference came from. Without this the ceiling and the rate
+           both move whenever a drone is molded, for no reason on screen. -->
+      <template v-if="derived.cogitFocus > 1.005">
+        <span class="tip-row good">
+          <span>Spare bandwidth</span>
+          <span>×{{ derived.cogitFocus.toFixed(2) }}</span>
+        </span>
+        <span class="muted" style="display: block; margin-top: 0.25rem">
+          {{ formatNumber(derived.cognition.free) }} cogits are not holding a drone, so the hive
+          is thinking with them — both the ceiling and the rate below are multiplied by it.
+        </span>
+      </template>
       <span class="tip-row">
         <span>Coming in</span>
         <span :class="derived.insightRate > 0 ? 'good' : 'muted'">
