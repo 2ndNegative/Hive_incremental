@@ -458,15 +458,37 @@ function computeMultipliers(state, charges) {
 }
 
 /** Metabolic efficiency per fuel: joules extracted per joule of stored mass. */
+/**
+ * WHAT FRACTION OF EACH FUEL THE HIVE ACTUALLY RECOVERS.
+ *
+ * Starts at the nutrient's own `burnBase` — always below 1 — and research moves
+ * it up. A tech STATES the efficiency it achieves rather than a bonus to add,
+ * and the best one the hive holds wins. Two consequences, both wanted:
+ *
+ *   Every figure in research.js is directly readable as "this is how good the
+ *   hive gets at burning fat", instead of a delta you have to sum by hand.
+ *
+ *   Exceeding 1 becomes impossible BY INSPECTION. Nothing can be authored above
+ *   1 without it being obvious in the table, and the clamp below is a backstop
+ *   rather than the thing holding the line. That matters, because the previous
+ *   scheme quietly let a gram of fat yield 46 kJ and nothing in the code said
+ *   so — it was additive bonuses on a perfect converter, and you had to add
+ *   them up across three techs to notice.
+ *
+ * Anything with no base is 1: water and mineral mass are not fuels and never
+ * reach this, but costs and flows index the same map.
+ */
 function computeEfficiency(state) {
   const eff = {};
-  for (const id of NUTRIENT_IDS) eff[id] = 1;
+  for (const id of NUTRIENT_IDS) eff[id] = NUTRIENTS[id].burnBase ?? 1;
   for (const tid of RESEARCH_ORDER) {
     if (!state.tech[tid]) continue;
-    const bonus = RESEARCH[tid].efficiency;
-    if (!bonus) continue;
-    for (const [n, value] of Object.entries(bonus)) eff[n] += value;
+    const reached = RESEARCH[tid].efficiency;
+    if (!reached) continue;
+    for (const [n, value] of Object.entries(reached)) eff[n] = Math.max(eff[n], value);
   }
+  // A gram is worth what a gram is worth. Nothing the hive learns changes that.
+  for (const id of NUTRIENT_IDS) eff[id] = Math.min(1, eff[id]);
   return eff;
 }
 
@@ -784,7 +806,7 @@ export const RATION_KEY = 'drones';
  * does, for the same reason — a hive that starves to death while the player is
  * asleep is a hive nobody comes back to.
  */
-export function computeRation(state, efficiency = {}) {
+export function computeRation(state) {
   const drones = droneCount(state);
   const joules = drones * DRONE_RATION_JOULES;
   const empty = {
@@ -808,7 +830,12 @@ export function computeRation(state, efficiency = {}) {
   const nutrient = chooseFuel(state, RATION_KEY, order, nominal).nutrient;
   if (!nutrient) return { ...empty, ratio: 0, multiplier: HYDRATION_FLOOR, hungry: true };
 
-  const perGram = joulesPerGram(nutrient) * (efficiency[nutrient] ?? 1);
+  // RAW joules per gram, NOT the generator's efficiency. `burnBase` is what a
+  // Metabolic Generator fails to recover out of a fuel; a drone eating is not a
+  // generator, and charging it the generator's waste would quietly make the
+  // ration two thirds dearer the moment the efficiency model landed. The bill
+  // is 0.15 g/s of sugar a drone, as specified, and research does not change it.
+  const perGram = joulesPerGram(nutrient);
   const wantGrams = perGram > EPSILON ? joules / perGram : 0;
   const have = state.nutrients?.[nutrient] || 0;
   // Per second: what it wants against what a second of eating could find.
@@ -859,7 +886,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // hive that cannot make energy cannot fetch water or food, and that is a hole
   // with no bottom.
   const hydration = computeHydration(state);
-  const ration = computeRation(state, efficiency);
+  const ration = computeRation(state);
 
   // One number, because they compound honestly: a hive that is both parched and
   // hungry is in twice the trouble, and should feel it.

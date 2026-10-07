@@ -93,6 +93,7 @@ import {
 import {
   TOPBAR, TOPBAR_ORDER, TOPBAR_SLOTS, DEFAULT_PINNED, topbarLayout, urgencyRank,
 } from './game/definitions/topbar.js';
+import { RESEARCH, RESEARCH_ORDER } from './game/definitions/research.js';
 import * as dev from './game/dev.js';
 import * as run from './game/run.js';
 
@@ -249,6 +250,8 @@ window.hive = {
   // "parked for the rebuild" apart from "broken", so they flip back on by
   // themselves once the new structures and castes land.
   discovery,
+  researchDefs: RESEARCH,
+  researchOrder: RESEARCH_ORDER,
   structureDefs: STRUCTURES,
   structureOrder: STRUCTURE_ORDER,
   powerPriority: () => powerPriority(),
@@ -261,7 +264,7 @@ window.hive = {
   fuelLock: (key) => fuelLockFor(state, key),
   larvaCarbPerSecond: LARVA_CARB_PER_SECOND,
   hydration: () => computeHydration(state),
-  ration: () => computeRation(state, computeDerived(state).efficiency),
+  ration: () => computeRation(state),
   rationKey: RATION_KEY,
   aridityTable: ARIDITY,
   aridityOf,

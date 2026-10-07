@@ -260,6 +260,51 @@ tools/
 unlocks, affordability — is computed in `engine.js`, which is why the panel can never
 disagree with what the simulation applies.
 
+## Efficiency buys back waste — it never invents energy
+
+A gram of fat is 37 kJ. Nothing the hive learns can make it 46.
+
+Every fuel starts **wasteful** — `burnBase` in `definitions/nutrients.js` — and research moves
+it **up towards 1 and never past it**. A tech states the efficiency it *reaches* rather than a
+bonus it adds, the best one you hold wins, and the result is clamped at 1. Exceeding the
+mass's real energy is impossible by inspection of the table, not just by a guard in the code.
+
+| fuel | base | after its tech | capstone | why |
+|---|---|---|---|---|
+| **Fibre** | 0.95 | — | — | almost lossless, and barely any energy there to lose |
+| **Ethanol** | 0.85 | — | — | small, volatile, already half-oxidised |
+| **Fat** | 0.70 | Lipolysis → 0.875 | Ketogenesis → **1.00** | what the hive runs on |
+| **Protein** | 0.70 | — | Ketogenesis → 0.84 | slow to dismantle; it was tissue a moment ago |
+| **Carbohydrate** | 0.60 | Glycolysis → 0.75 | — | needs no learning, and gets the 3× throughput |
+
+One generator, measured across the ladder:
+
+| | fat | carb | protein | fibre | ethanol |
+|---|---|---|---|---|---|
+| nothing | 259 kW | 275 | 119 | — | 247 |
+| Glycolysis | 259 | **344** | 119 | — | 247 |
+| + Lipolysis | **324** | 344 | 119 | — | 247 |
+| + Cellulolysis | 324 | 344 | 119 | **76** | 247 |
+| + Ketogenesis | **370** | 344 | **143** | 76 | 247 |
+
+**370 kW used to be where fat started. It is now where fat ends.** The old balance point is
+the ceiling at the end of the fat line, and the early game is about a third poorer with
+research as the way out. One generator still covers a 15-drone hive comfortably (259 kW
+against 135 kW of demand), so nothing needed compensating elsewhere.
+
+Fibre is the interesting one. At 0.95 it is nearly lossless, but 8 kJ/g is so little that a
+generator on fibre makes 76 kW against fat's 259. **Burning it is never an efficiency
+question — it is the building material, and every gram burned is a gram not built with.**
+That is the only real cost of it, and it is a big one.
+
+Carbohydrate pays twice: 0.60 recovered *and* a further 10% lost to the hurry of the 3×
+throughput, so 30 g/s of sugar is 275 kW rather than the 459 a perfect converter would give.
+It is still the sprint, and after Ketogenesis fat finally overtakes it on raw output too.
+
+**The drone ration does not go through this.** `burnBase` is what a *Metabolic Generator*
+fails to recover; a drone eating is not a generator. The ration stays 0.15 g/s of sugar a
+drone whatever the hive has learned.
+
 ## Slack is a resource
 
 Two things in the hive pay you for **not** spending them, on the same curve:

@@ -7,6 +7,11 @@
 //   since the first bite — the assay is what lets it see the stockpile and
 //   spend it. Finishing one is the closest thing this game has to a reveal.
 //
+//   EFFICIENCY techs state the fraction of a fuel the hive recovers, and they
+//   only ever move it UP TOWARDS 1. Every fuel starts wasteful (nutrients.js
+//   burnBase) and research buys the waste back; nothing can take a gram past
+//   what the gram contains. The number here IS the efficiency, not a bonus.
+//
 //   METABOLIC techs change what the hive can burn. Cellulolysis is the big one:
 //   fibre is 8 kJ/g sitting in every blade of grass and every plank of wood,
 //   and until the hive can cleave the bonds, none of it is fuel.
@@ -18,20 +23,23 @@ export const RESEARCH = {
   glycolysis: {
     id: 'glycolysis',
     name: 'Glycolysis',
-    desc: 'Refine the sugar-splitting pathway. Less mass burned per joule extracted.',
+    desc: 'Refine the sugar-splitting pathway. A quarter of every gram was going out as heat; most of that is recoverable.',
     requires: [],
     cost: { insight: 50 },
-    efficiency: { carb: 0.25 },
-    unlocks: ['+25% energy yield from carbohydrate'],
+    // The efficiency a tech REACHES, not a bonus it adds — see computeEfficiency.
+    // Sugar starts at 0.60, so this is a quarter more energy out of the same mass.
+    efficiency: { carb: 0.75 },
+    unlocks: ['Carbohydrate burns at 75% rather than 60%'],
   },
   lipolysis: {
     id: 'lipolysis',
     name: 'Lipolysis',
-    desc: 'Mobilise stored lipid properly instead of letting it sit inert.',
+    desc: 'Mobilise stored lipid properly instead of letting it sit inert. Most of what the hive was wasting on fat, it stops wasting.',
     requires: ['glycolysis'],
     cost: { insight: 140 },
-    efficiency: { fat: 0.25 },
-    unlocks: ['+25% energy yield from fat'],
+    // Fat starts at 0.70. A quarter more out of the same gram.
+    efficiency: { fat: 0.875 },
+    unlocks: ['Fat burns at 87.5% rather than 70%'],
   },
   bulkMineralAssay: {
     id: 'bulkMineralAssay',
@@ -83,6 +91,8 @@ export const RESEARCH = {
     queue: 4,
     unlocks: ['+4 build queue slots'],
   },
+  // PARKED — not in RESEARCH_ORDER. Everything it unlocks (the Excavator caste and the Bore Shaft)
+  // is parked for the rebuild, so this would buy the player nothing.
   lithovory: {
     id: 'lithovory',
     name: 'Lithovory',
@@ -91,6 +101,8 @@ export const RESEARCH = {
     cost: { insight: 1800, ash: 1500 },
     unlocks: ['Excavator caste', 'Bore Shaft'],
   },
+  // PARKED — not in RESEARCH_ORDER. Everything it unlocks (the Hunter caste and the Ambush Burrow)
+  // is parked for the rebuild, so this would buy the player nothing.
   predation: {
     id: 'predation',
     name: 'Predation',
@@ -126,14 +138,31 @@ export const RESEARCH = {
   ketogenesis: {
     id: 'ketogenesis',
     name: 'Ketogenesis',
-    desc: 'Run the whole hive off lipid when nothing else is available. Protein stops being an emergency ration.',
-    requires: ['predation', 'lipidAssay'],
+    desc:
+      'Run the whole hive off lipid, and finish the job: not one joule in a gram of fat is left '
+      + 'on the table. Protein stops being an emergency ration.',
+    // Re-pointed off Predation, which is parked with the Hunter caste. This has
+    // nothing to do with hunting — it is the end of the fat line, and it now has
+    // a job worth reaching: it is the only thing in the game that takes a fuel
+    // all the way to the limit.
+    requires: ['lipolysis', 'lipidAssay'],
     cost: { insight: 9000, fat: 6000 },
-    efficiency: { fat: 0.3, protein: 0.2 },
-    unlocks: ['+30% energy yield from fat', '+20% from protein'],
+    // THE CEILING. Fat is burned perfectly — nothing can go higher, because a
+    // gram of fat is 37 kJ and that is all it is.
+    efficiency: { fat: 1, protein: 0.84 },
+    unlocks: ['Fat burns perfectly — 100%, the limit', 'Protein burns at 84% rather than 70%'],
   },
 };
 
+/**
+ * The ladder, in order. A tech that is DEFINED above but not listed here is
+ * parked: nothing shows it, nothing can buy it, and `state.tech` round-trips it
+ * if an old save has it. Lithovory and Predation are parked because everything
+ * they unlock — the Excavator and Hunter castes, the Bore Shaft, the Ambush
+ * Burrow — is itself parked for the rebuild, and a tech whose entire reward is
+ * a promise the game cannot keep is worse than no tech at all.
+ *
+ */
 export const RESEARCH_ORDER = [
   'glycolysis',
   'lipolysis',
@@ -143,8 +172,6 @@ export const RESEARCH_ORDER = [
   'cellulolysis',
   'traceMetalAssay',
   'nestPlanning',
-  'lithovory',
-  'predation',
   'lipidAssay',
   'aqueousAssay',
   'rareElementAssay',

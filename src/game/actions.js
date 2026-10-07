@@ -14,7 +14,7 @@ import {
 } from './definitions/nutrients.js';
 import { STRUCTURES, maxLevelOf, isLeveled } from './definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
-import { RESEARCH } from './definitions/research.js';
+import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import {
   structureCost,
@@ -681,6 +681,11 @@ export function releaseAllCogits() {
 export function research(id) {
   const def = RESEARCH[id];
   if (!def || state.tech[id]) return false;
+  // A tech defined but left out of RESEARCH_ORDER is PARKED: nothing shows it
+  // and nothing can buy it, including this. Checked here rather than only in
+  // the interface, so the debug handle and the tests see the same ladder the
+  // player does.
+  if (!RESEARCH_ORDER.includes(id)) return false;
   if (!def.requires.every((req) => state.tech[req])) return false;
   if (!canAfford(state, def.cost)) return false;
 

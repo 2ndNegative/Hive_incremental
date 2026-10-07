@@ -57,6 +57,32 @@
  * a good deal of interface code all walk these entries, and a missing key is a
  * worse bug than a zero.
  */
+/**
+ * HOW MUCH OF A GRAM THE HIVE ACTUALLY GETS.
+ *
+ * `burnBase` is the fraction of a fuel's chemical energy a generator recovers
+ * before any research. The rest is lost — heat, residue, bonds the hive cannot
+ * open. It is ALWAYS below 1, and research moves it UP TOWARDS 1 and never past
+ * it, because a gram of fat is 37 kJ and nothing the hive learns can make it
+ * 46 kJ. Efficiency research buys back waste; it does not invent energy.
+ *
+ * That is a deliberate inversion. These used to be bonuses on top of a perfect
+ * converter — +25% fat meant a gram yielded more than the gram contained — and
+ * the only honest way to keep the research feeling like progress is to start
+ * every fuel wasteful and let the tech tree be the hive getting better at it.
+ *
+ * The spread says what each fuel IS:
+ *
+ *   fibre    0.95  almost lossless, and barely any energy there to begin with.
+ *                  Burning it is never an efficiency question — it is the
+ *                  building material, and every gram burned is a gram not built
+ *                  with. That is the only real cost, and it is a big one.
+ *   ethanol  0.85  small, volatile, already half-oxidised
+ *   fat      0.70  what the hive runs on, and still wasteful until Ketogenesis
+ *   protein  0.70  slow to dismantle, and it was tissue a moment ago
+ *   carb     0.60  the worst converter, and the one that needs no learning —
+ *                  it also gets the 3× throughput, so it is fast and dirty
+ */
 export const NUTRIENTS = {
   /* ------------------------------------------------------------- macros -- */
 
@@ -77,6 +103,8 @@ export const NUTRIENTS = {
     kjPerGram: 17,
     baseCap: 0,
     fuel: true,
+    // Dismantling tissue into fuel is slow and leaves a lot behind.
+    burnBase: 0.7,
     desc: 'Structural mass and emergency fuel. What drones and chambers are built from.',
   },
   fat: {
@@ -87,6 +115,9 @@ export const NUTRIENTS = {
     kjPerGram: 37,
     baseCap: 0,
     fuel: true,
+    // What the hive is built to run on, and still only two thirds of the way
+    // there until it learns better. Ketogenesis is what closes the gap.
+    burnBase: 0.7,
     desc: 'The densest fuel on this planet at 37 kJ per gram. Burn this first.',
   },
   carb: {
@@ -97,6 +128,10 @@ export const NUTRIENTS = {
     kjPerGram: 17,
     baseCap: 0,
     fuel: true,
+    // Worst converter in the hive, and on purpose: sugar is the fuel the hive
+    // has not had to learn anything to use, and it already gets the throughput
+    // bonus below. Glycolysis is what makes it good.
+    burnBase: 0.6,
     // THE SURGE FUEL. A generator pushes sugar through three times as fast as
     // anything else and wastes a tenth of it doing so: 30 g/s at 17 kJ/g and
     // 90% is 459 kW against fat's 370 kW, so carbohydrate out-produces fat
@@ -116,6 +151,12 @@ export const NUTRIENTS = {
     kjPerGram: 8,
     baseCap: 0,
     fuel: true,
+    // ALMOST LOSSLESS, and that is the point. Fibre carries little energy a
+    // gram, but a hive that has learned to cleave it wastes almost none — so
+    // burning it is never a question of efficiency, it is a question of what
+    // else the fibre was for. It is the building material. Every gram in the
+    // generator is a gram not in a wall.
+    burnBase: 0.95,
     fuelRequires: 'cellulolysis', // inert until the hive can break the bonds
     desc: 'Structural plant polysaccharide. Locked inside cellulose until the hive learns to cleave it.',
   },
@@ -127,6 +168,8 @@ export const NUTRIENTS = {
     kjPerGram: 29,
     baseCap: 0,
     fuel: true,
+    // Small, volatile and already half-oxidised. Easy to finish.
+    burnBase: 0.85,
     desc: 'Dense, volatile, mildly toxic. The locals drink it recreationally.',
   },
   ash: {

@@ -102,7 +102,11 @@ export const DRONE_TYPES = {
     cost: flat({ phosphorus: 'minuscule' }),
     gather: 'scavenger',
     load: { min: 20, max: 45 },
-    unlock: () => true,
+    // Behind Scavenging, as the research has always claimed. Eating what died
+    // on its own is a tolerance the hive has to evolve — the bacterial load in
+    // tissue that has already gone over is the whole reason nothing else is
+    // competing for it.
+    unlock: (state) => Boolean(state.tech?.scavenging),
   },
 
   explorer: {
