@@ -52,6 +52,9 @@ import {
 } from './game/expedition.js';
 import { FORAGE, poolFor } from './game/definitions/forage.js';
 import {
+  AMOUNT, AMOUNT_ORDER, GROWTH, GROWTH_ORDER, amount, growthOf, nearestAmount,
+} from './game/definitions/costs.js';
+import {
   FOCUS_SHARE, focusStrength, isStarrable, isStarred, starsFor, setStar, toggleStar,
   clearStars, focusedOdds,
 } from './game/focus.js';
@@ -263,6 +266,15 @@ window.hive = {
   lockedCostMultiplier: LOCKED_COST_MULTIPLIER,
   payableCost: (cost) => payableCost(state, cost || {}),
   maxLevelOf,
+  costs: {
+    amounts: AMOUNT,
+    amountOrder: AMOUNT_ORDER,
+    growth: GROWTH,
+    growthOrder: GROWTH_ORDER,
+    amount,
+    growthOf,
+    nearest: nearestAmount,
+  },
   structureCost: (id, n = 1) => structureCost(state, id, n),
   build: (id, n) => buildStructure(id, n),
   queue: {

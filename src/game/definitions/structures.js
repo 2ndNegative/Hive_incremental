@@ -6,7 +6,7 @@
 // None of it is referenced by the game any more: `STRUCTURE_ORDER` is empty, so
 // the engine computes no capacity, no upkeep, no slots and no multipliers from
 // any of it, and the Hive tab lists none of it. It is kept, rather than
-// deleted, because much of it is probably adaptable — the geometric cost curve,
+// deleted, because much of it is probably adaptable — the cost ladder,
 // the capMult/slots/throughput shape and several of the buildings themselves
 // are likely to survive the rebuild in some form.
 //
@@ -21,7 +21,15 @@
 // actual protein and fat off the stores, which is why an early hive has to
 // choose between growing and eating.
 //
-//   cost(n)      nutrient grams for the next unit, given n already built.
+//   cost(n)      nutrient grams for the next unit, given n already built. ALWAYS
+//                written with build() from definitions/costs.js — a named growth
+//                curve and a named amount per resource, never a number of grams.
+//                WHICH resources a building costs stays a decision about that
+//                building and is spelled out here in full; only the magnitudes
+//                come from the ladder, so rebalancing "fibre is too tight" is
+//                one line in costs.js rather than thirteen judgement calls
+//                scattered through this file. Read the rules at the top of
+//                costs.js before adding one.
 //                MOSTLY FIBRE, always. Fibre is the hive's building material:
 //                it is what the ground is actually made of (leaf litter is 68%
 //                fibre, wood 87%), it carries no energy worth burning, and
@@ -86,7 +94,7 @@
 //   identical; what changes is what the interface says and the fact that you
 //   cannot have two. `maxLevel` caps it.
 
-const geo = (base, growth) => (n) => base * growth ** n;
+import { build } from './costs.js';
 
 export const STRUCTURES = {
   /* ------------------------------------------------------------------ live -- */
@@ -102,7 +110,7 @@ export const STRUCTURES = {
       'The first of it brings a body with somewhere to put things; every level after that widens ' +
       'what the hivemind can hold in flight at once — and costs a great deal to keep lit.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(450, 1.6)(n), protein: geo(60, 1.6)(n), fat: geo(24, 1.6)(n) }),
+cost: build('steep', { fiber: 'large', protein: 'small', fat: 'slight' }),
     cogitCapacity: 5,
 
     // THE HIVE'S ONLY STORAGE.
@@ -171,7 +179,7 @@ export const STRUCTURES = {
       'comes out is not yet anything — it only eats, and waits to be told what it is for. Stop ' +
       'feeding it and it stops being anything at all, quickly.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(520, 1.4)(n), protein: geo(90, 1.4)(n), fat: geo(30, 1.4)(n) }),
+    cost: build('steady', { fiber: 'large', protein: 'modest', fat: 'slight' }),
     brood: { seconds: 20, cost: { protein: 60 }, yield: 1 },
     upkeepWatts: 25_000,
   },
@@ -184,7 +192,7 @@ export const STRUCTURES = {
       'A press of living cartilage. A larva goes in formless and comes out as something with a ' +
       'job. Switch a drone type on in the Drones tab and this is what makes it.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(400, 1.35)(n), protein: geo(60, 1.35)(n), ash: geo(30, 1.35)(n) }),
+cost: build('steady', { fiber: 'large', protein: 'small', ash: 'slight' }),
     upkeepWatts: 25_000, // idling, with nothing it is allowed to make
     activeWatts: 100_000, // pressing
     molding: { seconds: 20 },
@@ -201,7 +209,7 @@ export const STRUCTURES = {
     // Steeper than the storage buildings on purpose. Bandwidth is the ceiling
     // on the whole drone economy, so it should be bought a node at a time and
     // felt each time, not stacked twenty deep in one go.
-    cost: (n) => ({ fiber: geo(480, 1.45)(n), protein: geo(80, 1.45)(n), fat: geo(30, 1.45)(n) }),
+cost: build('steady', { fiber: 'large', protein: 'modest', fat: 'slight' }),
     cogitCapacity: 5,
     // THE RULE THAT MAKES DRONES WORTH HAVING. Five cogits holds five drones
     // coherent, and five foragers earn about 80 kW. A node has to cost a
@@ -220,7 +228,7 @@ export const STRUCTURES = {
       'and everything in general: when a dedicated store overflows, this is what catches it — and ' +
       'it is the first thing the hive empties again.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(260, 1.35)(n), protein: geo(35, 1.35)(n), water: geo(150, 1.35)(n) }),
+cost: build('steady', { fiber: 'medium', protein: 'slight', water: 'modest' }),
     generalStorage: 1_000, // grams, shared across every nutrient
   },
 
@@ -232,7 +240,7 @@ export const STRUCTURES = {
       'Dense packed amino acid, laid down in a shell the hive can break open again. Holds nothing ' +
       'but protein, and holds it far better than anything that holds everything.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(300, 1.4)(n), protein: geo(50, 1.4)(n), ash: geo(15, 1.4)(n) }),
+cost: build('steady', { fiber: 'medium', protein: 'small', ash: 'tiny' }),
     storage: { protein: 200 },
   },
 
@@ -244,7 +252,7 @@ export const STRUCTURES = {
       'A bead of rendered fat held in a skin of its own making. The densest thing the hive can ' +
       'keep, and the cheapest to keep it in — fat needs no water around it.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(280, 1.4)(n), protein: geo(40, 1.4)(n), fat: geo(24, 1.4)(n) }),
+cost: build('steady', { fiber: 'medium', protein: 'small', fat: 'slight' }),
     storage: { fat: 200 },
   },
 
@@ -256,7 +264,7 @@ export const STRUCTURES = {
       'Sugar wound into a branched knot so it can be packed away and pulled back out in a hurry. ' +
       'What the brood eats comes out of here.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(280, 1.4)(n), protein: geo(40, 1.4)(n), carb: geo(48, 1.4)(n) }),
+cost: build('steady', { fiber: 'medium', protein: 'small', carb: 'small' }),
     storage: { carb: 200 },
   },
 
@@ -278,7 +286,7 @@ export const STRUCTURES = {
     // Bigger than the 200 g granules on purpose, too. Fibre is spent in
     // four-hundred-gram lumps, so a two-hundred-gram shelf of it would not even
     // hold one building's worth.
-    cost: (n) => ({ fiber: geo(300, 1.35)(n), protein: geo(45, 1.35)(n) }),
+cost: build('steady', { fiber: 'medium', protein: 'small' }),
     storage: { fiber: 500 },
   },
 
@@ -291,7 +299,7 @@ export const STRUCTURES = {
       + 'mostly water and loses it constantly; without somewhere to keep a reserve, a dry spell '
       + 'is felt in everything the colony does within the hour.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(340, 1.3)(n), protein: geo(50, 1.3)(n) }),
+cost: build('gentle', { fiber: 'medium', protein: 'small' }),
     storage: { water: 10_000 },
     // Cheap to keep. It is a bag, not an organ.
     upkeepWatts: 5,
@@ -305,7 +313,7 @@ export const STRUCTURES = {
       'A muscular holding sac for matter the hive has gathered but not yet broken down. Harvest ' +
       'beyond what it can hold spoils where it lies.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(520, 1.3)(n), protein: geo(90, 1.3)(n) }),
+cost: build('gentle', { fiber: 'large', protein: 'modest' }),
     itemStorage: 2_000,
   },
 
@@ -318,7 +326,7 @@ export const STRUCTURES = {
       'can actually spend — the only thing in the hive that can. Without one, stored matter is ' +
       'just matter.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(320, 1.25)(n), protein: geo(45, 1.25)(n), ash: geo(20, 1.25)(n) }),
+cost: build('gentle', { fiber: 'medium', protein: 'small', ash: 'slight' }),
     metabolism: 10, // grams per second
   },
 
@@ -330,7 +338,7 @@ export const STRUCTURES = {
       'A blind fermenting gut. Breaks whole harvest down into the nutrients it was made of — ' +
       'without one, everything gathered simply piles up in the larder and rots there.',
     unlock: () => true,
-    cost: (n) => ({ fiber: geo(440, 1.28)(n), protein: geo(70, 1.28)(n), water: geo(180, 1.28)(n) }),
+cost: build('gentle', { fiber: 'large', protein: 'small', water: 'medium' }),
     // Eighty grams a second, for nothing. Digestion is not a machine the hive
     // runs — it is a gut, and a gut works on what is in it. Charging watts for
     // it would make the opening unwinnable: a hive with no generator could not
@@ -351,7 +359,7 @@ export const STRUCTURES = {
     name: 'Gut Sac',
     desc: 'Bulk storage lining. Expands every macronutrient reserve the hive holds.',
     unlock: () => true,
-    cost: (n) => ({ protein: geo(400, 1.32)(n) }),
+cost: build('gentle', { protein: 'large' }),
     capMult: { bulk: 0.5 },
     upkeepWatts: 5,
   },
@@ -360,7 +368,7 @@ export const STRUCTURES = {
     name: 'Metabolic Core',
     desc: 'Oxidation chamber. Raises the ceiling on how fast the hive can burn mass for energy.',
     unlock: () => true,
-    cost: (n) => ({ protein: geo(500, 1.34)(n), fat: geo(250, 1.34)(n) }),
+cost: build('steady', { protein: 'large', fat: 'medium' }),
     throughput: 5000,
     upkeepWatts: 0,
   },
@@ -369,7 +377,7 @@ export const STRUCTURES = {
     name: 'Assay Chamber',
     desc: 'Dedicated analysis tissue. Banks more insight and makes every analyst sharper.',
     unlock: () => true,
-    cost: (n) => ({ protein: geo(800, 1.35)(n), ash: geo(150, 1.35)(n) }),
+cost: build('steady', { protein: 'heavy', ash: 'modest' }),
     insightCap: 600,
     mult: { analyst: 0.2 },
     upkeepWatts: 40,
@@ -379,7 +387,7 @@ export const STRUCTURES = {
     name: 'Mineral Vault',
     desc: 'Sequestration cells for inorganic elements. Without these, assayed minerals spill as fast as they arrive.',
     unlock: (state) => state.tech.bulkMineralAssay,
-    cost: (n) => ({ protein: geo(1100, 1.36)(n), ash: geo(500, 1.36)(n) }),
+cost: build('steady', { protein: 'heavy', ash: 'large' }),
     capMult: { mineral: 1.0 },
     upkeepWatts: 25,
   },
@@ -388,7 +396,7 @@ export const STRUCTURES = {
     name: 'Vitamin Lattice',
     desc: 'Stabilised organic scaffolding. Vitamins degrade in open storage; this is what stops them.',
     unlock: (state) => state.tech.lipidAssay,
-    cost: (n) => ({ protein: geo(1600, 1.38)(n), fat: geo(500, 1.38)(n) }),
+cost: build('steady', { protein: 'heavy', fat: 'large' }),
     capMult: { vitamin: 1.0 },
     upkeepWatts: 60,
   },
@@ -397,7 +405,7 @@ export const STRUCTURES = {
     name: 'Bore Shaft',
     desc: 'A worked opening into the substrate. Each one supports an excavator at the face.',
     unlock: (state) => state.tech.lithovory,
-    cost: (n) => ({ protein: geo(900, 1.3)(n), ash: geo(400, 1.3)(n) }),
+cost: build('gentle', { protein: 'heavy', ash: 'large' }),
     slots: { excavator: 1 },
     upkeepWatts: 20,
   },
@@ -406,7 +414,7 @@ export const STRUCTURES = {
     name: 'Ambush Burrow',
     desc: 'A concealed approach onto a game trail. Each one supports one hunter in the field.',
     unlock: (state) => state.tech.predation,
-    cost: (n) => ({ protein: geo(1800, 1.33)(n), fat: geo(600, 1.33)(n) }),
+cost: build('steady', { protein: 'massive', fat: 'large' }),
     slots: { hunter: 1 },
     mult: { hunter: 0.1 },
     upkeepWatts: 35,

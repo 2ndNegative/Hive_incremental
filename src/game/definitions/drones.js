@@ -25,11 +25,15 @@
 //
 // WHAT A TYPE DECLARES
 //   caste        the band it belongs to, from DRONE_CASTES
-//   cost         what a Molding Chamber spends to press one.  READ. A cost in
-//                a nutrient the hive has not assayed yet is charged to its
-//                parent macro at fifty times the amount — see payableCost in
-//                definitions/nutrients.js. The hive can want phosphorus before
-//                it can find phosphorus; it just pays in ash until it can.
+//   cost         what a Molding Chamber spends to press one.  READ. Written
+//                with flat() from definitions/costs.js — a named amount per
+//                resource off the shared ladder, never a number of grams. No
+//                growth curve: the hundredth forager costs what the first did.
+//                A cost in a nutrient the hive has not assayed yet is charged
+//                to its parent macro at fifty times the amount — see
+//                payableCost in definitions/nutrients.js. The hive can want
+//                phosphorus before it can find phosphorus; it just pays in ash
+//                until it can.
 //   cogitDraw    cogits one of them occupies, working or not.  READ
 //   gather       which forage route it works, as the old castes did.  READ
 //   load         grams one of them carries home per trip, as { min, max }
@@ -46,6 +50,8 @@
 // weight at the same moment it rolls the find. The rate the interface shows is
 // that load spread over the cycle, which is the honest average of a thing that
 // actually arrives in parcels.
+
+import { flat } from './costs.js';
 
 export const DRONE_CASTES = {
   worker: {
@@ -72,7 +78,7 @@ export const DRONE_TYPES = {
     cogitDraw: 1,
     // Pressed out of a larva and a little fat. Cheap, because a Forager is the
     // thing a hive makes when it has nothing else to make.
-    cost: { fat: 5 },
+    cost: flat({ fat: 'minuscule' }),
     // The ground-vegetation route, the same one the parked forager caste worked
     // and the same one a manual gather draws on.
     gather: 'forager',
@@ -93,7 +99,7 @@ export const DRONE_TYPES = {
     // Phosphorus, which the hive cannot see yet: until the assay is run this is
     // charged as 250 g of mineral mass instead. Expensive on purpose — the
     // scavenger route is worth far more per gram than the forager one.
-    cost: { phosphorus: 5 },
+    cost: flat({ phosphorus: 'minuscule' }),
     gather: 'scavenger',
     load: { min: 20, max: 45 },
     unlock: () => true,
@@ -110,7 +116,7 @@ export const DRONE_TYPES = {
     cogitDraw: 1,
     // Manganese is unassayed at the start, so this is really 250 g of mineral
     // mass until the hive can tell manganese from the rest of the ash.
-    cost: { fat: 250, manganese: 5, water: 200 },
+    cost: flat({ fat: 'medium', manganese: 'minuscule', water: 'medium' }),
     // NOT a gather route: an expedition is a one-shot roll with several very
     // different outcomes, not a trip with a weight. See engine.js.
     expedition: {

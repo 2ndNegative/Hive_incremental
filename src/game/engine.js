@@ -2225,7 +2225,11 @@ export function raiseStructure(state, id, count = 1, onLog = null) {
   // be read before the count moves.
   const wasRunning = state.active?.[id] ?? had;
   for (const [n, amount] of Object.entries(cost)) state.nutrients[n] -= amount;
-  state.structures[id] += wanted;
+  // `had + wanted`, not `+= wanted`: a structure id that is not already a key —
+  // a new building on an old save, or a hand-built test fixture — would make
+  // that NaN, and a NaN count spreads silently through every capacity in the
+  // game before anything complains.
+  state.structures[id] = had + wanted;
   // Something newly built is switched on. Idling is a thing the player chooses,
   // never a thing that happens to them.
   state.active ??= {};

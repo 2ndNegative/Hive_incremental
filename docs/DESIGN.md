@@ -260,6 +260,91 @@ tools/
 unlocks, affordability — is computed in `engine.js`, which is why the panel can never
 disagree with what the simulation applies.
 
+## What things cost
+
+Every build cost in the game is a **named amount** of an **exactly named resource**, plus a
+**named growth curve**. No structure or drone definition contains a number of grams.
+
+```js
+cost: build('steady', { fiber: 'large', protein: 'small', fat: 'slight' })
+cost: flat({ fat: 'minuscule' })          // drones: no curve, the hundredth costs what the first did
+```
+
+The ladder and the curves live in `definitions/costs.js`, and that file is the only place
+either is written down.
+
+### Why
+
+Thirteen live buildings used to carry thirty-three hand-written numbers between them: ten
+fibre bases, eight protein bases, seven growth factors. Almost none were chosen against
+each other — 450 against 480 against 520 is drift that accumulated one building at a time,
+not a decision. Rebalancing *"fibre is too tight"* meant re-judging ten numbers in ten
+places and hoping they still agreed. It is now one line.
+
+### The amount ladder
+
+A 1‑2.5‑5 preferred series, in grams. Round, readable, about ×2.2 a step:
+
+| rung | g | | rung | g |
+|---|---|---|---|---|
+| `trace` | 2 | | `modest` | 100 |
+| `minuscule` | 5 | | `medium` | 250 |
+| `tiny` | 10 | | `large` | 500 |
+| `slight` | 25 | | `heavy` | 1000 |
+| `small` | 50 | | `massive` | 2500 |
+
+Roughly what each band is for as the table stands: `trace`–`tiny` for micronutrients and
+drone mold costs, `slight`–`modest` for the fat, ash, sugar and water a building needs,
+`medium`–`large` for fibre and protein, `heavy`–`massive` for research.
+
+### The growth curves
+
+How much dearer each one is than the last. **This is the bigger lever by far** — from a
+500 g base, by the tenth one:
+
+| curve | | 10th one | ten of them |
+|---|---|---|---|
+| `flat` | ×1.0 | 0.5 kg | 5 kg |
+| `gentle` | ×1.25 | 3.7 kg | 17 kg |
+| `steady` | ×1.4 | 10.3 kg | 35 kg |
+| `steep` | ×1.6 | 34.4 kg | 91 kg |
+| `brutal` | ×1.9 | 161.3 kg | 340 kg |
+
+Gentle to brutal is a **forty-four-fold** spread by the tenth building; the whole amount
+ladder spans ten-fold within a resource. So choose the curve first and the rung second, and
+treat a curve change as the serious edit it is.
+
+`flat` is for something the hive should be able to spam, `gentle` for bulk infrastructure
+it will end up with a lot of, `steady` is the default, `steep` for something where each one
+is a real decision, `brutal` for a thing that should hurt to repeat (nothing uses it yet).
+
+### The rules
+
+1. **The spacing is about ×2.2, and that is not arbitrary.** Below ×1.6 the rungs stop
+   being distinguishable and you may as well type the number. At ×2.5 and above everything
+   bunches — at that spacing every fibre cost in the game lands on one rung and the Vacuole
+   costs exactly what the Crop Chamber does.
+2. **The ladder is absolute grams, shared by every resource.** `medium` is 250 g whether it
+   is fibre or iron; dear resources simply use low rungs. A rung name always means the same
+   weight, at the cost of not self-scaling per resource. That trade was made on purpose.
+3. **Pick the rung, then check the neighbours.** A cost that sits between two rungs goes to
+   the cheaper one — costs compound through the curve, and a building 60% too dear at level
+   one is kilos too dear by level ten.
+4. **The ladder generalises the amount and nothing else.** Which resources a building costs
+   is a design decision about that building and is spelled out in full in its own
+   definition. A Cistern costs water because a cistern holds water.
+5. **When a number really is bespoke, write it.** `build()` and `flat()` both take a raw
+   number as well as a rung name — and expect to justify it in a comment, because the next
+   person rebalancing the ladder will not see it.
+
+### Changing it
+
+- *"Everything is too expensive"* → raise the rungs in `AMOUNT`.
+- *"Fibre specifically is too tight"* → nothing in `costs.js`; move the buildings that use
+  it down a rung, or change what fibre is worth elsewhere in the economy.
+- *"The late game ramps too hard"* → lower `GROWTH.steep` and `GROWTH.steady`.
+- *"This one building is wrong"* → change its rung. That is the only per-building edit.
+
 ## Balance
 
 ```bash
@@ -283,8 +368,7 @@ Current numbers reach 10 of 12 techs in 6 simulated hours with no starvation.
   ratings — and the Hunter caste already butchers deer through it. What is missing is the
   loop around it: biomes to scout, prey populations that regenerate and deplete, choosing
   a target species, and the risk that a hunt costs drones.
-- Per-structure on/off toggles (the engine throttles globally instead).
-- A prestige layer, achievements, and queued construction.
+- A prestige layer, and achievements.
 
 ## Developer mode
 
