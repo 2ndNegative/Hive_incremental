@@ -53,6 +53,7 @@ import {
 import { FORAGE, poolFor } from './game/definitions/forage.js';
 import {
   AMOUNT, AMOUNT_ORDER, GROWTH, GROWTH_ORDER, amount, growthOf, nearestAmount,
+  build as buildCost, flat as flatCost,
 } from './game/definitions/costs.js';
 import {
   FOCUS_SHARE, focusStrength, isStarrable, isStarred, starsFor, setStar, toggleStar,
@@ -274,6 +275,8 @@ window.hive = {
     amount,
     growthOf,
     nearest: nearestAmount,
+    build: buildCost,
+    flat: flatCost,
   },
   structureCost: (id, n = 1) => structureCost(state, id, n),
   build: (id, n) => buildStructure(id, n),

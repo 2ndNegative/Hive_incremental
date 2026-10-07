@@ -800,6 +800,21 @@ textarea.save-box {
   flex-wrap: wrap;
 }
 
+/* Why a build cost is quoted in mineral mass rather than the element the
+   building is actually made of. */
+.cost-substituted {
+  display: block;
+  width: 100%;
+  font-size: 0.68rem;
+  color: var(--warn);
+}
+
+/* The line under the catalogue header that explains a nutrient match. */
+.codex-hint {
+  padding: 0 0.6rem 0.3rem;
+  font-size: 0.72rem;
+}
+
 .codex-search {
   flex: 1;
   min-width: 200px;

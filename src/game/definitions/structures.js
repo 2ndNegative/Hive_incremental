@@ -30,6 +30,13 @@
 //                one line in costs.js rather than thirteen judgement calls
 //                scattered through this file. Read the rules at the top of
 //                costs.js before adding one.
+//                NOTHING COSTS `ash`. Mineral mass is the bag the minerals are
+//                hiding in, not a material: a cost names the element the thing
+//                is actually made of, and payableCost charges it to the ash at
+//                fifty times the amount until the hive has assayed it. build()
+//                throws on `ash` rather than trusting this comment. Note the
+//                multiplier when choosing the rung — `tiny` iron is 500 g of
+//                mineral mass to a hive that cannot see iron yet.
 //                MOSTLY FIBRE, always. Fibre is the hive's building material:
 //                it is what the ground is actually made of (leaf litter is 68%
 //                fibre, wood 87%), it carries no energy worth burning, and
@@ -110,7 +117,7 @@ export const STRUCTURES = {
       'The first of it brings a body with somewhere to put things; every level after that widens ' +
       'what the hivemind can hold in flight at once — and costs a great deal to keep lit.',
     unlock: () => true,
-cost: build('steep', { fiber: 'large', protein: 'small', fat: 'slight' }),
+    cost: build('steep', { fiber: 'large', protein: 'small', fat: 'slight' }),
     cogitCapacity: 5,
 
     // THE HIVE'S ONLY STORAGE.
@@ -192,7 +199,7 @@ cost: build('steep', { fiber: 'large', protein: 'small', fat: 'slight' }),
       'A press of living cartilage. A larva goes in formless and comes out as something with a ' +
       'job. Switch a drone type on in the Drones tab and this is what makes it.',
     unlock: () => true,
-cost: build('steady', { fiber: 'large', protein: 'small', ash: 'slight' }),
+    cost: build('steady', { fiber: 'large', protein: 'small', iron: 'tiny' }),
     upkeepWatts: 25_000, // idling, with nothing it is allowed to make
     activeWatts: 100_000, // pressing
     molding: { seconds: 20 },
@@ -209,7 +216,7 @@ cost: build('steady', { fiber: 'large', protein: 'small', ash: 'slight' }),
     // Steeper than the storage buildings on purpose. Bandwidth is the ceiling
     // on the whole drone economy, so it should be bought a node at a time and
     // felt each time, not stacked twenty deep in one go.
-cost: build('steady', { fiber: 'large', protein: 'modest', fat: 'slight' }),
+    cost: build('steady', { fiber: 'large', protein: 'modest', fat: 'slight' }),
     cogitCapacity: 5,
     // THE RULE THAT MAKES DRONES WORTH HAVING. Five cogits holds five drones
     // coherent, and five foragers earn about 80 kW. A node has to cost a
@@ -228,7 +235,7 @@ cost: build('steady', { fiber: 'large', protein: 'modest', fat: 'slight' }),
       'and everything in general: when a dedicated store overflows, this is what catches it — and ' +
       'it is the first thing the hive empties again.',
     unlock: () => true,
-cost: build('steady', { fiber: 'medium', protein: 'slight', water: 'modest' }),
+    cost: build('steady', { fiber: 'medium', protein: 'slight', water: 'modest' }),
     generalStorage: 1_000, // grams, shared across every nutrient
   },
 
@@ -240,7 +247,7 @@ cost: build('steady', { fiber: 'medium', protein: 'slight', water: 'modest' }),
       'Dense packed amino acid, laid down in a shell the hive can break open again. Holds nothing ' +
       'but protein, and holds it far better than anything that holds everything.',
     unlock: () => true,
-cost: build('steady', { fiber: 'medium', protein: 'small', ash: 'tiny' }),
+    cost: build('steady', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
     storage: { protein: 200 },
   },
 
@@ -252,7 +259,7 @@ cost: build('steady', { fiber: 'medium', protein: 'small', ash: 'tiny' }),
       'A bead of rendered fat held in a skin of its own making. The densest thing the hive can ' +
       'keep, and the cheapest to keep it in — fat needs no water around it.',
     unlock: () => true,
-cost: build('steady', { fiber: 'medium', protein: 'small', fat: 'slight' }),
+    cost: build('steady', { fiber: 'medium', protein: 'small', fat: 'slight' }),
     storage: { fat: 200 },
   },
 
@@ -264,7 +271,7 @@ cost: build('steady', { fiber: 'medium', protein: 'small', fat: 'slight' }),
       'Sugar wound into a branched knot so it can be packed away and pulled back out in a hurry. ' +
       'What the brood eats comes out of here.',
     unlock: () => true,
-cost: build('steady', { fiber: 'medium', protein: 'small', carb: 'small' }),
+    cost: build('steady', { fiber: 'medium', protein: 'small', carb: 'small' }),
     storage: { carb: 200 },
   },
 
@@ -286,8 +293,27 @@ cost: build('steady', { fiber: 'medium', protein: 'small', carb: 'small' }),
     // Bigger than the 200 g granules on purpose, too. Fibre is spent in
     // four-hundred-gram lumps, so a two-hundred-gram shelf of it would not even
     // hold one building's worth.
-cost: build('steady', { fiber: 'medium', protein: 'small' }),
+    cost: build('steady', { fiber: 'medium', protein: 'small' }),
     storage: { fiber: 500 },
+  },
+
+  gizzard: {
+    id: 'gizzard',
+    name: 'Gizzard',
+    category: 'storage',
+    desc:
+      'A muscular grinding chamber packed with swallowed grit. Holds the mineral fraction and '
+      + 'nothing else — raw unsorted mass, exactly as it came out of the ground. Whatever the '
+      + 'hive has since learned to pick out of it is kept somewhere more careful.',
+    unlock: () => true,
+    cost: build('steady', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
+    // ASH ONLY, on purpose. `ash` is the unsorted mineral fraction; sodium,
+    // iron and the rest are their own nutrients the moment an assay resolves
+    // them, and they are not stored here. A hive that has assayed everything
+    // still fills a gizzard with grit — the assay changes what the hive can
+    // SEE in the mass, not where the mass sits. See the Mineral Vault for the
+    // other half of the job, which widens the assayed minerals instead.
+    storage: { ash: 1_000 },
   },
 
   cistern: {
@@ -299,7 +325,7 @@ cost: build('steady', { fiber: 'medium', protein: 'small' }),
       + 'mostly water and loses it constantly; without somewhere to keep a reserve, a dry spell '
       + 'is felt in everything the colony does within the hour.',
     unlock: () => true,
-cost: build('gentle', { fiber: 'medium', protein: 'small' }),
+    cost: build('gentle', { fiber: 'medium', protein: 'small' }),
     storage: { water: 10_000 },
     // Cheap to keep. It is a bag, not an organ.
     upkeepWatts: 5,
@@ -313,7 +339,7 @@ cost: build('gentle', { fiber: 'medium', protein: 'small' }),
       'A muscular holding sac for matter the hive has gathered but not yet broken down. Harvest ' +
       'beyond what it can hold spoils where it lies.',
     unlock: () => true,
-cost: build('gentle', { fiber: 'large', protein: 'modest' }),
+    cost: build('gentle', { fiber: 'large', protein: 'modest' }),
     itemStorage: 2_000,
   },
 
@@ -326,7 +352,7 @@ cost: build('gentle', { fiber: 'large', protein: 'modest' }),
       'can actually spend — the only thing in the hive that can. Without one, stored matter is ' +
       'just matter.',
     unlock: () => true,
-cost: build('gentle', { fiber: 'medium', protein: 'small', ash: 'slight' }),
+    cost: build('gentle', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
     metabolism: 10, // grams per second
   },
 
@@ -338,7 +364,7 @@ cost: build('gentle', { fiber: 'medium', protein: 'small', ash: 'slight' }),
       'A blind fermenting gut. Breaks whole harvest down into the nutrients it was made of — ' +
       'without one, everything gathered simply piles up in the larder and rots there.',
     unlock: () => true,
-cost: build('gentle', { fiber: 'large', protein: 'small', water: 'medium' }),
+    cost: build('gentle', { fiber: 'large', protein: 'small', water: 'medium' }),
     // Eighty grams a second, for nothing. Digestion is not a machine the hive
     // runs — it is a gut, and a gut works on what is in it. Charging watts for
     // it would make the opening unwinnable: a hive with no generator could not
@@ -359,7 +385,7 @@ cost: build('gentle', { fiber: 'large', protein: 'small', water: 'medium' }),
     name: 'Gut Sac',
     desc: 'Bulk storage lining. Expands every macronutrient reserve the hive holds.',
     unlock: () => true,
-cost: build('gentle', { protein: 'large' }),
+    cost: build('gentle', { protein: 'large' }),
     capMult: { bulk: 0.5 },
     upkeepWatts: 5,
   },
@@ -368,7 +394,7 @@ cost: build('gentle', { protein: 'large' }),
     name: 'Metabolic Core',
     desc: 'Oxidation chamber. Raises the ceiling on how fast the hive can burn mass for energy.',
     unlock: () => true,
-cost: build('steady', { protein: 'large', fat: 'medium' }),
+    cost: build('steady', { protein: 'large', fat: 'medium' }),
     throughput: 5000,
     upkeepWatts: 0,
   },
@@ -377,7 +403,7 @@ cost: build('steady', { protein: 'large', fat: 'medium' }),
     name: 'Assay Chamber',
     desc: 'Dedicated analysis tissue. Banks more insight and makes every analyst sharper.',
     unlock: () => true,
-cost: build('steady', { protein: 'heavy', ash: 'modest' }),
+    cost: build('steady', { protein: 'heavy', iron: 'tiny' }),
     insightCap: 600,
     mult: { analyst: 0.2 },
     upkeepWatts: 40,
@@ -387,7 +413,7 @@ cost: build('steady', { protein: 'heavy', ash: 'modest' }),
     name: 'Mineral Vault',
     desc: 'Sequestration cells for inorganic elements. Without these, assayed minerals spill as fast as they arrive.',
     unlock: (state) => state.tech.bulkMineralAssay,
-cost: build('steady', { protein: 'heavy', ash: 'large' }),
+    cost: build('steady', { protein: 'heavy', iron: 'slight' }),
     capMult: { mineral: 1.0 },
     upkeepWatts: 25,
   },
@@ -396,7 +422,7 @@ cost: build('steady', { protein: 'heavy', ash: 'large' }),
     name: 'Vitamin Lattice',
     desc: 'Stabilised organic scaffolding. Vitamins degrade in open storage; this is what stops them.',
     unlock: (state) => state.tech.lipidAssay,
-cost: build('steady', { protein: 'heavy', fat: 'large' }),
+    cost: build('steady', { protein: 'heavy', fat: 'large' }),
     capMult: { vitamin: 1.0 },
     upkeepWatts: 60,
   },
@@ -405,7 +431,7 @@ cost: build('steady', { protein: 'heavy', fat: 'large' }),
     name: 'Bore Shaft',
     desc: 'A worked opening into the substrate. Each one supports an excavator at the face.',
     unlock: (state) => state.tech.lithovory,
-cost: build('gentle', { protein: 'heavy', ash: 'large' }),
+    cost: build('gentle', { protein: 'heavy', iron: 'slight' }),
     slots: { excavator: 1 },
     upkeepWatts: 20,
   },
@@ -414,7 +440,7 @@ cost: build('gentle', { protein: 'heavy', ash: 'large' }),
     name: 'Ambush Burrow',
     desc: 'A concealed approach onto a game trail. Each one supports one hunter in the field.',
     unlock: (state) => state.tech.predation,
-cost: build('steady', { protein: 'massive', fat: 'large' }),
+    cost: build('steady', { protein: 'massive', fat: 'large' }),
     slots: { hunter: 1 },
     mult: { hunter: 0.1 },
     upkeepWatts: 35,
@@ -478,6 +504,7 @@ export const STRUCTURE_ORDER = [
   'lipidDroplet',
   'glycogenGranule',
   'celluloseBale',
+  'gizzard',
   'cistern',
   'crop',
   'vacuole',

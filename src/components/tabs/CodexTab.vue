@@ -3,7 +3,10 @@ import { computed } from 'vue';
 import { state, derived } from '../../game/useGame.js';
 import { ITEMS, ITEM_IDS, CATEGORIES, itemJoulesPerGram } from '../../game/definitions/items/index.js';
 import { ORGANISMS, ORGANISM_IDS, butcherYield } from '../../game/definitions/organisms.js';
-import { NUTRIENTS, MACROS, MICROS, isRevealed } from '../../game/definitions/nutrients.js';
+import {
+  NUTRIENTS, NUTRIENT_IDS, MACROS, MICROS, isRevealed,
+} from '../../game/definitions/nutrients.js';
+import { isNamed } from '../../game/discovery.js';
 import { formatMass, formatEnergy } from '../../game/units.js';
 import { FORAGE, GATHER_TYPES } from '../../game/definitions/forage.js';
 import { BIOMES } from '../../game/definitions/biomes.js';
@@ -15,26 +18,73 @@ const SORTS = {
   fat: (a, b) => (ITEMS[b].per100g.fat || 0) - (ITEMS[a].per100g.fat || 0),
 };
 
+/**
+ * WHAT THE HIVE HAS ACTUALLY MET.
+ *
+ * The codex is a record of what this colony has found, not a catalogue of
+ * everything that exists. An item appears the first time it turns up anywhere —
+ * the same moment it stops reading as ??? on the Territory tab — and until then
+ * the hive has no word for it and nothing to file. That is the whole reason
+ * discovery exists; a codex that listed all two hundred from the first tick
+ * would hand the player the answer to a question the game is asking.
+ */
+const known = computed(() => ITEM_IDS.filter((id) => isNamed(state, id)));
+
 const categories = computed(() => {
-  const present = new Set(ITEM_IDS.map((id) => ITEMS[id].category));
+  const present = new Set(known.value.map((id) => ITEMS[id].category));
   return ['all', ...Object.keys(CATEGORIES).filter((c) => present.has(c))];
 });
 
+/**
+ * Nutrients the search can match on: every macro, and every micro whose assay
+ * is done. Searching "iron" before the Trace Metal Assay finds nothing, which
+ * is correct — the hive cannot pick iron out of the mineral mass yet, so it has
+ * no way to know which of its finds carry it.
+ */
+const searchableNutrients = computed(() =>
+  NUTRIENT_IDS.filter((n) => isRevealed(state, n)).map((n) => ({
+    id: n,
+    name: NUTRIENTS[n].name.toLowerCase(),
+  })),
+);
+
 const results = computed(() => {
   const q = state.ui.codexSearch.trim().toLowerCase();
-  return ITEM_IDS.filter((id) => {
+  // Which nutrients the query names. "fat" matches the macro; "ethanol" matches
+  // the one nutrient; "vitamin" matches the lot of them.
+  const wanted = q ? searchableNutrients.value.filter((n) => n.name.includes(q)) : [];
+  return known.value.filter((id) => {
     const item = ITEMS[id];
     if (state.ui.codexCategory !== 'all' && item.category !== state.ui.codexCategory) return false;
     if (!q) return true;
     return (
-      item.name.toLowerCase().includes(q) ||
-      item.category.includes(q) ||
-      item.tags.some((t) => t.includes(q))
+      item.name.toLowerCase().includes(q)
+      || item.category.includes(q)
+      || item.tags.some((t) => t.includes(q))
+      // By what is IN it: searching a nutrient lists everything that carries
+      // any of it, which is the question a player actually has — "where do I
+      // get ethanol" rather than "what is ethanol".
+      || wanted.some((n) => (item.per100g[n.id] || 0) > 0)
     );
   }).sort(SORTS[state.ui.codexSort] ?? SORTS.name);
 });
 
-const selected = computed(() => (state.ui.selectedItem ? ITEMS[state.ui.selectedItem] : null));
+/** Which nutrients the current query matched, so the list can say so. */
+const matchedNutrients = computed(() => {
+  const q = state.ui.codexSearch.trim().toLowerCase();
+  if (!q) return [];
+  return searchableNutrients.value
+    .filter((n) => n.name.includes(q))
+    .map((n) => NUTRIENTS[n.id].name);
+});
+
+// A save can carry a selection the hive no longer has a name for — a wipe, or a
+// run that reset discovery — so the detail pane checks rather than trusting it.
+const selected = computed(() => {
+  const id = state.ui.selectedItem;
+  if (!id || !ITEMS[id] || !isNamed(state, id)) return null;
+  return ITEMS[id];
+});
 
 /** Macro rows always show. Micro rows appear only once their assay is done. */
 const composition = computed(() => {
@@ -97,7 +147,7 @@ const CONFIDENCE_LABEL = {
       <input
         class="codex-search"
         type="search"
-        placeholder="Search 184 items by name, category or tag…"
+        placeholder="Search by name, category, tag or what is in it…"
         v-model="state.ui.codexSearch"
       />
       <select class="fuel-select" v-model="state.ui.codexCategory">
@@ -117,8 +167,17 @@ const CONFIDENCE_LABEL = {
       <div class="panel-box codex-list">
         <div class="panel-head">
           <span>Catalogue</span>
-          <span class="muted">{{ results.length }}</span>
+          <span class="muted">
+            <template v-if="results.length === known.length">{{ known.length }} known</template>
+            <template v-else>{{ results.length }} of {{ known.length }}</template>
+          </span>
         </div>
+        <!-- When the query named a nutrient, say so: otherwise a search for
+             "ethanol" returning nine things with no ethanol in their NAME looks
+             like the filter is broken. -->
+        <p v-if="matchedNutrients.length" class="muted codex-hint">
+          …and anything containing {{ matchedNutrients.join(', ').toLowerCase() }}.
+        </p>
         <div class="panel-body tight">
           <button
             v-for="id in results"
@@ -130,7 +189,15 @@ const CONFIDENCE_LABEL = {
             <span class="codex-row-name">{{ ITEMS[id].name }}</span>
             <span class="muted num">{{ formatEnergy(itemJoulesPerGram(ITEMS[id]) * 1000) }}/kg</span>
           </button>
-          <p v-if="!results.length" class="muted" style="padding: 0.6rem">Nothing matches.</p>
+          <!-- Two different emptinesses, and conflating them is how a new
+               player concludes the tab is broken. -->
+          <p v-if="!known.length" class="muted" style="padding: 0.6rem">
+            The hive has not met anything yet. Send drones out, or press Consume biomass — a
+            thing is named here the first time it turns up anywhere.
+          </p>
+          <p v-else-if="!results.length" class="muted" style="padding: 0.6rem">
+            Nothing the hive knows matches that. It has met {{ known.length }} things so far.
+          </p>
         </div>
       </div>
 

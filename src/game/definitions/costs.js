@@ -46,7 +46,31 @@
  *
  * 4. THE GROWTH CURVE MATTERS MORE THAN THE RUNG. Read the note on GROWTH.
  *
- * 5. WHEN A NUMBER REALLY IS BESPOKE, WRITE IT.
+ * 5. NOTHING EVER COSTS MINERAL MASS. It costs a NAMED MINERAL.
+ *
+ *    `ash` is not a resource, it is the bag the minerals are hiding in — the
+ *    undifferentiated fraction the hive has not learned to sort yet. Pricing a
+ *    building in ash says the hive needs "some mineral, any mineral", which is
+ *    true of nothing that is actually built: a generator needs iron because
+ *    iron carries oxygen, a shell needs calcium because calcium is what shells
+ *    are. So a cost names the element, whether the hive can see it yet or not.
+ *
+ *    It is not a lost mechanic. An unassayed mineral is charged to its parent
+ *    at LOCKED_COST_MULTIPLIER — see payableCost in nutrients.js — so a young
+ *    hive still pays in mineral mass, at a bad rate, and the assay that makes
+ *    the element visible is also the thing that stops it overpaying. The cost
+ *    ALWAYS told the truth about what the building is made of; what changes is
+ *    whether the hive can pick that out of the pile.
+ *
+ *    MIND THE MULTIPLIER WHEN PICKING THE RUNG. At 50×, `tiny` iron is 500 g of
+ *    mineral mass before the assay lands, and `trace` is 100 g. The rung you
+ *    write is the price AFTER the assay; the price before it is fifty times
+ *    larger, and that is the number an early hive actually pays.
+ *
+ *    build() and flat() refuse `ash` outright rather than leaving this to
+ *    whoever reads the comment.
+ *
+ * 6. WHEN A NUMBER REALLY IS BESPOKE, WRITE IT.
  *
  *    `build()` takes a raw number as well as a rung name. Use it for something
  *    that genuinely has to be an odd amount — and expect to justify it in a
@@ -174,6 +198,7 @@ export function build(curve, parts) {
   const growth = growthOf(curve);
   const base = {};
   for (const [resource, size] of Object.entries(parts)) {
+    refuseUnsorted(resource);
     base[resource] = amount(size);
   }
   const entries = Object.entries(base);
@@ -193,8 +218,32 @@ export function build(curve, parts) {
  */
 export function flat(parts) {
   const out = {};
-  for (const [resource, size] of Object.entries(parts)) out[resource] = amount(size);
+  for (const [resource, size] of Object.entries(parts)) {
+    refuseUnsorted(resource);
+    out[resource] = amount(size);
+  }
   return out;
+}
+
+/**
+ * Rule 5, enforced rather than documented.
+ *
+ * Thrown at module load, so a cost priced in mineral mass is a game that does
+ * not start — which is the right loudness for a rule that is otherwise very
+ * easy to break by accident, because `ash` looks exactly like a resource in
+ * every list it appears in.
+ *
+ * STORAGE is a different question and is not touched here: the Gizzard holds a
+ * kilo of ash precisely because ash is what unsorted mineral mass IS. The rule
+ * is about what a thing is made of, not about what a shelf can hold.
+ */
+function refuseUnsorted(resource) {
+  if (resource !== 'ash') return;
+  throw new Error(
+    'Nothing costs mineral mass. Name the element the thing is actually made of — '
+    + 'iron, calcium, phosphorus — and let payableCost charge it to the ash until '
+    + 'the hive has assayed it. See rule 5 in definitions/costs.js.',
+  );
 }
 
 /**

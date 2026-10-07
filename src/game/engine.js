@@ -1658,8 +1658,18 @@ export function structureCost(state, id, count = 1) {
       total[n] = (total[n] || 0) + amount;
     }
   }
-  for (const n of Object.keys(total)) total[n] = Math.ceil(total[n]);
-  return total;
+  // THROUGH payableCost, like a drone's mold cost and a claim already were.
+  // A building names the element it is made of whether the hive can see that
+  // element yet or not — see rule 5 in definitions/costs.js — so without this
+  // a Metabolic Generator priced in iron is simply unbuildable until the Trace
+  // Metal Assay, which is not a gate anybody designed. The substitution is
+  // linear, so charging the total is the same as charging each unit.
+  const payable = payableCost(state, total);
+  // Ceil IN PLACE: payableCost marks the object with a non-enumerable flag that
+  // the interface reads to say "paid in mineral mass", and rebuilding the
+  // object here would quietly drop it.
+  for (const n of Object.keys(payable)) payable[n] = Math.ceil(payable[n]);
+  return payable;
 }
 
 /**
@@ -1682,7 +1692,10 @@ export function affordableCount(state, id, max = 1000) {
   // A levelled structure cannot go past its cap, so "max" means "up to the cap".
   const ceiling = Math.min(max, maxLevelOf(id) - owned);
   while (count < ceiling) {
-    const next = STRUCTURES[id].cost(owned + count);
+    // Payable, not raw — otherwise "max" would refuse to count anything priced
+    // in a mineral the hive has not assayed, while the Build button next to it
+    // happily grows one.
+    const next = payableCost(state, STRUCTURES[id].cost(owned + count));
     const ok = Object.entries(next).every(([n, amount]) => {
       if (!isRevealed(state, n)) return false;
       return (state.nutrients[n] || 0) - (spent[n] || 0) >= amount;

@@ -333,7 +333,22 @@ is a real decision, `brutal` for a thing that should hurt to repeat (nothing use
 4. **The ladder generalises the amount and nothing else.** Which resources a building costs
    is a design decision about that building and is spelled out in full in its own
    definition. A Cistern costs water because a cistern holds water.
-5. **When a number really is bespoke, write it.** `build()` and `flat()` both take a raw
+5. **Nothing ever costs mineral mass — it costs a named mineral.** `ash` is not a resource,
+   it is the bag the minerals are hiding in. Pricing a building in ash says the hive needs
+   *some mineral, any mineral*, which is true of nothing that is actually built: a
+   generator needs iron because iron carries oxygen. So a cost names the element, assayed
+   or not, and `build()` and `flat()` throw on `ash` rather than leaving it to whoever reads
+   this.
+
+   Nothing is lost by it. An unassayed mineral is charged to its parent at
+   `LOCKED_COST_MULTIPLIER` (50×), so a young hive still pays in mineral mass, at a bad
+   rate, and the assay that makes the element visible is also what stops it overpaying.
+
+   **Mind the multiplier when picking the rung.** `tiny` iron is 10 g after the assay and
+   **500 g of mineral mass** before it. The rung is the post-assay price; an early hive pays
+   fifty times that. Storage is a different question — the Gizzard holds ash precisely
+   because ash is what unsorted mineral mass *is*.
+6. **When a number really is bespoke, write it.** `build()` and `flat()` both take a raw
    number as well as a rung name — and expect to justify it in a comment, because the next
    person rebalancing the ladder will not see it.
 
@@ -344,6 +359,9 @@ is a real decision, `brutal` for a thing that should hurt to repeat (nothing use
   it down a rung, or change what fibre is worth elsewhere in the economy.
 - *"The late game ramps too hard"* → lower `GROWTH.steep` and `GROWTH.steady`.
 - *"This one building is wrong"* → change its rung. That is the only per-building edit.
+- *"Minerals bite too hard before the assay"* → that is `LOCKED_COST_MULTIPLIER` in
+  `definitions/nutrients.js`, not the ladder. At 50× it is the dominant term in any mineral
+  cost an unassayed hive pays.
 
 ## Balance
 

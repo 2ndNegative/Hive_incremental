@@ -1,11 +1,22 @@
 <script setup>
 import { computed } from 'vue';
 import { state } from '../game/useGame.js';
-import { NUTRIENTS, isRevealed } from '../game/definitions/nutrients.js';
+import { NUTRIENTS, isRevealed, costWasSubstituted } from '../game/definitions/nutrients.js';
 import { formatMass } from '../game/units.js';
 import { formatNumber } from '../game/format.js';
 
 const props = defineProps({ cost: { type: Object, required: true } });
+
+/**
+ * Whether anything in this price is actually standing in for something else.
+ *
+ * A building names the element it is made of whether the hive can see that
+ * element or not, so an early hive is charged fifty times the amount in the
+ * parent macro — see payableCost. Without saying so, a Metabolic Generator
+ * reads as wanting half a kilo of mineral mass for no reason anybody can see,
+ * and the assay that fixes it looks like an unrelated piece of research.
+ */
+const substituted = computed(() => costWasSubstituted(props.cost));
 
 const entries = computed(() =>
   Object.entries(props.cost).map(([n, amount]) => {
@@ -38,6 +49,9 @@ const entries = computed(() =>
       :class="entry.unknown ? 'cost-unknown' : entry.short ? 'cost-short' : 'cost-ok'"
     >
       {{ entry.unknown ? 'unresolved compound' : entry.text }}
+    </span>
+    <span v-if="substituted" class="cost-substituted">
+      unassayed — paid in bulk until the element can be told apart
     </span>
   </div>
 </template>
