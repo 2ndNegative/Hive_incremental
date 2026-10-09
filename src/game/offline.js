@@ -18,7 +18,7 @@ import { reactive } from 'vue';
 import { tick } from './engine.js';
 import { NUTRIENT_IDS } from './definitions/nutrients.js';
 import { pushLog } from './state.js';
-import { logOfflineGain } from './actions.js';
+import { logOfflineGain, advanceResearchQueue } from './actions.js';
 import { formatDuration } from './format.js';
 
 /** Enough resolution to feel honest, few enough ticks to stay responsive. */
@@ -88,6 +88,11 @@ export function runOfflineCatchup(state, seconds) {
       while (ticks < TICKS_PER_CHUNK && offline.done < offline.total) {
         const dt = Math.min(offline.stepSeconds, offline.total - offline.done);
         tick(state, dt);
+        // Inside the loop, not after it: a tech bought at hour three changes
+        // what the next five hours generate. Draining only at the end would
+        // simulate an eight-hour absence in which the hive banked insight and
+        // deliberately declined to use it.
+        advanceResearchQueue();
         offline.done += dt;
         ticks += 1;
       }

@@ -773,6 +773,28 @@ a:hover {
   font-size: 0.76rem;
 }
 
+/*
+ * A row whose help is a line of its own.
+ *
+ * `.field-help` is an inline span, and Vue's template compiler drops the
+ * whitespace-only text node between two elements on separate lines — so a label
+ * ending in a value and a help text starting with one came out as
+ * "Forager ×1010 on the ground". Opting a row into a stacked help is both the
+ * fix and the better layout for a help text longer than a few words.
+ */
+.stacked-help .field-help {
+  display: block;
+  margin-top: 0.1rem;
+  line-height: 1.35;
+}
+
+/* An explicit separator, because the space around one cannot be written as
+ * whitespace in a template for the reason above. */
+.sep {
+  margin: 0 0.3em;
+  color: var(--muted);
+}
+
 textarea.save-box {
   width: 100%;
   min-height: 90px;
@@ -1315,6 +1337,14 @@ textarea.save-box {
   visibility: visible;
 }
 
+/* Set by the delegated measurer in game/tips.js when there is no room below.
+   Not a hover state and not guessable from CSS alone: it depends on where the
+   element happens to be in a window the player can resize. */
+.tip.tip-above > .tip-body {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
 .tip.tip-right > .tip-body {
   left: auto;
   right: 0;
@@ -1643,6 +1673,39 @@ textarea.save-box {
   text-align: right;
 }
 
+/*
+ * The three figures that decide whether to buy ground, as figures.
+ *
+ * They were a sentence — "Ground carries 14 foraging drones at 2.5 m² each, and
+ * is worked in 12 patches" — which is accurate and which nobody reads twice. A
+ * number a player checks every few minutes should be findable without parsing a
+ * clause, and the sentence stays underneath to say what the numbers mean.
+ */
+.land-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.6rem;
+}
+
+.land-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.land-stat-num {
+  font-size: 1.05rem;
+  line-height: 1.1;
+  color: var(--text-strong);
+}
+
+.land-stat-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
 .offer-head {
   display: flex;
   justify-content: space-between;
@@ -1650,6 +1713,13 @@ textarea.save-box {
   padding: 0.3rem 0.6rem 0.15rem;
   font-size: 0.8rem;
   color: var(--text-strong);
+}
+
+/* A biome's dot inline in a group header, rather than in the legend grid. */
+.offer-head .terr-key-dot {
+  display: inline-block;
+  margin-right: 0.3rem;
+  vertical-align: baseline;
 }
 
 .offer-empty {
@@ -1862,6 +1932,16 @@ textarea.save-box {
   padding: 0.2rem 0 0;
 }
 
+
+/* The "line it up" button beside a card. Deleted once as dead when the Hive
+   tab's queue moved onto the card itself; live again for the research queue,
+   where buying now and queuing are genuinely different actions. */
+.queue-btn {
+  width: auto;
+  height: auto;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.74rem;
+}
 
 .queue-mine {
   font-size: 0.72rem;

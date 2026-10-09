@@ -137,12 +137,24 @@ function formatReserve(seconds) {
           ({{ Math.floor(derived.energy.ratio * 100) }}%)
         </div>
       </div>
+      <!-- This tile used to say "Metabolic ceiling" and show what the generators
+           had just made, which is a different thing wearing the name of a
+           mechanic that was never wired up. See the comment on `fromPool` in
+           engine.js. -->
       <div class="stat-tile">
-        <div class="label">Metabolic ceiling</div>
+        <div class="label">Generated</div>
         <div class="value" :class="derived.energy.throughputRatio < 0.999 ? 'warn' : ''">
-          {{ formatPower(derived.energy.throughput) }}
+          {{ formatPower(derived.energy.generated) }}
         </div>
-        <div class="muted" style="font-size: 0.72rem">how fast mass can be oxidised</div>
+        <div class="muted" style="font-size: 0.72rem">
+          <template v-if="derived.energy.fromPool > 1">
+            {{ formatPower(derived.energy.fromPool) }} more is coming out of the reserve
+          </template>
+          <template v-else-if="derived.energy.fromPool < -1">
+            banking {{ formatPower(-derived.energy.fromPool) }}
+          </template>
+          <template v-else>what the generators are making</template>
+        </div>
       </div>
       <div class="stat-tile">
         <div class="label">Reserve</div>

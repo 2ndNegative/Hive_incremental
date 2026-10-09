@@ -59,6 +59,8 @@ const ORDER = [
   'codex', 'cost', 'insight', 'economy', 'power', 'scaffold', 'buildtime',
   'modifier',
   'storagewall',
+  'landvalue',
+  'ui',
 ];
 
 const files = readdirSync(HERE)

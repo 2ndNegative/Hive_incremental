@@ -242,7 +242,11 @@ const terr = await p.evaluate(() => {
   return row?.innerText || '';
 });
 check('Territory shows the Foragers out on the land', /Forager\s*×4/.test(terr), terr.replace(/\n/g, ' | '));
-check('and what this trip is worth', /each this trip|nothing of this kind/.test(terr));
+// The crew row carries the trip weight now. It used to be stamped on every
+// patch row instead, alongside a drones-per-patch figure that was the same on
+// all of them — see TerritoryTab's `crews`.
+check('and what a trip is worth', /carrying about [\d.]+\s*g back every \d+s/.test(terr),
+  terr.replace(/\n/g, ' | '));
 
 /* ===================================================== 7. a save round-trips */
 

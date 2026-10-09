@@ -248,6 +248,94 @@ export function abandonBuild() {
   return cancelBuild(state, pushLog);
 }
 
+/* ---------------------------------------------------------- research queue */
+
+/**
+ * THE RESEARCH QUEUE.
+ *
+ * Insight accumulates whether anybody is watching or not, so without a queue
+ * the player's job between techs is to come back and press a button at the
+ * right moment — which is not a decision, it is an alarm clock.
+ *
+ * UNCAPPED. The build queue is capped because a build spends mass the instant
+ * it starts, so holding five in mind is a real commitment; research spends
+ * insight the hive was going to bank regardless, and lining up the whole
+ * available tree costs nothing and promises nothing. The only limit is what is
+ * ACTUALLY AVAILABLE — a tech whose prerequisites are unmet cannot be queued,
+ * because the order it would then be bought in depends on a tree the player
+ * cannot see from here.
+ *
+ * STRICTLY IN ORDER, head first, for the same reason the build queue is: a
+ * queue that skipped an expensive head to buy the cheap thing behind it would
+ * invert the player's priorities at exactly the moment the order matters.
+ */
+export function queueResearch(id) {
+  const def = RESEARCH[id];
+  if (!def || state.tech[id]) return false;
+  if (!RESEARCH_ORDER.includes(id)) return false;
+  if (!def.requires.every((req) => state.tech[req])) return false;
+  state.researchQueue ??= [];
+  if (state.researchQueue.includes(id)) return false;
+  state.researchQueue.push(id);
+  return true;
+}
+
+export function unqueueResearch(index) {
+  const q = state.researchQueue;
+  if (!Array.isArray(q) || index < 0 || index >= q.length) return false;
+  q.splice(index, 1);
+  return true;
+}
+
+/** Move one entry up or down. The order is the whole point of it. */
+export function moveResearch(index, delta) {
+  const q = state.researchQueue;
+  if (!Array.isArray(q)) return false;
+  const to = index + delta;
+  if (!q[index] || to < 0 || to >= q.length) return false;
+  const [entry] = q.splice(index, 1);
+  q.splice(to, 0, entry);
+  return true;
+}
+
+export function clearResearchQueue() {
+  const n = (state.researchQueue || []).length;
+  state.researchQueue = [];
+  return n;
+}
+
+/**
+ * Buy what can be bought off the head of the queue.
+ *
+ * Called from the game loop and from the offline catch-up, which is two places
+ * and deliberately not inside `tick()`: tick lives in engine.js, `research()`
+ * lives here, and actions.js already imports the engine — so the engine calling
+ * back into it would be this codebase's first import cycle, with two
+ * throw-on-load validation loops in the graph. The two call sites are both
+ * "drive the game forward" sites and both pass through here, so there is no
+ * second copy of the rule, only a second invocation of it.
+ *
+ * Loops, because finishing one tech can make the next affordable in the same
+ * instant — an assay that reveals a stockpile, or a catch-up step that banked
+ * hours of insight at once.
+ */
+export function advanceResearchQueue() {
+  const q = state.researchQueue;
+  if (!Array.isArray(q) || !q.length) return 0;
+  let bought = 0;
+  for (let guard = q.length + 1; guard > 0 && q.length; guard -= 1) {
+    const id = q[0];
+    // Already known, or no longer legal: drop it rather than letting it sit at
+    // the head blocking everything behind it forever.
+    if (state.tech[id] || !RESEARCH_ORDER.includes(id)) { q.shift(); continue; }
+    if (!RESEARCH[id]?.requires.every((req) => state.tech[req])) { q.shift(); continue; }
+    if (!research(id)) break; // cannot pay for it yet; it keeps its place
+    q.shift();
+    bought += 1;
+  }
+  return bought;
+}
+
 /* ------------------------------------------------------------- build queue */
 
 /**

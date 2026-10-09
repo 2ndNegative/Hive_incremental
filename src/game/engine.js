@@ -78,7 +78,9 @@ import {
 import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import { ORGANISMS } from './definitions/organisms.js';
-import { BIOMES, totalArea, landCapacity, patchCount, aridity } from './definitions/biomes.js';
+import {
+  BIOMES, totalArea, landCapacity, patchCount, aridity, MAX_PATCHES,
+} from './definitions/biomes.js';
 import { BASE_COGIT_CAPACITY, COGIT_PER_DRONE } from './definitions/cognition.js';
 import {
   DRONE_TYPES,
@@ -97,6 +99,25 @@ const MAX_CATCHUP_SECONDS = 5;
 // No cap on absence: see offline.js, which scales the step size instead so the
 // work stays bounded however long the player has been away.
 
+/**
+ * THE METABOLIC CEILING, WHICH IS NOT WIRED UP. Read this before using it.
+ *
+ * `computeCaps` adds up a real ceiling — this base plus every standing
+ * structure's `throughput` — and NOTHING CAPS GENERATION WITH IT. The number is
+ * computed and discarded, and `derived.energy` used to export generation under
+ * the name `throughput`, so two screens showed what the generators had just
+ * made and called it the ceiling.
+ *
+ * It is vestigial from the pre-rebuild economy, where generation was measured in
+ * single kilowatts. No live structure declares `throughput` at all; only the
+ * parked Metabolic Core does. At 2 kW against a hive generating 648 kW, making
+ * it bind today would stop the game dead — so the honest thing was to say so
+ * here rather than to implement a cap nobody designed.
+ *
+ * To revive it: give the Metabolic Generator a `throughput`, pick a base that
+ * means something at the current scale, and clamp `generatedWatts` to it. That
+ * is a balance decision, not a bug fix.
+ */
 const BASE_THROUGHPUT_WATTS = 2_000;
 /**
  * The gut the hive lands with: NONE.
@@ -923,7 +944,7 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   const priority = powerPriority();
   const mod = computeModifiers(state, charges);
   const efficiency = computeEfficiency(state);
-  const { caps, capsMax, storage, capMult, droneCap, insightCap, throughput, digestion, itemCap } =
+  const { caps, capsMax, storage, capMult, droneCap, insightCap, digestion, itemCap } =
     computeCaps(state, charges, mod);
   const slots = computeSlots(state, charges);
   const cognition = computeCognition(state, charges);
@@ -1468,6 +1489,12 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   const droneForage = {};
   let roomLeft = capacity;
 
+  // Hoisted, not called per patch: ONE reader per channel is modifiers.js rule
+  // 4, and the territory preview needs the same number to tell the player what
+  // claiming would be worth. Two `factor()` calls would be two readers that
+  // have to be kept in step by hand.
+  const harvest = factor(mod, 'harvest');
+
   for (const typeId of foragingTypes()) {
     const count = state.droneTypes?.[typeId] || 0;
     if (!count) continue;
@@ -1491,7 +1518,7 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
       const live = i < open;
       const grams = patch.grams || 0;
       const perSecond = live
-        ? ((grams * perPatch * vigour) / FORAGE_CYCLE) * factor(mod, 'harvest')
+        ? ((grams * perPatch * vigour) / FORAGE_CYCLE) * harvest
         : 0;
       const biome = patch.biomeId ? BIOMES[patch.biomeId] : null;
       patches.push({
@@ -1734,11 +1761,19 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
       demand: totalDemand,
       delivered: deliveredWatts,
       ratio: energyRatio,
-      // What the generators are making, and what they could make if the stores
-      // could keep up with them.
+      // What the generators are making. `delivered` can exceed this, and that
+      // is not a bug: the hive spends out of the banked pool as well, so a
+      // colony drawing 685 kW while making 648 kW is running 37 kW out of its
+      // savings and will fall into deficit the moment they run out.
+      //
+      // That number is the most important one on the screen and nothing used to
+      // show it, so the chip said "Ceiling 648 kW" next to "Delivered 685 kW"
+      // and looked like broken arithmetic. See `fromPool` below.
       generated: generatedWatts,
       massRate,
-      throughput: generatedWatts,
+      // Positive: this much of what was delivered came out of the bank rather
+      // than out of a generator. Negative: the bank is filling.
+      fromPool: deliveredWatts - generatedWatts,
       throughputRatio,
       // Usable energy banked, after this step's generation and draw.
       pool: poolAfter,
@@ -1805,6 +1840,13 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
       working: Object.values(droneForage).reduce((a, f) => a + f.working, 0),
       landless: Object.values(droneForage).reduce((a, f) => a + f.landless, 0),
       full: capacity > 0 && roomLeft <= EPSILON,
+      // Passed out so landvalue.js can run the same sum on hypothetical ground
+      // without reaching into the modifier layer for a second read of a channel
+      // that is only allowed one.
+      harvest,
+      // Ground the hive could still put a patch on. Zero at MAX_PATCHES, which
+      // is the point at which "more land is more places" stops being true.
+      patchHeadroom: MAX_PATCHES - patchesAvailable,
     },
     droneForage,
     // What is out past the edge of the map, and how far through it is.

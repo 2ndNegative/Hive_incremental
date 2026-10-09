@@ -430,6 +430,69 @@ caught that: given a bonus on a channel, **does the number it names actually mov
 channel, one at a time, against the figure its `applied` field points at. It is deliberately
 not a unit test of `factor()`; `factor()` was never the part that broke.
 
+## What ground is worth
+
+Territory used to be the one purchase the game would not price. The tab said how big a patch
+was and what it cost in nutrients; what it would *do* was left to the player to find out by
+buying it and watching the intake for an hour. `src/game/landvalue.js` answers that question
+before the money changes hands, and the answer turned out to be less flattering — and more
+useful — than expected.
+
+### The patches cancel
+
+Work the engine's forage sum through symbolically. Per drone type, `computeDerived` has:
+
+```
+open     = min(patches, floor(working))
+perPatch = working / open
+rate     = Σ over the `open` live patches of  grams × perPatch × vigour / FORAGE_CYCLE
+```
+
+Every live patch draws from the same distribution, so in expectation each carries the same
+grams — and `open × perPatch` is just `working` again. The whole thing collapses to:
+
+```
+rate = working × P(a trip finds anything) × mean load × vigour / FORAGE_CYCLE × harvest
+```
+
+**The patch count is not in it.** Twelve patches bring in twelve things at a twelfth the rate
+each instead of one thing in a lump; the mass is identical. Patches are *variance*, and
+variance is worth real money downstream — a narrow intake overflows one item's shelf while
+the gut idles — but it is not intake, and a preview that implied otherwise would be lying to
+the player about the thing they were paying for.
+
+That leaves exactly two honest things to say about a patch of ground:
+
+1. **How many more foragers it will carry**, and therefore whether it adds any intake *at
+   all* today. Land is a ceiling on drones, not a multiplier on them. A hive whose every
+   forager is already on ground gains nothing this minute by buying more — it buys headroom.
+   That was invisible, and it is the whole decision: claim now, or hatch first.
+2. **What it changes about what comes in.** A biome's share of every roll is its area over
+   the total, so a strange biome rewrites the mix and more of a familiar one barely moves it.
+   This is where unfamiliar ground earns a price that familiar ground does not.
+
+The claim dialog says both, and when the first one is zero it says so in a warning box rather
+than printing `+0.0 g/s` and hoping nobody reads it.
+
+### It is checked against the game, not against itself
+
+`tests/landvalue-test.mjs` sets up a hive, takes the estimate, then runs **twenty thousand
+ticks** of the real engine and averages its instantaneous forage rate. The two agree to
+within half a percent. Nothing else in the suites would have caught the cancellation being
+wrong, because every other figure on the tab comes out of the engine and would have been
+wrong in the same direction.
+
+It also checks that the preview never names a find the hive has not discovered. The offerings
+panel is careful about this and the preview has to be too, or claiming ground becomes a way
+to read the forage table for free.
+
+### One reader, still
+
+`harvest` is lifted out of the patch loop in `computeDerived` and published on `derived.land`,
+rather than being read a second time from the modifier layer. See the modifier layer's rule
+4: two `factor()` calls on one channel are two readers that have to be kept in step by hand,
+which is precisely the bug the brood rate had.
+
 ## Storage, and the wall underneath it
 
 A building you cannot save up for is a building you can never build. If the cost of the next
@@ -858,13 +921,13 @@ One run is one sample. Before reading any of this as a result, sweep a few seeds
 
 ## The test suites
 
-32 of them in `tests/`, each a standalone script that opens a real browser, drives the real
+35 of them in `tests/`, each a standalone script that opens a real browser, drives the real
 game and prints `PASS`/`FAIL` lines. There is no shared framework on purpose: a suite that
 goes red can be run on its own with `node tests/<name>.mjs` and read top to bottom with no
 indirection, which is how most of them got written.
 
 ```bash
-npm test                  # build, serve, run all 32
+npm test                  # build, serve, run all 35
 npm test -- queue water   # just those two, by name
 npm test -- --bail        # stop at the first red suite
 npm test -- --no-build    # against whatever dist/ already holds

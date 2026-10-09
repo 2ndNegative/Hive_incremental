@@ -239,13 +239,21 @@ const terr = await p.evaluate(() => {
   );
   return {
     text: box?.innerText.replace(/\s+/g, ' ').trim() ?? '',
-    rows: box?.querySelectorAll('.field-row').length ?? 0,
+    // The three headline figures, read as figures. They used to be a sentence,
+    // and a sentence is what a regex had to match — which meant this suite
+    // broke on a rewording rather than on a wrong number.
+    stats: [...(box?.querySelectorAll('.land-stat') ?? [])]
+      .map((n) => n.innerText.replace(/\s+/g, ' ').trim()),
+    // Patch rows only. The crews get a row each above them, and unworked patch
+    // slots get none at all — see TerritoryTab's `outNow`.
+    rows: box?.querySelectorAll('.offer-head ~ .field-row').length ?? 0,
   };
 });
-check('Territory says what the ground carries and in how many patches',
-  /carries 64 foraging drones/.test(terr.text) && /worked in 4 patches/.test(terr.text),
-  terr.text.slice(0, 120));
-check('and lists a row per patch', terr.rows === 4, `${terr.rows} rows`);
+check('Territory says what the ground carries, as a figure',
+  /20\s*\/\s*64/.test(terr.stats[0] ?? ''), terr.stats.join(' | '));
+check('and how many patches are being worked',
+  /^4\b/.test(terr.stats[1] ?? ''), terr.stats[1]);
+check('and lists a row per worked patch', terr.rows === 4, `${terr.rows} rows`);
 
 await p.evaluate(() => { hive.state.droneTypes.forager = 80; hive.tick(1); });
 await p.waitForTimeout(250);

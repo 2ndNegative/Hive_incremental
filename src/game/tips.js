@@ -78,6 +78,50 @@ export function pinHandlers(key) {
 }
 
 /**
+ * KEEP A TOOLTIP ON THE SCREEN. One delegated listener, installed once.
+ *
+ * `.tip-body` opens downward, which is right nearly always and wrong at the
+ * bottom of the window: the nutrient sidebar is twenty rows long, so hovering
+ * anything in its lower half opened a panel that ran off the bottom edge and
+ * was simply unreadable. The same happens to the storage rows and the territory
+ * offer chips.
+ *
+ * Measured on the way in rather than guessed from a row's index, because what
+ * matters is the window, and the window is whatever size the player made it.
+ *
+ * DELEGATED, not bound per element. Every `.tip` in the game is covered by this
+ * one listener whether or not it uses pinHandlers, and nothing has to remember
+ * to opt in — which is the failure mode a per-component fix would have had, in
+ * a codebase with eight tabs that each grew their own tooltips.
+ *
+ * `mouseover` rather than `mouseenter`: mouseenter does not bubble, so it
+ * cannot be delegated at all.
+ */
+function flipIfClipped(el) {
+  const body = el.querySelector(':scope > .tip-body');
+  if (!body) return;
+  // Measure with the class off, so a tooltip that has already been flipped is
+  // re-judged from its natural position rather than from where the last
+  // decision put it.
+  el.classList.remove('tip-above');
+  const anchor = el.getBoundingClientRect();
+  const height = body.offsetHeight;
+  const roomBelow = window.innerHeight - anchor.bottom;
+  // Only flip when there is genuinely more room the other way. A tooltip taller
+  // than the whole window fits nowhere, and flipping it would move the part the
+  // player can read from the top to the bottom for no gain.
+  if (height + 8 > roomBelow && anchor.top > roomBelow) el.classList.add('tip-above');
+}
+
+export function installTipFlip() {
+  if (typeof window === 'undefined') return;
+  document.addEventListener('mouseover', (event) => {
+    const el = event.target.closest?.('.tip');
+    if (el) flipIfClipped(el);
+  }, { passive: true });
+}
+
+/**
  * Release a pinned tooltip on Escape, or on a click that lands outside one.
  * Called once, from the app root.
  */

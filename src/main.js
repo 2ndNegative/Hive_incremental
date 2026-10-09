@@ -57,6 +57,7 @@ import {
   CACHE_GRAMS, PATCH_AREA,
 } from './game/expedition.js';
 import { FORAGE, poolFor } from './game/definitions/forage.js';
+import * as landvalue from './game/landvalue.js';
 import {
   AMOUNT, AMOUNT_ORDER, GROWTH, GROWTH_ORDER, amount, growthOf, nearestAmount,
   build as buildCost, flat as flatCost,
@@ -78,6 +79,7 @@ import {
   research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary, MANUAL_INTAKE,
   manualCombo,
   reserveCogits, releaseCogits, releaseAllCogits, buildStructure, abandonBuild,
+  queueResearch, unqueueResearch, moveResearch, clearResearchQueue, advanceResearchQueue,
   setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
   togglePinned, resetPinned, setMolding, toggleMolding, setMoldTarget,
   claimCost, claimableArea, claimTerritory, abandonTerritory,
@@ -94,7 +96,7 @@ import {
 } from './game/definitions/structures.js';
 import { CASTES, CASTE_ORDER } from './game/definitions/castes.js';
 import { formatMass, formatEnergy, formatPower, formatCogits, formatLarvae } from './game/units.js';
-import { installTipDismiss, pinned, unpinAll } from './game/tips.js';
+import { installTipDismiss, installTipFlip, pinned, unpinAll } from './game/tips.js';
 import {
   DRONE_CASTES, DRONE_CASTE_ORDER, DRONE_TYPES, DRONE_TYPE_ORDER, typesInCaste, unfiledTypes,
   foragingTypes, cogitDrawOf,
@@ -116,6 +118,7 @@ createApp(App).mount('#app');
 
 // Escape, or a click outside, releases a pinned tooltip.
 installTipDismiss();
+installTipFlip();
 
 /**
  * Catch up on time away, then start the live loop. The catch-up runs in chunks
@@ -128,7 +131,11 @@ const pendingOffline = state.origin ? offlineSeconds : 0;
 
 runOfflineCatchup(state, pendingOffline).then(() => {
   save();
-  startLoop(state);
+  // The research queue is drained from the loop callback rather than from
+  // inside tick(): tick lives in engine.js, research() lives in actions.js, and
+  // actions already imports the engine — so the engine calling back would be
+  // this codebase's first import cycle. See actions.js advanceResearchQueue.
+  startLoop(state, advanceResearchQueue);
 });
 
 setInterval(() => {
@@ -170,6 +177,25 @@ window.hive = {
   holdings: () => holdings(state),
   landCapacity: () => landCapacity(state),
   patchCount: () => patchCount(state),
+  // What ground is WORTH, as an expectation. Exposed because the suite that
+  // proves the estimate against a long run of the game has to be able to reach
+  // it from inside the page, and a production build has no module paths.
+  landValue: {
+    expected: (territory, opts) => landvalue.expectedForage(state, territory ?? state.territory, {
+      vigour: computeDerived(state).vigour,
+      harvest: computeDerived(state).land.harvest,
+      ...opts,
+    }),
+    preview: (biomeId, want, opts) => landvalue.claimPreview(state, biomeId, want, {
+      vigour: computeDerived(state).vigour,
+      harvest: computeDerived(state).land.harvest,
+      ...opts,
+    }),
+    hitChance: (gather, territory) =>
+      landvalue.hitChance(biomeShares({ territory: territory ?? state.territory }), gather),
+    labelFor: (key) => landvalue.labelFor(state, key),
+    meanLoad: landvalue.meanLoad,
+  },
   forageTable: FORAGE,
   poolFor,
   focus_: {
@@ -222,7 +248,15 @@ window.hive = {
   tick: (seconds, step = 1) => advance(state, seconds, step),
   // Hand control of the clock, so a test can take exact samples instead of
   // racing the live loop.
-  loop: { start: () => startLoop(state), stop: stopLoop },
+  loop: { start: () => startLoop(state, advanceResearchQueue), stop: stopLoop },
+  researchQueue: {
+    list: () => [...(state.researchQueue || [])],
+    add: (id) => queueResearch(id),
+    remove: (i) => unqueueResearch(i),
+    move: (i, d) => moveResearch(i, d),
+    clear: () => clearResearchQueue(),
+    advance: () => advanceResearchQueue(),
+  },
   offline,
   skipOffline,
   dev,

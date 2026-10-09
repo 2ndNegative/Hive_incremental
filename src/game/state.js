@@ -89,6 +89,14 @@ export function createInitialState() {
     // BUILD_QUEUE_BASE plus whatever research has widened it.
     buildQueue: [],
 
+    // What the hive has been told to work out next, in order: research ids.
+    // UNCAPPED, unlike the build queue — a tech is bought with insight the hive
+    // was going to accumulate anyway, so lining up five costs nothing and
+    // commits nothing. The build queue's cap exists because a build consumes
+    // mass the moment it starts; research has no equivalent.
+    // See actions.js advanceResearchQueue.
+    researchQueue: [],
+
     // What is being grown RIGHT NOW: { id, work, remaining, paid } or null.
     // A job leaves the queue, is paid for in full, and then takes minutes —
     // `remaining` is in pace-seconds and comes down at derived.buildPace, so a
