@@ -14,16 +14,6 @@ good deal of the prose in it, was written by a large language model working from
 my direction — design decisions, mechanics, balance and review are mine; a lot of
 the typing is not.
 
-The food and nutrient database is compiled from published nutritional data rather
-than invented — chiefly the USDA FoodData Central SR Legacy set, which is where
-about three quarters of the 497 items come from, with the rest from published
-analyses of things SR Legacy does not cover. Every item carries its source and a
-confidence rating, and the Codex shows both, so a measured figure and a deliberate
-game abstraction are never presented as the same thing.
-
-I would rather say this plainly up front than have you work it out from the
-commit history.
-
 ## Running it locally
 
 Needs Node 20 or newer.
