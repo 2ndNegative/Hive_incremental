@@ -430,6 +430,86 @@ caught that: given a bonus on a channel, **does the number it names actually mov
 channel, one at a time, against the figure its `applied` field points at. It is deliberately
 not a unit test of `factor()`; `factor()` was never the part that broke.
 
+## Storage, and the wall underneath it
+
+A building you cannot save up for is a building you can never build. If the cost of the next
+one exceeds what the hive can *hold* of the resource it is priced in, the number never gets
+high enough, nothing says why, and the player concludes the game is broken. Two of these
+shipped before anyone noticed, and they are worth keeping written down because the shape
+recurs.
+
+### The slow one: fibre
+
+The Cellulose Bale stores fibre and is bought with fibre. On a `steady` curve its cost grew
+×1.4 a bale while its shelf grew by a flat 500 g, so cost overtook capacity at the **tenth**
+and the hive could never widen its own fibre store again. Fibre is the worst case for a
+structural reason: it is what everything is made of *and* what its own store is priced in.
+
+The fix was not a bonus. A geometric cost against a linear capacity always crosses, and a
+constant multiplier only slides the crossing point — a flat +50% buys 1.21 more buildings and
+then the wall is back, permanently. The fix was the curve: the five dedicated stores still on
+`steady` moved to `gentle`, matching the Cistern and Crop Chamber, which already were. The
+wall moves to 17, and 19 with Tight Packing.
+
+The Vacuole stays `steady` on purpose. It is *general* storage — a buffer for catching
+overflow, not a bigger cupboard — so it should stay expensive to repeat.
+
+### The fast one: minerals, and why researching made it worse
+
+The Hivecore's micronutrient shelf held 2 g of iron. A Gizzard costs 10 g. Before the Trace
+Metal Assay `payableCost` charged that as 500 g of mineral mass, which fits easily; after it,
+the cost was real iron against a real iron shelf. **Researching made four buildings
+permanently unbuildable.**
+
+The numbers came from this file's own `baseCap` column divided by ten — a nutritional table,
+describing how much of each element a body wants, answering a question it was never asked.
+Rare elements came out at 0.05 g, which no cost could ever fit under.
+
+A ceiling answers *can I hold what I must spend*, and the only numbers bearing on it are the
+costs. So `MICRO_BASE_CAP` is **50 g for every micronutrient**, uniformly: micro costs live on
+the `tiny` and `slight` rungs, so 50 g holds two of the dearest. Abundance is already modelled,
+correctly, in what the hive finds; modelling it twice — in the shelf as well — is what
+produced a ceiling below the price of the thing standing on the shelf.
+
+### Two rules that fell out of it
+
+**A store is never denominated in what it stores.** The Mineral Vault used to cost 25 g of
+iron against a 2 g iron ceiling: the cure was priced above the ceiling it raises. The same
+rule is why Tight Packing, which widens a fibre wall, costs insight and no fibre — a fix for
+a bottleneck must not be payable only in the bottleneck.
+
+**Flat room beats a multiplier on a small base.** The vaults used to give `capMult: 1.0`,
+doubling their group. Doubling 2 g gives 4 g against a 10 g cost. They now add flat grams per
+shelf, generated from the cap group rather than hand-typed, and `capMult` still multiplies the
+result — so Tight Packing reaches vault room too.
+
+### What is tested, and what deliberately is not
+
+`tests/storagewall-test.mjs` pins the narrow invariant, and getting it narrow mattered. A
+Lipid Droplet is priced in fibre and stores fat: when its fibre cost outruns the fibre shelf
+you cannot build one, but you are not stuck — you go and build a Cellulose Bale. That is a
+decision, not a dead end, and almost every wall in the game is of that kind.
+
+The dead end is the **self-referential** case: a store priced in the thing it stores, where
+the only building that could widen the ceiling is the one the ceiling blocks. The suite walks
+every store, finds the resources it both costs and holds, and asserts the wall is at least
+fifteen deep. It does not assert the wall is absent — on a `gentle` curve against a flat shelf
+one always exists eventually — only that it is further out than a player plausibly builds.
+
+`balance-sim.mjs` reports every wall for every resource after a run, measured against that
+run's actual storage. It reports and does not judge: a wall at forty is a curiosity, a wall at
+ten is a soft-lock, and only a human can say which.
+
+### `grants`: a tech can hand over a building
+
+A research entry may carry `grants: { mineralVault: 1 }`, applied the moment the tech lands.
+It exists for one shape of problem — a tech that *creates* the need for a building. The assays
+are the case: a hive that researched before building anything would find the cure priced above
+the ceiling it raises, so the tech that opens the hole supplies the first patch.
+
+It is not a reward mechanism and should not become one. If a tech grants something the player
+could simply have built, the right change is to the price of the building.
+
 ## What things cost
 
 Every build cost in the game is a **named amount** of an **exactly named resource**, plus a

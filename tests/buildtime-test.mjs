@@ -182,6 +182,11 @@ check('because what is stored is work, not a deadline',
 await reset();
 const instant = await p.evaluate(() => {
   const s = hive.state;
+  // Every tech, because this is about the CLOCK, not about unlocks. The Mineral
+  // Vault and Vitamin Lattice are gated behind their assays, and a locked
+  // building the queue refuses looks exactly like a building that went up
+  // instantly — which is the thing this section exists to catch.
+  s.tech = Object.fromEntries(hive.researchOrder.map((t) => [t, true]));
   const results = [];
   for (const id of hive.structureOrder) {
     s.buildQueue = [];

@@ -15,7 +15,7 @@
     "validate": "node tools/validate-items.mjs",
     "balance": "node tools/balance-sim.mjs",
     "test": "node tests/run-all.mjs",
-    "check": "npm run lint && npm run validate && npm test"
+    "check": "node tools/check.mjs"
   },
   "dependencies": {
     "bulma": "^1.0.4",

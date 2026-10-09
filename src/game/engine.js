@@ -54,6 +54,7 @@ import {
   isUsableFuel,
   itemYield,
   payableCost,
+  capGroupOf,
 } from './definitions/nutrients.js';
 import {
   STRUCTURES,
@@ -336,13 +337,6 @@ function working(state, charges, id) {
 
 /* ------------------------------------------------------------ capacity groups */
 
-/** Which capMult channel a nutrient's storage obeys. */
-function capGroup(id) {
-  const def = NUTRIENTS[id];
-  if (def.tier === 'macro') return 'bulk';
-  return def.group === 'lipidAssay' || def.group === 'aqueousAssay' ? 'vitamin' : 'mineral';
-}
-
 /* ------------------------------------------------------------------ cognition */
 
 /**
@@ -560,7 +554,7 @@ function computeCaps(state, charges, mod = null) {
   // other. The multiplicative bonuses apply here and nowhere else.
   const dedicated = {};
   for (const id of NUTRIENT_IDS) {
-    dedicated[id] = (room[id] || 0) * (1 + capMult[capGroup(id)]);
+    dedicated[id] = (room[id] || 0) * (1 + capMult[capGroupOf(id)]);
   }
 
   // GENERAL room: one shared volume that will take anything, and what the hive

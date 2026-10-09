@@ -18,6 +18,7 @@ import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import {
   canAfford,
+  placeStructure,
   storageFor,
   slotsFor,
   cognitionFor,
@@ -713,6 +714,20 @@ export function research(id) {
   state.tech[id] = true;
   state.stats.researched += 1;
   pushLog(`Research complete: ${def.name}.`, 'research');
+
+  // A tech that creates a need for a building hands over the first one. See
+  // the `grants` note at the top of definitions/research.js — placeStructure,
+  // not raiseStructure, because this is given rather than bought and must not
+  // fail for want of mass the player does not have yet.
+  for (const [id, count] of Object.entries(def.grants || {})) {
+    const put = placeStructure(state, id, count, pushLog);
+    if (put > 0) {
+      pushLog(
+        `${STRUCTURES[id]?.name ?? id} grown from the new understanding, at no cost.`,
+        'unlock',
+      );
+    }
+  }
 
   const revealed = hiddenBefore.filter((n) => isRevealed(state, n));
   if (revealed.length) {

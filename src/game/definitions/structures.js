@@ -115,8 +115,31 @@
 //   identical; what changes is what the interface says and the fact that you
 //   cannot have two. `maxLevel` caps it.
 
-import { build } from './costs.js';
+import { build, AMOUNT } from './costs.js';
 import { duration } from './times.js';
+import { MICROS, MICRO_BASE_CAP, capGroupOf } from './nutrients.js';
+
+/**
+ * FLAT ROOM FOR EVERY MICRONUTRIENT IN ONE GROUP.
+ *
+ * A vault is responsible for a whole band of the table, not for one element, so
+ * its storage map is derived from the band rather than written out. Twenty-odd
+ * hand-typed lines per building is how the Hivecore's micro shelf came to be a
+ * copy of a table in another file with six entries silently off by a factor of
+ * ten — see MICRO_BASE_CAP in nutrients.js.
+ *
+ * Deliberately flat grams rather than a `capMult` multiplier. The vaults used
+ * to double their group, which sounds generous and was worthless: doubling a
+ * 2 g iron ceiling gives 4 g, against a Gizzard that costs 10 g. A multiplier
+ * can only ever be as good as the base it multiplies. Tight Packing still
+ * multiplies the result, because `capMult` applies to the total dedicated room
+ * whatever supplied it.
+ */
+function groupStorage(group, grams) {
+  const out = {};
+  for (const id of MICROS) if (capGroupOf(id) === group) out[id] = grams;
+  return out;
+}
 
 export const STRUCTURES = {
   /* ------------------------------------------------------------------ live -- */
@@ -150,34 +173,13 @@ export const STRUCTURES = {
       fiber: 2_000,
       ethanol: 200,
       ash: 4_000,
-      sodium: 20,
-      potassium: 20,
-      calcium: 40,
-      magnesium: 10,
-      phosphorus: 30,
-      chloride: 20,
-      sulfur: 10,
-      iron: 2,
-      zinc: 2,
-      copper: 1,
-      manganese: 1,
-      selenium: 0.05,
-      iodine: 0.05,
-      chromium: 0.02,
-      molybdenum: 0.02,
-      vitaminA: 0.2,
-      vitaminD: 0.02,
-      vitaminE: 1,
-      vitaminK: 0.1,
-      vitaminC: 2,
-      vitaminB1: 0.2,
-      vitaminB2: 0.2,
-      vitaminB3: 1,
-      vitaminB5: 0.5,
-      vitaminB6: 0.2,
-      vitaminB7: 0.05,
-      vitaminB9: 0.1,
-      vitaminB12: 0.02,
+      // Every micronutrient gets the same shelf, and the reason is in
+      // nutrients.js MICRO_BASE_CAP: a ceiling answers "can I hold what I must
+      // spend", and the twenty-eight numbers that used to sit here answered a
+      // nutritional question instead. One of them gave iron 2 g against a 10 g
+      // cost.
+      ...groupStorage('mineral', MICRO_BASE_CAP),
+      ...groupStorage('vitamin', MICRO_BASE_CAP),
     },
     // Room for raw matter, shared across everything in the larder. Deliberately
     // small and deliberately unadvertised — the card says nothing about it,
@@ -299,7 +301,7 @@ export const STRUCTURES = {
       'Dense packed amino acid, laid down in a shell the hive can break open again. Holds nothing ' +
       'but protein, and holds it far better than anything that holds everything.',
     unlock: () => true,
-    cost: build('steady', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
+    cost: build('gentle', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
     time: 'short',
     storage: { protein: 200 },
   },
@@ -312,7 +314,7 @@ export const STRUCTURES = {
       'A bead of rendered fat held in a skin of its own making. The densest thing the hive can ' +
       'keep, and the cheapest to keep it in — fat needs no water around it.',
     unlock: () => true,
-    cost: build('steady', { fiber: 'medium', protein: 'small', fat: 'slight' }),
+    cost: build('gentle', { fiber: 'medium', protein: 'small', fat: 'slight' }),
     time: 'short',
     storage: { fat: 200 },
   },
@@ -325,7 +327,7 @@ export const STRUCTURES = {
       'Sugar wound into a branched knot so it can be packed away and pulled back out in a hurry. ' +
       'What the brood eats comes out of here.',
     unlock: () => true,
-    cost: build('steady', { fiber: 'medium', protein: 'small', carb: 'small' }),
+    cost: build('gentle', { fiber: 'medium', protein: 'small', carb: 'small' }),
     time: 'short',
     storage: { carb: 200 },
   },
@@ -348,7 +350,7 @@ export const STRUCTURES = {
     // Bigger than the 200 g granules on purpose, too. Fibre is spent in
     // four-hundred-gram lumps, so a two-hundred-gram shelf of it would not even
     // hold one building's worth.
-    cost: build('steady', { fiber: 'medium', protein: 'small' }),
+    cost: build('gentle', { fiber: 'medium', protein: 'small' }),
     time: 'short',
     storage: { fiber: 500 },
   },
@@ -362,7 +364,7 @@ export const STRUCTURES = {
       + 'nothing else — raw unsorted mass, exactly as it came out of the ground. Whatever the '
       + 'hive has since learned to pick out of it is kept somewhere more careful.',
     unlock: () => true,
-    cost: build('steady', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
+    cost: build('gentle', { fiber: 'medium', protein: 'small', iron: 'tiny' }),
     time: 'short',
     // ASH ONLY, on purpose. `ash` is the unsorted mineral fraction; sodium,
     // iron and the rest are their own nutrients the moment an assay resolves
@@ -475,22 +477,34 @@ export const STRUCTURES = {
   mineralVault: {
     id: 'mineralVault',
     name: 'Mineral Vault',
+    category: 'storage',
     desc: 'Sequestration cells for inorganic elements. Without these, assayed minerals spill as fast as they arrive.',
     unlock: (state) => state.tech.bulkMineralAssay,
-    cost: build('steady', { protein: 'heavy', iron: 'slight' }),
+    // NOT PRICED IN A MINERAL, and that is the whole lesson of this building.
+    // It used to cost 25 g of iron against a 2 g iron ceiling: the thing that
+    // raises the ceiling was priced above it, so the moment the Trace Metal
+    // Assay made the cost real the building became unbuildable forever. A
+    // store is never denominated in what it stores.
+    //
+    // Calcium is the exception that proves it — `tiny` is 10 g against a 50 g
+    // shelf, so there is headroom by a factor of five, and a vault really is
+    // built out of mineral. If MICRO_BASE_CAP ever drops below 20 g, this line
+    // is the first thing that breaks.
+    cost: build('gentle', { fiber: 'large', protein: 'small', calcium: 'tiny' }),
     time: 'short',
-    capMult: { mineral: 1.0 },
-    upkeepWatts: 25,
+    storage: groupStorage('mineral', AMOUNT.medium),
   },
   vitaminLattice: {
     id: 'vitaminLattice',
     name: 'Vitamin Lattice',
+    category: 'storage',
     desc: 'Stabilised organic scaffolding. Vitamins degrade in open storage; this is what stops them.',
     unlock: (state) => state.tech.lipidAssay,
-    cost: build('steady', { protein: 'heavy', fat: 'large' }),
+    // Fat rather than a vitamin, for the reason above and because the
+    // fat-soluble half of the table needs a lipid phase to sit in.
+    cost: build('gentle', { fiber: 'medium', protein: 'small', fat: 'slight' }),
     time: 'middling',
-    capMult: { vitamin: 1.0 },
-    upkeepWatts: 60,
+    storage: groupStorage('vitamin', AMOUNT.medium),
   },
   boreShaft: {
     id: 'boreShaft',
@@ -575,6 +589,8 @@ export const STRUCTURE_ORDER = [
   'glycogenGranule',
   'celluloseBale',
   'gizzard',
+  'mineralVault',
+  'vitaminLattice',
   'cistern',
   'crop',
   'vacuole',
@@ -621,8 +637,6 @@ export const DEPRECATED_STRUCTURE_ORDER = [
   'gutSac',
   'thermalVent',
   'assayChamber',
-  'mineralVault',
-  'vitaminLattice',
   'boreShaft',
   'ambushBurrow',
 ];

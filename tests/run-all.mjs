@@ -58,6 +58,7 @@ const ORDER = [
   'mold', 'land', 'explore', 'adjacency', 'general', 'focus', 'queue', 'water',
   'codex', 'cost', 'insight', 'economy', 'power', 'scaffold', 'buildtime',
   'modifier',
+  'storagewall',
 ];
 
 const files = readdirSync(HERE)
@@ -83,6 +84,19 @@ if (!suites.length) {
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 
+/**
+ * Windows needs a shell to launch npx, and that is not a style choice.
+ *
+ * `npx` on Windows is `npx.cmd`, a batch file, and since the fix for
+ * CVE-2024-27980 Node REFUSES to spawn a .cmd or .bat without `shell: true`.
+ * The refusal arrives as `result.error`, with `status` null and both output
+ * streams empty — so a handler that prints stdout and stderr prints two blank
+ * lines and the reason is simply gone. That is exactly how this failed: a log
+ * reading `building (build)… FAILED` and nothing else, on a machine where
+ * `npx vite build` typed by hand worked perfectly.
+ */
+const SHELL = process.platform === 'win32';
+
 if (!flags.has('--no-build')) {
   // single-test.mjs opens HiveIdle.html, the portable one-file build, so that
   // has to be current too or it tests a version of the game nobody is running.
@@ -90,11 +104,21 @@ if (!flags.has('--no-build')) {
     process.stdout.write(`building (${label})… `);
     const bin = cmd[0] === 'node' ? process.execPath : npx;
     const rest = cmd[0] === 'node' ? cmd.slice(1) : cmd;
-    const out = spawnSync(bin, rest, { cwd: ROOT, encoding: 'utf8' });
+    // Only the npx path needs the shell; `node` is an executable Node can
+    // spawn directly, and going through a shell would only add quoting risk.
+    const out = spawnSync(bin, rest, {
+      cwd: ROOT,
+      encoding: 'utf8',
+      shell: bin === npx ? SHELL : false,
+    });
     if (out.status !== 0) {
       console.log('FAILED');
-      console.log(out.stdout?.slice(-2000) ?? '');
-      console.log(out.stderr?.slice(-2000) ?? '');
+      // `error` FIRST and unconditionally. A process that never started has no
+      // output at all, and printing only its streams turns the most common
+      // failure on a fresh machine into a blank screen.
+      if (out.error) console.log(`could not run ${bin}: ${out.error.message}`);
+      console.log(out.stdout?.slice(-4000) ?? '');
+      console.log(out.stderr?.slice(-4000) ?? '');
       process.exit(1);
     }
     console.log('ok');
@@ -106,7 +130,15 @@ if (!flags.has('--no-build')) {
 const server = spawn(npx, ['vite', 'preview', '--port', String(PORT), '--strictPort'], {
   cwd: ROOT,
   stdio: 'ignore',
+  shell: SHELL, // same .cmd rule as the build above
   detached: process.platform !== 'win32',
+});
+// A server that never starts would otherwise show up as thirty-two suites
+// timing out on their first selector, which is a long way to travel to learn
+// that one process did not launch.
+server.on('error', (err) => {
+  console.error(`\ncould not start the preview server (${npx}): ${err.message}`);
+  process.exit(1);
 });
 
 let stopped = false;

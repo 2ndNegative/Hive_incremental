@@ -23,6 +23,7 @@ import {
 import { chooseOrigin, originsFor } from '../src/game/run.js';
 import { RESEARCH, RESEARCH_ORDER } from '../src/game/definitions/research.js';
 import { STRUCTURE_ORDER, STRUCTURES } from '../src/game/definitions/structures.js';
+import { payableCost } from '../src/game/definitions/nutrients.js';
 import { DRONE_TYPES, DRONE_TYPE_ORDER } from '../src/game/definitions/drones.js';
 import { NUTRIENTS, MACROS, MICROS, isRevealed } from '../src/game/definitions/nutrients.js';
 import { holdings, totalArea } from '../src/game/definitions/biomes.js';
@@ -420,6 +421,53 @@ console.log('=== simulation finished ===');
  * Raise these only if the game genuinely changes shape. They are deliberately
  * far below anything a playable balance would hit.
  */
+/* ------------------------------------------------- can the hive still grow?
+ *
+ * THE STORAGE WALL. A building you cannot save up for is a building you can
+ * never build, and if that building is the one that would have given you the
+ * room, the run is over without anything saying so. The hive just stops.
+ *
+ * It bit fibre first and for a structural reason: fibre is what everything is
+ * made of AND what its own store is priced in, so the Cellulose Bale was
+ * bidding against itself. At `steady` the tenth bale cost 7.2 kg against the
+ * 7.0 kg the hive could hold — a dead end with no message.
+ *
+ * The shape of it is general, though, and that is why this checks every
+ * resource rather than the one that happened to break: a cost that grows
+ * geometrically against a capacity that grows arithmetically always crosses.
+ * The question is only whether it crosses somewhere a player will reach.
+ *
+ * NOT a failure. A wall at forty of something is a curiosity; a wall at ten is
+ * a soft-lock. Only a human can say which, so this reports and does not judge.
+ */
+const walls = [];
+for (const id of STRUCTURE_ORDER) {
+  const def = STRUCTURES[id];
+  for (let n = 0; n < 40; n += 1) {
+    // THROUGH payableCost, or this lies about every mineral the hive cannot
+    // see yet. A Gizzard's 10 g of iron is really 500 g of mineral mass before
+    // the assay, measured against the ash shelf rather than the iron one — and
+    // reading it as iron reported four buildings as walled at zero when none
+    // of them is.
+    const cost = payableCost(state, def.cost(n));
+    // What the hive could hold, with n of this already standing. `capsMax` is
+    // the honest ceiling: dedicated room plus whatever the shared pool adds.
+    const ceiling = derived.capsMax;
+    const over = Object.entries(cost).find(([res, grams]) => grams > (ceiling[res] ?? Infinity));
+    if (!over) continue;
+    walls.push({ id, n, resource: over[0], cost: Math.round(over[1]), ceiling: Math.round(ceiling[over[0]] ?? 0) });
+    break;
+  }
+}
+if (walls.length) {
+  console.log('\nstorage walls  (cost of the next one exceeds what the hive can hold)');
+  for (const w of walls.sort((a, b) => a.n - b.n)) {
+    console.log(`  ${STRUCTURES[w.id].name.padEnd(20)} stops at ${String(w.n).padStart(3)}`
+      + `  — needs ${formatMass(w.cost)} of ${w.resource}, can hold ${formatMass(w.ceiling)}`);
+  }
+  console.log('  Measured against THIS run\'s storage, so it moves as the hive grows.');
+}
+
 const dead = [];
 if (droneCount(state) < 1) dead.push('no drones were ever raised');
 if (state.stats.ingested <= 0) dead.push('nothing was ever ingested');

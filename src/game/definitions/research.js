@@ -19,6 +19,18 @@
 // A `queue` field widens the build queue by that many slots — see engine.js
 // buildQueueCap, where BUILD_QUEUE_BASE says how many the hive starts with.
 //
+// A `grants` field hands over buildings, free, the moment the tech lands:
+// `grants: { mineralVault: 1 }`. It exists for one specific shape of problem —
+// a tech that CREATES a need for a building. The assays are the case: before
+// one, the hive pays for minerals in mineral mass and holds them easily; after
+// it, the cost is real elements against real element shelves, and a hive that
+// researched before building anything would find the cure priced above the
+// ceiling it raises. The tech that opens the hole supplies the first patch.
+//
+// It is not a reward mechanism and should not become one. If a tech grants
+// something the player could simply have built, the right change is to the
+// price of the building.
+//
 // COSTS ARE NAMED RUNGS, through tech() — insight against the INSIGHT ladder in
 // costs.js, mass against AMOUNT. Research was the last table in the game still
 // carrying hand-written numbers, and the two priced in `ash` were breaking a
@@ -54,6 +66,7 @@ export const RESEARCH = {
     desc: 'Separate the mineral fraction into its elements. Everything eaten so far is still in there.',
     requires: ['glycolysis'],
     cost: tech({ insight: 'notion' }),
+    grants: { mineralVault: 1 },
     unlocks: ['Reveals sodium, potassium, calcium, magnesium, phosphorus, chloride, sulfur', 'Mineral Vault'],
   },
   stigmergy: {
@@ -64,6 +77,30 @@ export const RESEARCH = {
     cost: tech({ insight: 'notion' }),
     queue: 2,
     unlocks: ['+2 build queue slots'],
+  },
+
+  tightPacking: {
+    id: 'tightPacking',
+    name: 'Tight Packing',
+    desc:
+      'Stack the stores the way a seed head stacks its seeds. The same cell wall, '
+      + 'wrapped closer, holds half again as much before it has to spill.',
+    requires: ['stigmergy'],
+    // INSIGHT ONLY, and that is the whole point of where it sits.
+    //
+    // This tech exists to widen a wall the hive hits in FIBRE. Pricing it in
+    // fibre would mean the cure gets harder to afford exactly as the disease
+    // gets worse, and a hive that had already run out of room could not buy the
+    // thing that gives it room. A fix for a bottleneck is never denominated in
+    // the bottleneck.
+    cost: tech({ insight: 'concept' }),
+    // All three cap groups, which together are every DEDICATED shelf in the
+    // game. The general pool is sized separately and deliberately untouched —
+    // see structures.js generalStorage: it is a buffer for catching overflow,
+    // and making it bigger would turn it into the bigger cupboard it is not
+    // supposed to be.
+    mult: { storage: 0.5, mineralStorage: 0.5, vitaminStorage: 0.5 },
+    unlocks: ['+50% dedicated storage'],
   },
   scavenging: {
     id: 'scavenging',
@@ -124,6 +161,7 @@ export const RESEARCH = {
     desc: 'Isolate what dissolves in the fat fraction. Liver turns out to have been carrying a great deal of it.',
     requires: ['traceMetalAssay'],
     cost: tech({ insight: 'doctrine' }),
+    grants: { vitaminLattice: 1 },
     unlocks: ['Reveals vitamins A, D, E and K', 'Vitamin Lattice'],
   },
   aqueousAssay: {
@@ -175,6 +213,7 @@ export const RESEARCH_ORDER = [
   'lipolysis',
   'bulkMineralAssay',
   'stigmergy',
+  'tightPacking',
   'scavenging',
   'cellulolysis',
   'traceMetalAssay',

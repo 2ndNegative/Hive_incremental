@@ -250,6 +250,51 @@ function defaultParent(group) {
   return 'ash';
 }
 
+/**
+ * WHICH STORAGE GROUP A NUTRIENT BELONGS TO.
+ *
+ * Three groups, because room is bought three different ways: the macro shelves
+ * come from the bulk stores, the minerals from a Mineral Vault, the vitamins
+ * from a Vitamin Lattice. `capMult` and the storage modifier channels are keyed
+ * on these names.
+ *
+ * It lives here rather than in the engine because it is a fact ABOUT a
+ * nutrient, not about the simulation — and because structures.js needs it too,
+ * to work out which shelves a vault is responsible for. It was private to
+ * engine.js until the vaults needed it; a second copy there would have been the
+ * first place these three groups could disagree with each other.
+ */
+export function capGroupOf(id) {
+  const def = NUTRIENTS[id];
+  if (!def) return 'mineral';
+  if (def.tier === 'macro') return 'bulk';
+  return def.group === 'lipidAssay' || def.group === 'aqueousAssay' ? 'vitamin' : 'mineral';
+}
+
+/**
+ * THE ROOM A HIVE HAS FOR ANY ONE MICRONUTRIENT BEFORE IT BUILDS FOR IT.
+ *
+ * 50 g, uniformly, and the uniformity is the design.
+ *
+ * The old figures came from this file's `baseCap` column divided by ten — a
+ * NUTRITIONAL table, describing how much of each element a body wants, pressed
+ * into answering a question it was never asked: how much can the hive hold. It
+ * gave iron a 2 g ceiling while a Gizzard cost 10 g of iron, so researching the
+ * Trace Metal Assay made four buildings permanently unbuildable. Rare elements
+ * came out at 0.05 g, which no cost could ever fit under.
+ *
+ * The question a ceiling answers is "can I hold what I must spend", and the
+ * only numbers that bear on it are the costs. Micro costs live on the `tiny`
+ * and `slight` rungs (10 g and 25 g), so 50 g holds two of the dearest — enough
+ * to build without a vault, not enough to stop wanting one.
+ *
+ * Abundance is already modelled, correctly, somewhere else: how much of each
+ * element the hive FINDS is a property of what it eats. Modelling it twice, in
+ * the shelf as well, is what produced a ceiling below the price of the thing
+ * standing on the shelf.
+ */
+export const MICRO_BASE_CAP = 50;
+
 export const NUTRIENT_IDS = Object.keys(NUTRIENTS);
 
 export const MACROS = NUTRIENT_IDS.filter((id) => NUTRIENTS[id].tier === 'macro');

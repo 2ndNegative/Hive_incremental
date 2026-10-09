@@ -303,6 +303,7 @@ window.hive = {
     insightAmount,
     nearestInsight,
     tech: techCost,
+    payable: payableCost,
   },
   structureCost: (id, n = 1) => structureCost(state, id, n),
   build: (id, n) => buildStructure(id, n),
