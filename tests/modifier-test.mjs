@@ -90,6 +90,12 @@ const CASES = [
   { channel: 'broodRate', dir: 'up', read: 'brood' },
   { channel: 'moldRate', dir: 'up', read: 'mold' },
   { channel: 'harvest', dir: 'up', read: 'harvest' },
+  // Grazing multiplies a SHARE rather than a figure — how much of its keep a
+  // working drone covers out on the ground — and the bill is that share
+  // subtracted from a headcount. So the ×1.5 check is pointed at the share,
+  // which is the thing the channel actually multiplies, and the check below
+  // proves the share reaches the bill.
+  { channel: 'grazing', dir: 'up', read: 'grazeShare' },
   { channel: 'insight', dir: 'up', read: 'insight' },
   { channel: 'digestion', dir: 'up', read: 'digestion' },
   { channel: 'storage', dir: 'up', read: 'bulkCap' },
@@ -134,13 +140,20 @@ const moved = await p.evaluate((cases) => {
     // it, so seed them by hand rather than ticking — a tick would advance the
     // whole economy between the two readings and the ratio would be measuring
     // the economy rather than the channel.
-    s.patches = {};
+    //
+    // Patches hang off the CREW now — one drone type on one biome — and which
+    // crews exist is decided by the assignment layer, so the seeding has to ask
+    // it where everyone ended up rather than assuming.
+    s.crews = {};
+    s.assign = {};
+    const where = hive.land.assignment();
     for (const typeId of ['forager', 'scavenger']) {
-      const held = hive.drones.patches(typeId);
-      for (const patch of held) {
-        patch.itemId = 'acorn';
-        patch.biomeId = 'temperateForest';
-        patch.grams = 40;
+      for (const [biomeId, drones] of Object.entries(where[typeId] || {})) {
+        if (drones < 1) continue;
+        for (const patch of hive.drones.patches(typeId, biomeId, drones)) {
+          patch.itemId = 'acorn';
+          patch.grams = 40;
+        }
       }
     }
   };
@@ -159,6 +172,7 @@ const moved = await p.evaluate((cases) => {
       mineralCap: d.caps.iron ?? d.caps.ash,
       vitaminCap: d.caps.vitaminC ?? d.caps.water,
       ration: d.ration.joules,
+      grazeShare: d.ration.share,
       waterDraw: d.hydration.draw,
     };
   };
@@ -196,6 +210,27 @@ for (const m of moved) {
       ? `baseline was ${m.before} — the fixture does not exercise this`
       : `×${m.ratio.toFixed(4)} (want ×1.5)`);
 }
+
+// A share nothing reads would pass the ×1.5 check above while the drones ate
+// exactly as much as before, which is the failure this whole suite exists for.
+const grazes = await p.evaluate(() => {
+  const s = hive.state;
+  s.tech = { glycolysis: true };
+  s.territory = { temperateForest: 400 };
+  s.assign = {};
+  s.droneTypes = { forager: 20, scavenger: 0 };
+  hive.forage.resetForage(s);
+  hive.tick(1);
+  hive.researchDefs.glycolysis.mult = undefined;
+  const before = hive.derived().ration;
+  hive.researchDefs.glycolysis.mult = { grazing: 0.5 };
+  const after = hive.derived().ration;
+  hive.researchDefs.glycolysis.mult = undefined;
+  return { before: before.billable, after: after.billable, grazed: before.grazed };
+});
+check('and a bigger share actually lowers the food bill',
+  grazes.grazed > 0 && grazes.after < grazes.before,
+  `${grazes.before.toFixed(1)} → ${grazes.after.toFixed(1)} drones on the stores`);
 
 /* ================================= 4. nothing is left summing into the void */
 

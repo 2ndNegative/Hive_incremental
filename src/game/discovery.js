@@ -18,12 +18,32 @@
 // back with hazelnuts is one observation of hazelnuts, however long the caste
 // then spends gathering them. That is what makes the sample size mean
 // something — it is a count of draws from the distribution.
+//
+// A ROLL IS NOW A DRONE. It used to be a patch, and patches were capped at
+// twelve however large the hive grew, so observations arrived at a fixed rate
+// forever. Under the land rewrite every drone rolls its own ground every cycle,
+// so a crew of sixty learns sixty times faster than a crew of one — which is
+// both obviously right and ten times the old pace at a modest headcount. The
+// thresholds went up to match. They are a count of observations, not of
+// minutes, so they stay honest at any size: a big hive learns its ground
+// quickly because it has a lot of drones looking at it, which is the sentence
+// the mechanic should have been saying all along.
+//
+// Raising them rewrote history for saves that had already banked finds, so the
+// v23 migration multiplies stored counts by DISCOVERY_RESCALE. Change these two
+// together or a returning hive forgets what it knew.
 
 /** Finds in one biome before the hive can bracket a rate at all. */
-export const RANGE_AT = 10;
+export const RANGE_AT = 100;
 
 /** Finds in one biome before it has the exact figure. */
-export const EXACT_AT = 25;
+export const EXACT_AT = 350;
+
+/**
+ * What the thresholds were multiplied by when a roll stopped being a patch and
+ * started being a drone. Read by the save migration, and by nothing else.
+ */
+export const DISCOVERY_RESCALE = 10;
 
 /**
  * The brackets a rate is reported in while it is still being learned.

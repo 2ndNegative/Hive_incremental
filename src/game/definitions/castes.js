@@ -43,6 +43,43 @@
 export const DRONE_RATION_JOULES = 2550;
 
 /**
+ * HOW MUCH OF ITS OWN KEEP A WORKING DRONE COVERS ON THE JOB.
+ *
+ * A drone out on the ground is standing in the middle of its own dinner. It
+ * eats some of what it finds before it ever gets home, which is both obviously
+ * true of a real forager and the reason the ration was priced where it was —
+ * the bill above assumes a drone pays for about half its own keep.
+ *
+ * So the ration is charged on
+ *
+ *     billable = drones − Σ over crews of (drones × efficiency) × SNACK_SHARE
+ *
+ * and the interesting word is `efficiency`. A drone crammed onto a tenth of the
+ * ground it needs is finding a tenth as much, so it is snacking a tenth as
+ * much, so it comes home nearly as hungry as one that never went out. CROWDING
+ * THEREFORE COSTS TWICE: less comes in, and more goes out. That is the whole
+ * point of the number, and it is what stops a `tolerant` type — whose total
+ * output rises forever as you pile drones on, see CROWDING — from being free to
+ * pile indefinitely.
+ *
+ * A drone finds a break-even at roughly eleven times its room on these figures,
+ * which is around 30% efficiency: generous, deliberately. The ceiling is meant
+ * to be reachable by a player who is not watching, not a cliff.
+ *
+ * TWO DRONES EAT NOTHING ON THE JOB and both are correct:
+ *   — one with no ground at all, which is what makes an idle drone expensive;
+ *   — one standing on a biome that offers its route NOTHING. A scavenger in a
+ *     place with no carrion comes back empty and comes back hungry, and the
+ *     food bill is the only thing that tells the player they wasted the trip.
+ *
+ * SIMPLIFIED ON PURPOSE: it scales with efficiency rather than with the grams
+ * actually hauled, so a drone on rich ground does not eat more than one on poor
+ * ground. The honest version would make this figure depend on the biome's load
+ * table, and the panel could then no longer say "half your keep" about anything.
+ */
+export const SNACK_SHARE = 0.5;
+
+/**
  * Water the hive loses per drone per second, before the land has its say.
  *
  * Multiplied by the aridity of the ground the hive holds (see biomes.js), so

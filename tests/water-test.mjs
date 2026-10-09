@@ -88,11 +88,31 @@ check('no drone draws a watt any more',
   noWatts.demands.join(', ') || '(nothing billed)');
 check('they eat instead, and it is counted off the live population',
   noWatts.ration.drones === 40, `${noWatts.ration.drones} drones`);
-check('forty of them want 6 g/s of sugar',
-  Math.abs(noWatts.ration.wantGrams - 6) < 1e-9,
-  `${noWatts.ration.wantGrams.toFixed(2)} g/s of ${noWatts.ration.nutrient}`);
-check('which is 0.15 g a drone, as specified',
-  Math.abs(noWatts.ration.wantGrams / 40 - 0.15) < 1e-9);
+// 0.15 g/s a drone is the price of a BILLABLE drone, and a drone out on ground
+// it can work is only half billable: it eats what it finds before it gets home
+// — see SNACK_SHARE in castes.js. So the per-drone figure is checked against
+// `billable` rather than the headcount, and the gap between the two is checked
+// separately, because the gap is the mechanic.
+check('the ration is 0.15 g of sugar per billable drone, as specified',
+  Math.abs(noWatts.ration.wantGrams / noWatts.ration.billable - 0.15) < 1e-9,
+  `${noWatts.ration.wantGrams.toFixed(2)} g/s of ${noWatts.ration.nutrient}`
+  + ` for ${noWatts.ration.billable.toFixed(1)} of ${noWatts.ration.drones}`);
+check('and the drones out on the ground are feeding themselves half of it',
+  noWatts.ration.grazed > 0
+  && Math.abs(noWatts.ration.billable - (40 - noWatts.ration.grazed * 0.5)) < 1e-9,
+  `${noWatts.ration.grazed.toFixed(1)} fed on the job`);
+
+const idleBill = await p.evaluate(() => {
+  const s = hive.state;
+  const territory = { ...s.territory };
+  s.territory = {}; // nowhere to stand, so nobody grazes
+  const bare = hive.ration();
+  s.territory = territory;
+  return { want: bare.wantGrams, billable: bare.billable };
+});
+check('a hive with nowhere to forage pays the full 6 g/s for forty drones',
+  Math.abs(idleBill.want - 6) < 1e-9 && idleBill.billable === 40,
+  `${idleBill.want.toFixed(2)} g/s for ${idleBill.billable}`);
 
 const perFuel = await p.evaluate(() => {
   const s = hive.state;
@@ -107,8 +127,9 @@ const perFuel = await p.evaluate(() => {
   s.fuelLock = {};
   return out;
 });
+const billable = await p.evaluate(() => hive.ration().billable);
 check('the same ration costs less of a denser fuel',
-  perFuel.fat < perFuel.carb && Math.abs(perFuel.carb - 6) < 0.01,
+  perFuel.fat < perFuel.carb && Math.abs(perFuel.carb - billable * 0.15) < 0.01,
   `carb ${perFuel.carb} g/s · fat ${perFuel.fat} g/s · protein ${perFuel.protein} g/s`);
 check('and the energy it comes to is the same whichever it is',
   Math.abs(perFuel.fat * 37 - perFuel.carb * 17) < 0.5,

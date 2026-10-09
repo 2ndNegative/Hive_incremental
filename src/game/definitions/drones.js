@@ -38,6 +38,9 @@
 //   gather       which forage route it works, as the old castes did.  READ
 //   load         grams one of them carries home per trip, as { min, max }
 //                — rolled fresh every trip.  READ
+//   range        square metres of ONE BIOME this drone needs to work at full
+//                rate. See the range table below.  READ
+//   crowding     how badly it minds company, off the CROWDING ladder.  READ
 //   upkeepWatts  what it draws while it lives.  NOT READ YET
 //   eats         what it consumes, and how fast.  NOT READ YET
 //
@@ -52,6 +55,74 @@
 // actually arrives in parcels.
 
 import { flat } from './costs.js';
+
+/* ------------------------------------------------- how much ground one needs */
+
+/**
+ * RANGE, AND WHY A PATCH IS NOW A DRONE.
+ *
+ * The old model divided the land into patches of 36 m² and put a share of the
+ * drones on each. That 36 was the Anthill's starting territory and nothing
+ * else — the patch size was the opening tile, chosen once and then reasoned
+ * backwards from. It also meant land never constrained anything: at 2.5 m² a
+ * forager, 540 m² carried 216 of them, and cognition caps the hive two orders
+ * of magnitude below that.
+ *
+ * So the unit is now the drone. A patch is the ground ONE drone works, its size
+ * is declared by the type, and capacity is counted per BIOME rather than
+ * pooled. That last part is where the decision lives: the hive does not run out
+ * of land, it runs out of *farmland*, and 90 m² of it holds twenty foragers or
+ * two hunters but not both.
+ *
+ * RANGE IS A STATEMENT ABOUT THE BODY. A gatherer works the ground it is
+ * standing on. A scavenger has to find something that has already died, which
+ * means covering more of it. A hunter needs a predator's home range, which is
+ * the reason there are not many predators anywhere.
+ *
+ *   route       range   crowding       drone
+ *   forager       4 m²  tolerant       Forager            BUILT
+ *   scavenger    14 m²  touchy         Scavenger          BUILT
+ *   excavator    10 m²  even           — not built yet
+ *   siphon       25 m²  territorial    — not built yet
+ *   hunter       50 m²  solitary       — not built yet
+ *
+ * The bottom three have no drone to work them. Their forage tables are complete
+ * (119 huntable items plus the prey organisms, 13 excavated, 4 siphoned) and
+ * the figures above are what those drones will declare when they exist —
+ * written down here rather than invented later, so the balance of the whole
+ * table can be read in one place. A hunter in particular needs the carcass-into-
+ * cuts path wired through the drone route before it can exist at all; today
+ * only the parked hunter CASTE rolls prey.
+ */
+
+/**
+ * HOW BADLY A DRONE MINDS COMPANY.
+ *
+ * Efficiency per drone is `min(1, slots / drones) ** crowding`, where `slots` is
+ * the biome's area over the type's range. At or under its room every drone
+ * works at full rate; over it, each one loses ground, and this exponent says
+ * how fast.
+ *
+ * ONE NUMBER, TWO SHAPES. Below 1 the curve is concave: a crowded forager is
+ * merely inefficient, and total intake still rises as you add more, because
+ * there is always another bush. At 1 the total simply caps — ten scavengers on
+ * one carcass bring back one carcass. Above 1 the total FALLS: two hunters
+ * inside one home range do not split the prey, they drive it off, and the
+ * second one costs the hive the first one's dinner.
+ *
+ * Which is what makes a sliver of ground type-dependent rather than just small.
+ * Two square metres of farmland is half a forager's range — one forager at 71%,
+ * worth having. It is a twenty-fifth of a hunter's, which at `solitary` is
+ * 0.0003 of a hunter: not a bad deal, not a deal at all. The hive cannot nibble
+ * its way to a hunting ground; it has to take one.
+ */
+export const CROWDING = {
+  tolerant: 0.5,
+  even: 1,
+  touchy: 1.5,
+  territorial: 2.5,
+  solitary: 4,
+};
 
 export const DRONE_CASTES = {
   worker: {
@@ -84,6 +155,11 @@ export const DRONE_TYPES = {
     gather: 'forager',
     // Grams per trip, rolled per trip.
     load: { min: 20, max: 45 },
+    // Four square metres, and it barely minds sharing them. Standing vegetation
+    // is the one thing there is always more of — two foragers on one bush is
+    // two foragers picking slightly slower, not one of them going hungry.
+    range: 4,
+    crowding: CROWDING.tolerant,
     unlock: () => true,
   },
 
@@ -102,6 +178,13 @@ export const DRONE_TYPES = {
     cost: flat({ phosphorus: 'minuscule' }),
     gather: 'scavenger',
     load: { min: 20, max: 45 },
+    // Three and a half times a forager's ground, because carrion is an EVENT
+    // rather than a crop: it has to be come across, and the only way to come
+    // across more of it is to cover more ground. And a carcass does not divide
+    // — past the point where the ground is covered, another scavenger is
+    // another mouth at the same body, so the total caps rather than climbing.
+    range: 14,
+    crowding: CROWDING.touchy,
     // Behind Scavenging, as the research has always claimed. Eating what died
     // on its own is a tolerance the hive has to evolve — the bacterial load in
     // tissue that has already gone over is the whole reason nothing else is

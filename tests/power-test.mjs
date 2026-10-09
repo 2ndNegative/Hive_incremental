@@ -654,20 +654,30 @@ check('and names it in the territory table in the same breath',
   synced.territoryNamed, synced.target);
 check('a name does not hand over the rate', synced.odds.rate === '?%', synced.odds.rate);
 
+// Counted off the real thresholds rather than written out as 9 and 15. They
+// moved by an order of magnitude when a forage roll stopped being a patch and
+// became a drone (see discovery.js), and a suite that hard-codes them goes red
+// on a tuning change rather than on a broken one.
 const bracketed = await p.evaluate(() => {
+  const { RANGE_AT, EXACT_AT } = hive.discovery;
   const target = hive.manualOdds(1)[0].itemId;
-  for (let i = 0; i < 9; i += 1) hive.discovery.recordFind(hive.state, 'temperateForest', target);
+  const find = (n) => {
+    for (let i = 0; i < n; i += 1) {
+      hive.discovery.recordFind(hive.state, 'temperateForest', target);
+    }
+  };
+  find(RANGE_AT - 1); // one already banked from the roll above
   const ten = hive.manualOdds(1)[0];
-  for (let i = 0; i < 15; i += 1) hive.discovery.recordFind(hive.state, 'temperateForest', target);
+  find(EXACT_AT - RANGE_AT);
   const twentyFive = hive.manualOdds(1)[0];
-  return { ten, twentyFive };
+  return { ten, twentyFive, RANGE_AT, EXACT_AT };
 });
-check('ten finds bracket the rate on the gather button',
+check('enough finds bracket the rate on the gather button',
   bracketed.ten.level === 'range' && /^\d+–\d+%$/.test(bracketed.ten.rate),
-  bracketed.ten.rate);
-check('twenty-five pin it down',
+  `${bracketed.RANGE_AT} finds → ${bracketed.ten.rate}`);
+check('and enough more pin it down',
   bracketed.twentyFive.level === 'exact' && /^\d+%$/.test(bracketed.twentyFive.rate),
-  bracketed.twentyFive.rate);
+  `${bracketed.EXACT_AT} finds → ${bracketed.twentyFive.rate}`);
 check('the bracket contains the truth',
   (() => {
     const [lo, hi] = bracketed.ten.rate.replace('%', '').split('–').map(Number);
@@ -690,7 +700,9 @@ const blended = await p.evaluate(() => {
   if (!shared) return { shared: null };
 
   // Learn it to the hilt in the forest, and only in the forest.
-  for (let i = 0; i < 30; i += 1) hive.discovery.recordFind(hive.state, 'temperateForest', shared);
+  for (let i = 0; i <= hive.discovery.EXACT_AT; i += 1) {
+    hive.discovery.recordFind(hive.state, 'temperateForest', shared);
+  }
   const before = hive.manualOdds(Infinity).find((o) => o.itemId === shared);
   hive.run.grantTerritory('denseUrban', 36);
   const after = hive.manualOdds(Infinity).find((o) => o.itemId === shared);

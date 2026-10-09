@@ -701,6 +701,60 @@ export function setMoldTarget(typeId, target) {
   return state.droneMolding[typeId].target;
 }
 
+/* ------------------------------------------------------------ land assignment */
+
+/**
+ * Put this many drones of this type on this biome — or ask to, anyway.
+ *
+ * A TARGET, NOT A PLACEMENT. It may name drones the hive has not molded yet,
+ * which is the whole point: a player should be able to lay out a wetland for
+ * four hunters, see the ground go green, and then go and press four hunters.
+ * land.js resolves the plan against the headcount every tick, so a target that
+ * cannot be met yet simply reserves its share and waits.
+ *
+ * No ceiling is imposed here. Asking for more drones than the ground will carry
+ * is legal and sometimes correct — a tolerant type still gains from crowding,
+ * see CROWDING in drones.js — so the tab shows what it would cost in efficiency
+ * and lets the player decide. Refusing the input would be the interface
+ * pretending to know better than the person using it.
+ */
+export function setLandTarget(biomeId, typeId, want) {
+  if (!BIOMES[biomeId] || !DRONE_TYPES[typeId]) return null;
+  state.assign ??= {};
+  const here = (state.assign[biomeId] ??= {});
+  const n = Math.max(0, Math.floor(Number(want) || 0));
+  if (n <= 0) {
+    delete here[typeId];
+    // An empty plan for a biome is deleted outright rather than left as {}: it
+    // keeps the save clean and makes "has the player touched this ground" a
+    // question with a yes-or-no answer.
+    if (!Object.keys(here).length) delete state.assign[biomeId];
+  } else {
+    here[typeId] = n;
+  }
+  return n;
+}
+
+/** Take the whole plan off one biome, or off everywhere. */
+export function clearLandTargets(biomeId = null) {
+  state.assign ??= {};
+  if (biomeId === null) state.assign = {};
+  else delete state.assign[biomeId];
+}
+
+/**
+ * Fill this biome with as many of this type as it will carry at full rate.
+ *
+ * `floor(slots)`, so the target lands exactly on the last whole drone the ground
+ * supports without crowding anyone. The one-click answer to "what is this ground
+ * actually for".
+ */
+export function fillLandTarget(biomeId, typeId) {
+  const range = DRONE_TYPES[typeId]?.range;
+  if (!range || !BIOMES[biomeId]) return null;
+  return setLandTarget(biomeId, typeId, Math.floor((state.territory?.[biomeId] || 0) / range));
+}
+
 /* -------------------------------------------------------------------- top bar */
 
 /**

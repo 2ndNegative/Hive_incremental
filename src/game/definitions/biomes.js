@@ -290,70 +290,30 @@ export function biomeShares(state) {
 /**
  * WHAT HOLDING GROUND ACTUALLY DOES.
  *
- * Two things, and they are deliberately different things:
+ * Room for drones, counted PER BIOME — and that is the whole of it.
  *
- *   1. CAPACITY. A square metre only supports so much foraging. Land is the
- *      ceiling on how many drones can be out at once — not a multiplier on what
- *      they bring back. A hive with forty foragers and nine square metres is a
- *      hive with nine foragers and thirty-one standing around.
+ * It used to be two things: a pooled ceiling on how many drones could be out at
+ * once, and a count of separately-rolled patches that broadened what came in.
+ * Both are gone, and `land.js` has the long version of why. The short version:
+ * the pooled ceiling was never reached, because cognition caps the hive two
+ * orders of magnitude below what its ground will carry; and the patch count
+ * floored at the number of biomes held while every patch rolled the WHOLE
+ * territory, which made two square metres of anything a free pass to its entire
+ * forage table. Holding a sliver of everything was not an exploit. It was the
+ * rule, written down.
  *
- *   2. PATCHES. A big holding is several places at once. Every patch is its own
- *      find, rolled separately against the whole territory, worked by its own
- *      share of the drones. More land does not make a trip richer; it makes the
- *      hive work acorns and carrion and standing water at the same time instead
- *      of whatever the last roll happened to say.
+ * Now a patch is one drone's ground on one biome, its size is declared by the
+ * drone type (see `range` in drones.js), and a drone rolls only what is on the
+ * biome it was assigned to. So expanding does not raise a global ceiling or
+ * widen a roll — it buys room for a particular kind of drone on a particular
+ * kind of ground, and the player decides which.
  *
- * So expanding raises the ceiling AND broadens what comes in, and neither of
- * those is a number quietly multiplying another number.
+ * The functions that used to live here — `landCapacity`, `patchCount`,
+ * `FORAGERS_PER_SQUARE_METRE`, `AREA_PER_PATCH`, `MAX_PATCHES` — have no
+ * successors with the same shape, which is why they were deleted rather than
+ * rewritten. `slotsOn(state, biomeId, typeId)` in land.js is the nearest thing,
+ * and it answers a narrower question on purpose.
  */
-
-/** Foragers one square metre of ground will support. */
-export const FORAGERS_PER_SQUARE_METRE = 0.4;
-
-/** Ground that supports one separately-worked patch. */
-export const AREA_PER_PATCH = 36;
-
-/** However much land the hive holds, the interface stays readable. */
-export const MAX_PATCHES = 12;
-
-/**
- * How many drones the hive's land can keep working at once.
- *
- * Whole drones. Two thirds of a forager is not a thing that can be out on the
- * ground, and a capacity of 14.4 reads as a rounding error rather than a rule —
- * but any land at all supports at least one, because a hive standing on a
- * square metre can still reach down and pick something up.
- */
-export function landCapacity(state) {
-  const area = totalArea(state);
-  if (area <= 0) return 0;
-  return Math.max(1, Math.floor(area * FORAGERS_PER_SQUARE_METRE));
-}
-
-/**
- * How many patches the hive can work at once.
- *
- * Area decides it — but never fewer than the number of biomes held, so a hive
- * that has gone to the trouble of holding three kinds of ground can always have
- * drones on all three at once rather than rolling for the privilege.
- */
-export function patchCount(state) {
-  // Counted rather than built: this runs inside computeDerived and inside every
-  // tick, and `holdings` allocates an array of objects and sorts it. Offline
-  // catch-up is millions of ticks, and it showed.
-  let kinds = 0;
-  let area = 0;
-  for (const id of BIOME_IDS) {
-    const held = state.territory?.[id] || 0;
-    if (held > 0) {
-      kinds += 1;
-      area += held;
-    }
-  }
-  if (!kinds) return 0;
-  const byArea = Math.floor(area / AREA_PER_PATCH);
-  return Math.max(1, Math.min(MAX_PATCHES, Math.max(kinds, byArea)));
-}
 
 /* ------------------------------------------------- what lies next to what */
 

@@ -188,13 +188,14 @@ await p.evaluate(() => {
   const s = hive.state;
   s.territory = { temperateForest: 300, grassland: 150, farmland: 90 };
   s.droneTypes = { forager: 10, scavenger: 4 };
+  s.assign = {};
   // The loop is stopped, so the patches have to be rolled by hand: a patch only
   // exists once advanceForage has created it, and until then there is nothing
   // for the panel to group.
   for (let i = 0; i < 20; i += 1) hive.tick(1);
 });
 await openTab(p, 'Territory');
-await p.waitForTimeout(200);
+await p.waitForTimeout(250);
 
 const out = await p.evaluate(() => {
   // Panel heads are uppercased by the stylesheet, so innerText comes back
@@ -208,78 +209,119 @@ const out = await p.evaluate(() => {
     // One group header per biome worked, each with a colour dot.
     groups: panel ? [...panel.querySelectorAll('.offer-head')].length : 0,
     dots: panel ? [...panel.querySelectorAll('.offer-head .terr-key-dot')].length : 0,
-    // The figure that used to be stamped on every row. It should appear in the
-    // crew summaries and nowhere else.
-    perPatchMentions: (text.match(/drones? per patch/g) || []).length,
+    // One crew line per (type × biome), each stating how hard that ground is
+    // being leaned on. The efficiency belongs to the CREW, so it is said once
+    // per crew and not once per find.
+    crews: panel ? [...panel.querySelectorAll('.crew-line')].map((n) => n.innerText.trim()) : [],
     rows: panel ? [...panel.querySelectorAll('.field-row')].length : 0,
-    saysCapacity: /drones out/i.test(text),
+    saysOut: /drones out/i.test(text),
   };
 });
 
 check('the Out now panel is there', out.found);
 check('it leads with the three figures as figures, not a sentence',
-  out.stats.length === 3 && out.saysCapacity, out.stats.join(' / '));
-check('the patches are grouped under the ground they are on',
+  out.stats.length === 3 && out.saysOut, out.stats.join(' / '));
+check('the finds are grouped under the ground they are on',
   out.groups > 0 && out.dots === out.groups, `${out.groups} groups, ${out.dots} dots`);
-check('and drones-per-patch is stated once per crew, not once per patch',
-  out.perPatchMentions > 0 && out.perPatchMentions < out.rows,
-  `${out.perPatchMentions} mentions across ${out.rows} rows`);
+check('each crew states its own room once, not once per find',
+  out.crews.length > 0 && out.crews.every((c) => /% each/.test(c))
+  && out.crews.length < out.rows,
+  `${out.crews.length} crew lines across ${out.rows} rows`);
+check('and a find is one row however many drones are on it',
+  out.rows > 0 && /×\d+/.test(
+    [...(out.crews || [])].join(' ') || 'x1',
+  ), `${out.rows} rows`);
 
-/* ===================== 5. a claim says what it would be worth, honestly */
+/* ===================== 5. assignment, and what a claim is worth */
 
 await p.evaluate(() => {
   const s = hive.state;
-  s.territory = { temperateForest: 30 };
-  s.droneTypes = { forager: 40 };
+  s.territory = { temperateForest: 120 };
+  s.droneTypes = { forager: 10, scavenger: 4 };
+  s.assign = {};
   s.unclaimed = { grassland: 400 };
   for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e7;
   // The mix table only lists finds the hive could NAME — an unnamed one would
   // read "??? +1.2 g/s", which spoils that something is there without saying
-  // anything useful. A fresh save has found nothing at all, so the preview
-  // would correctly have nothing to list. Give it something to list.
-  s.found = {
-    grassland: Object.fromEntries(
-      hive.poolFor('forager', 'grassland').map((e) => [e.itemId, 5]),
-    ),
-    temperateForest: Object.fromEntries(
-      hive.poolFor('forager', 'temperateForest').map((e) => [e.itemId, 5]),
-    ),
+  // anything useful. A fresh save has found nothing at all.
+  const PINNED = hive.discovery.EXACT_AT + 15;
+  s.found = {};
+  for (const b of ['grassland', 'temperateForest']) {
+    s.found[b] = Object.fromEntries(
+      hive.poolFor('forager', b).map((e) => [e.itemId, PINNED]),
+    );
+  }
+});
+await p.waitForTimeout(250);
+
+const assign = await p.evaluate(() => {
+  const who = [...document.querySelectorAll('.panel-box')]
+    .find((b) => /^who works what/i.test(b.innerText));
+  const rows = [...(who?.querySelectorAll('.assign-row') ?? [])];
+  // Set a target through the interface, which is the whole point of the panel.
+  rows[0]?.querySelector('.assign-input')?.focus();
+  return {
+    found: Boolean(who),
+    rows: rows.length,
+    saysRoom: /Room for/.test(who?.innerText ?? ''),
+    // Live occupancy beside the target, so the gap between plan and reality is
+    // visible while the hive is still molding into it.
+    now: [...(who?.querySelectorAll('.assign-now') ?? [])].map((n) => n.innerText),
   };
 });
-await p.waitForTimeout(200);
-await p.click('.terr-tile.is-unclaimed');
+check('the assignment panel gives every type a row on every biome', assign.rows === 2,
+  `${assign.rows} rows`);
+check('and says how much room each has', assign.saysRoom);
+check('with who is standing there right now beside the target',
+  assign.now.length === 2 && assign.now.some((n) => Number(n) > 0), assign.now.join(' / '));
+
+await p.evaluate(() => {
+  const who = [...document.querySelectorAll('.panel-box')]
+    .find((b) => /^who works what/i.test(b.innerText));
+  who.querySelectorAll('.assign-row')[0].querySelectorAll('.btn-mini')[1].click();
+});
 await p.waitForTimeout(250);
+const bumped = await p.evaluate(() => hive.state.assign?.temperateForest?.forager ?? 0);
+check('the stepper writes a target the hive honours', bumped === 1, `target ${bumped}`);
+
+await p.click('.terr-tile.is-unclaimed');
+await p.waitForTimeout(300);
 
 const claim = await p.evaluate(() => {
   const box = document.querySelector('.claim-box');
   const text = box?.innerText ?? '';
   return {
     open: Boolean(box),
-    worth: /What this would do/.test(text),
-    employs: /to work/.test(text),
-    capacityRow: /Foragers the land will carry/.test(text),
-    mix: /What comes in instead/.test(text),
+    worth: /What this would do/i.test(text),
+    // The headline is a count of whole drones per type, which is the thing
+    // being bought now that room is per biome.
+    perType: /Forager/.test(text) && /Scavenger/.test(text),
+    room: /m² each/.test(text),
+    mix: /What comes in instead/i.test(text),
   };
 });
-
 check('clicking unclaimed ground opens the claim dialog', claim.open);
-check('which now says what the ground would do, not just what it costs',
-  claim.worth && claim.capacityRow);
-check('it names the drones it would put to work', claim.employs);
-check('and shows how the mix of finds would shift', claim.mix);
+check('which says what the ground would do, not just what it costs', claim.worth);
+check('counting whole drones of each type it would carry',
+  claim.perType && claim.room);
+check('and showing how the mix of finds would shift', claim.mix);
 
-// Every forager already on ground: the claim buys headroom, nothing today.
-await p.evaluate(() => {
-  hive.state.droneTypes = { forager: 12 };
-  hive.state.territory = { temperateForest: 30 };
+const threshold = await p.evaluate(() => {
+  // A sliver: too small for a scavenger, fine for a forager. The threshold is
+  // the sentence this dialog exists to say.
+  const input = document.querySelector('.claim-input');
+  input.value = '6';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  return null;
 });
-await p.waitForTimeout(250);
-const honest = await p.evaluate(() => {
+void threshold;
+await p.waitForTimeout(300);
+const short = await p.evaluate(() => {
   const text = document.querySelector('.claim-box')?.innerText ?? '';
-  return { warned: /No extra intake today/.test(text), text: text.slice(0, 120) };
+  return { shortBy: /short of the\s+first one/i.test(text), text: text.slice(0, 200) };
 });
-check('a claim that would add no intake today says so instead of flattering it',
-  honest.warned, honest.text.replace(/\n/g, ' | '));
+check('a claim too small for a type says how far short it is',
+  short.shortBy, short.text.replace(/\n/g, ' | ').slice(0, 130));
 
 /* ------------------------------------------------------------------ errors */
 

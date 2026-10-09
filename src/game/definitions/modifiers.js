@@ -113,6 +113,12 @@ export const CHANNELS = {
     applied: 'computeCaps',
   },
 
+  grazing: {
+    name: 'Grazing',
+    desc: 'How much of its own keep a working drone covers out on the ground.',
+    applied: 'computeRation',
+  },
+
   // Costs. Rule 3: a positive number here is WORSE for the hive.
   rationCost: {
     name: 'Appetite',

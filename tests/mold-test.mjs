@@ -221,9 +221,15 @@ const working = await p.evaluate(() => {
   hive.tick(1);
   hive.tick(1);
   const f = hive.derived().droneForage.scavenger;
+  // Patches live on the CREW now — one drone type on one biome — rather than
+  // being pooled under the type, because a drone works the ground it was put
+  // on and the type may be on several.
+  const patches = hive.derived().crews
+    .filter((c) => c.droneId === 'scavenger')
+    .flatMap((c) => c.patches);
   return {
     rate: f?.rate,
-    items: f?.patches.filter((q) => q.itemId).map((q) => q.itemId),
+    items: patches.filter((q) => q.itemId).map((q) => q.itemId),
     inPool: hive.poolFor('scavenger', 'temperateForest').map((e) => e.itemId),
   };
 });

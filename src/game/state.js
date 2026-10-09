@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 22;
+export const SAVE_VERSION = 23;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -130,12 +130,17 @@ export function createInitialState() {
     // to be the same from one frame to the next.
     forage: {},
 
-    // The patches each foraging drone type is working, keyed by type id: an
-    // array of { elapsed, biomeId, itemId, grams }. How many there are is
-    // decided by the land — see definitions/biomes.js patchCount — and each one
-    // is rolled separately, so a big holding is several places at once rather
-    // than one place that happens to be bigger.
-    patches: {},
+    // What each CREW is working, keyed "<droneType>:<biomeId>": an array of
+    // { elapsed, itemId, grams }, one entry per drone standing on that ground.
+    // A patch is one drone's ground now — see land.js — so the length of this
+    // array is the crew's headcount and nothing has to be divided.
+    crews: {},
+
+    // Where the player wants drones, keyed biome id → drone type id → how many.
+    // A PLAN rather than a record: it may name drones that do not exist yet,
+    // which is the point — a wetland can be laid out for four hunters and then
+    // the hunters molded into it. land.js resolves it against the headcount.
+    assign: {},
 
     // Ground an Explorer has MAPPED but the hive has not paid for, in square
     // metres by biome. It shows on the territory map marked unclaimed and does
@@ -349,7 +354,8 @@ export const OPEN_MAPS = new Set([
   'expedition',
   'brood', // structure id → cycle progress
   'molding',
-  'patches',
+  'crews', // "<droneType>:<biomeId>" → the patches that crew is working
+  'assign', // biome id → drone type id → how many the player wants there
   'power', // structure id → charge
   'active', // structure id → how many are switched on
   'droneMolding', // drone type id → { on, target }

@@ -2,41 +2,36 @@
 //
 // The territory tab could always say how big a patch was and what it cost. It
 // could never say what taking it would DO, so every claim was a guess followed
-// by an hour of watching the intake to find out. This module is the answer to
-// "and then what", and it is an expectation rather than a roll: the same
-// arithmetic tick() runs, with the dice replaced by their averages.
+// by an hour of watching the intake. This module is the answer to "and then
+// what", and it is an expectation rather than a roll: the same arithmetic tick()
+// runs, with the dice replaced by their averages.
 //
-// THE ONE RESULT WORTH KNOWING UP FRONT.
+// WHAT THE LAND REWRITE DID TO THIS FILE.
 //
-// Work the engine's forage sum through symbolically and the patches cancel out.
-// Per drone type, computeDerived has:
+// The first version of it proved something true and useless. Under the old
+// pooled-capacity model the patch count cancelled out of the forage sum, so the
+// whole thing reduced to `working × hit × load × vigour / cycle`, and since the
+// hive never came close to filling its ground, the honest answer to "what would
+// claiming this gain" was almost always NOTHING. The preview had a warning box
+// for it. A preview whose main job is to talk you out of the purchase is a sign
+// that the purchase has no mechanics behind it, not that the player is wrong.
 //
-//   open    = min(patches, floor(working))
-//   perPatch = working / open
-//   rate    = Σ over the `open` live patches of grams × perPatch × vigour / CYCLE
+// Room is counted per biome now, and per drone type, with a range and a crowding
+// curve each (land.js, drones.js). So the question has an answer with edges in
+// it:
 //
-// Every live patch draws from the same distribution, so in expectation each one
-// carries the same grams, and `open × perPatch` is just `working` again:
+//   — how many more of each type this ground would carry, which is a count of
+//     whole drones and not a ratio;
+//   — whether it crosses a THRESHOLD. Fourteen more square metres of wetland
+//     is the difference between no hunters and one hunter, and that is the most
+//     useful sentence this file can produce;
+//   — what it does to the hive's intake under the assignment it currently has,
+//     which may be nothing if the player has not told anyone to go there.
 //
-//   rate = working × E[grams] × vigour / CYCLE × harvest
-//
-// So the expected intake depends on how many drones the land will CARRY and on
-// nothing else about its shape. Patch count decides the VARIANCE — twelve
-// patches bring in twelve things at a twelfth the rate each instead of one thing
-// in a lump — and variance is worth real money downstream, because a narrow
-// intake overflows one item's shelf while the gut idles. But it is not intake,
-// and a preview that promised otherwise would be lying.
-//
-// Which leaves two honest things to tell a player about a patch of ground:
-//
-//   1. How many more foragers it will carry — and therefore, at today's drone
-//      count, whether it adds any intake AT ALL. A hive with no landless drones
-//      gains nothing today from more of the same ground. That is the fact the
-//      tab was hiding, and it is the one that decides whether to claim now or
-//      hatch first.
-//   2. What it changes about WHAT comes in. Share of the roll is area over total
-//      area, so a new biome rewrites the mix and more of a held one barely moves
-//      it. This is where a strange patch earns a price a familiar one does not.
+// AND THE BIOME ROLL IS GONE, which simplifies the expectation rather than
+// complicating it. A drone works the ground it was put on, so "what does this
+// crew find" is one biome's table, and a biome that offers a route nothing
+// yields exactly zero rather than diluting an average.
 //
 // NOTHING HERE ROLLS, AND NOTHING HERE MUTATES. It is called from computeds in
 // the interface, several times a second, and `poolFor` is memoised — but it
@@ -46,14 +41,22 @@
 // exactly as it does in the offerings panel: a preview that named the contents
 // of unexplored ground would hand the player the forage table for free.
 
-import { BIOMES, landCapacity, patchCount, biomeShares } from './definitions/biomes.js';
+import { BIOMES } from './definitions/biomes.js';
 import { DRONE_TYPES, foragingTypes } from './definitions/drones.js';
-import { poolFor } from './definitions/forage.js';
-import { preyFor, ORGANISMS } from './definitions/organisms.js';
+import { ORGANISMS } from './definitions/organisms.js';
 import { ITEMS } from './definitions/items/index.js';
 import { focusedOdds } from './focus.js';
-import { isNamed, preyKey } from './discovery.js';
+import { isNamed } from './discovery.js';
 import { FORAGE_CYCLE } from './forage.js';
+import {
+  assignmentOf, slotsOn, efficiencyOf, heldBiomes, routePool, offersAnything,
+} from './land.js';
+
+// Re-exported: callers of this module think in terms of what ground is worth,
+// and "does it offer this route anything" is the first question they ask. The
+// definitions live in land.js because the ENGINE needs them for the ration, and
+// the engine should not be importing a valuation module.
+export { routePool, offersAnything };
 
 /**
  * Mean grams one trip brings back, for one drone of this type.
@@ -71,65 +74,22 @@ export function meanLoad(typeId) {
 }
 
 /**
- * What a gather route can find on one biome: items, plus prey for a hunter.
- *
- * Shaped for `focusedOdds`, which reads `key` first — so the prey entries carry
- * their prey key rather than being re-derived downstream.
- */
-export function routePool(gather, biomeId) {
-  if (gather === 'hunter') {
-    return [
-      ...preyFor(biomeId).map((p) => ({
-        key: preyKey(p.organismId),
-        organismId: p.organismId,
-        name: ORGANISMS[p.organismId].name,
-        weight: p.weight,
-      })),
-      ...poolFor('hunter', biomeId).map((p) => ({
-        key: p.itemId, itemId: p.itemId, name: ITEMS[p.itemId].name, weight: p.weight,
-      })),
-    ];
-  }
-  return poolFor(gather, biomeId).map((p) => ({
-    key: p.itemId, itemId: p.itemId, name: ITEMS[p.itemId].name, weight: p.weight,
-  }));
-}
-
-/**
- * The chance one roll of this route finds anything at all, on this land.
- *
- * A roll picks a biome by area and then picks from what that biome offers the
- * route — and a biome can offer it nothing. A siphon working a hive of pure
- * desert comes back empty every single time, and that is the correct answer
- * rather than a bug, so the expectation has to carry it.
- */
-export function hitChance(shares, gather) {
-  let hit = 0;
-  for (const [biomeId, share] of Object.entries(shares)) {
-    if (routePool(gather, biomeId).length > 0) hit += share;
-  }
-  return hit;
-}
-
-/**
- * What the hive would find, and in what proportions, on a given set of
- * holdings. Keys are item ids and prey keys; values sum to the hit chance.
+ * What the hive would find on one biome, and in what proportions. Keys are item
+ * ids and prey keys; values sum to 1.
  *
  * The stars are honoured, because a player who has pointed a route at acorns
- * wants the preview to answer the question they are actually asking.
+ * wants the preview to answer the question they are actually asking — and they
+ * bite harder than they used to, since the pool a star competes inside is one
+ * biome's rather than the whole map's.
  */
-export function findMix(state, territory, gather) {
-  const shares = biomeShares({ territory });
+export function findMix(state, gather, biomeId) {
+  const pool = routePool(gather, biomeId);
+  if (!pool.length) return {};
+  const odds = focusedOdds(state, gather, biomeId, pool);
   const mix = {};
-  for (const [biomeId, share] of Object.entries(shares)) {
-    const pool = routePool(gather, biomeId);
-    if (!pool.length) continue;
-    const odds = focusedOdds(state, gather, biomeId, pool);
-    for (const entry of pool) {
-      const chance = odds[entry.key] ?? 0;
-      if (chance <= 0) continue;
-      mix[entry.key] = (mix[entry.key] || 0) + share * chance;
-    }
+  for (const entry of pool) {
+    const chance = odds[entry.key] ?? 0;
+    if (chance > 0) mix[entry.key] = chance;
   }
   return mix;
 }
@@ -137,72 +97,105 @@ export function findMix(state, territory, gather) {
 /**
  * What foraging is worth on a given set of holdings, in grams a second.
  *
- * `drones` is a type -> count map, normally `state.droneTypes`; pass a different
- * one to ask what the same ground would be worth with a different hive on it.
- * The land is shared out in declared type order, exactly as computeDerived does
- * it, because which type goes landless first is a rule and not an accident.
+ * `drones` is a type -> count map, normally `state.droneTypes`; `assign` is the
+ * target plan, normally `state.assign`. Pass different ones to ask what the same
+ * ground would be worth with a different hive or a different plan on it — which
+ * is exactly what the claim preview does.
  */
 export function expectedForage(state, territory, {
   drones = state.droneTypes,
+  assign = state.assign,
   vigour = 1,
   harvest = 1,
 } = {}) {
-  const shim = { territory };
-  const capacity = landCapacity(shim);
-  const patches = patchCount(shim);
-  const shares = biomeShares(shim);
+  const shim = { territory, assign, droneTypes: drones };
+  const held = heldBiomes(shim);
+  const assigned = assignmentOf(shim);
 
-  const byType = [];
+  const crews = [];
   const byFind = {};
+  const room = {}; // type -> whole drones this territory would carry anywhere
   let total = 0;
   let working = 0;
-  let landless = 0;
-  let roomLeft = capacity;
 
   for (const typeId of foragingTypes()) {
-    const count = drones?.[typeId] || 0;
-    if (!count) continue;
     const def = DRONE_TYPES[typeId];
-    const out = Math.max(0, Math.min(count, roomLeft));
-    roomLeft -= out;
+    room[typeId] = 0;
+    for (const biomeId of held) {
+      const slots = slotsOn(shim, biomeId, typeId);
+      room[typeId] += Math.floor(slots);
+      const here = assigned[typeId]?.[biomeId] || 0;
+      if (here < 1) continue;
 
-    const hit = hitChance(shares, def.gather);
-    // The whole sum, with the patches already cancelled — see the header.
-    const rate = (out * hit * meanLoad(typeId) * vigour * harvest) / FORAGE_CYCLE;
+      const efficiency = efficiencyOf(slots, here, def.crowding ?? 1);
+      const live = offersAnything(def.gather, biomeId);
+      // No patch count in it: a patch IS a drone, so the crew's rate is simply
+      // its headcount times what one of them manages.
+      const rate = live
+        ? (here * efficiency * meanLoad(typeId) * vigour * harvest) / FORAGE_CYCLE
+        : 0;
 
-    byType.push({
-      droneId: typeId,
-      name: def.name,
-      gather: def.gather,
-      count,
-      working: out,
-      landless: count - out,
-      hit,
-      rate,
-    });
-    total += rate;
-    working += out;
-    landless += count - out;
+      crews.push({
+        droneId: typeId, biomeId, drones: here, slots, efficiency, live, rate,
+      });
+      total += rate;
+      working += here;
 
-    if (rate > 0) {
-      // Split this type's rate across what it would find. The mix sums to the
-      // hit chance rather than to 1, so dividing by it turns "chance of finding
-      // this" into "share of what comes back".
-      const mix = findMix(state, territory, def.gather);
-      for (const [key, chance] of Object.entries(mix)) {
-        byFind[key] = (byFind[key] || 0) + (rate * chance) / (hit || 1);
+      if (rate > 0) {
+        const mix = findMix(state, def.gather, biomeId);
+        for (const [key, chance] of Object.entries(mix)) {
+          byFind[key] = (byFind[key] || 0) + rate * chance;
+        }
       }
     }
   }
 
-  return { capacity, patches, working, landless, total, byType, byFind };
+  const headcount = foragingTypes()
+    .reduce((a, t) => a + Math.floor(drones?.[t] || 0), 0);
+  return { crews, byFind, room, total, working, idle: headcount - working };
 }
 
-/** A find's name as the hive may say it — ??? until it has turned one up. */
+/** A find's name as the hive may say it — null until it has turned one up. */
 export function labelFor(state, key) {
   if (!isNamed(state, key)) return null;
   if (key.startsWith('@')) return ORGANISMS[key.slice(1)]?.name ?? null;
   return ITEMS[key]?.name ?? null;
+}
+
+/**
+ * How much more of this biome it would take to fit one more drone of each type.
+ *
+ * THE THRESHOLD IS THE POINT. Room is area over range, and range is per type, so
+ * ground arrives in lumps of different sizes — fifty square metres of wetland is
+ * twelve more foragers or one more hunter, and a two square metre sliver is
+ * neither. A player who can see "14 m² short of your first hunter here" has an
+ * expansion goal; one who can see only a price has a shrug.
+ */
+export function nextWholeDrone(state, biomeId, territory = state.territory) {
+  const area = territory?.[biomeId] || 0;
+  const out = [];
+  for (const typeId of foragingTypes()) {
+    const def = DRONE_TYPES[typeId];
+    if (!def.range) continue;
+    const slots = area / def.range;
+    const have = Math.floor(slots);
+    out.push({
+      droneId: typeId,
+      name: def.name,
+      range: def.range,
+      have,
+      // Square metres to the next whole one. Exactly `range` when the ground is
+      // empty, which is the honest reading: the first of anything costs a full
+      // range, there is no founder's discount.
+      needed: (have + 1) * def.range - area,
+      // True when this ground does not hold even one, which is the case the
+      // player most needs flagged — a biome can be bought and still be useless
+      // to the type they wanted it for.
+      none: have < 1,
+      offers: offersAnything(def.gather, biomeId),
+    });
+  }
+  return out;
 }
 
 /**
@@ -212,10 +205,11 @@ export function labelFor(state, key) {
  * stand on the larger holding. Everything the panel says is a difference between
  * two runs of one function, so the preview cannot drift away from the game.
  *
- * `shifts` is the mix comparison, biggest mover first, and it is deliberately
- * signed: taking more of the ground the hive already stands on makes a strange
- * biome's share FALL, and a player who is about to drown their acorn supply in
- * roadkill should be able to see it coming.
+ * `rateGain` is what the hive would ACTUALLY bring in more of, under the plan it
+ * currently has — which is nothing at all if every drone is already pinned to a
+ * target somewhere else. That is not a flaw in the preview, it is the answer:
+ * ground with nobody on it grows nothing. `room` is the other half, and the half
+ * a player is usually really buying.
  */
 export function claimPreview(state, biomeId, want, { vigour = 1, harvest = 1 } = {}) {
   const now = { ...(state.territory || {}) };
@@ -236,31 +230,51 @@ export function claimPreview(state, biomeId, want, { vigour = 1, harvest = 1 } =
     }))
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
-  // Ground the hive has never stood on. Its whole value is in the second list,
-  // and if the hive has no foragers spare it is ENTIRELY in the second list.
-  const fresh = !(now[biomeId] > 0);
+  // Room, per type, on THIS biome rather than across the hive — the whole
+  // reason the rewrite happened. Each entry says what the ground carries now,
+  // what it would carry, and whether the claim crosses a whole-drone line.
+  // Who ends up standing on this particular ground, before and after. Summed
+  // over types out of the crew lists rather than re-running the assignment,
+  // so it cannot disagree with the rates above it.
+  const onHere = (run) => run.crews
+    .filter((c) => c.biomeId === biomeId)
+    .reduce((a, c) => a + c.drones, 0);
+  const moving = onHere(gained) - onHere(before);
+
+  const beforeRoom = nextWholeDrone(state, biomeId, now);
+  const afterRoom = nextWholeDrone(state, biomeId, after);
+  const capacity = afterRoom.map((a, i) => ({
+    ...a,
+    was: beforeRoom[i].have,
+    gain: a.have - beforeRoom[i].have,
+    // The sentence worth printing when the gain is zero: how much further it
+    // would have to go before this type gets anything out of the purchase.
+    shortBy: a.have > beforeRoom[i].have ? 0 : a.needed,
+  }));
 
   return {
     biomeId,
     def: BIOMES[biomeId],
     want,
-    fresh,
+    fresh: !(now[biomeId] > 0),
     before,
     after: gained,
-    // The three deltas that decide whether to buy.
-    capacityGain: gained.capacity - before.capacity,
-    patchGain: gained.patches - before.patches,
-    // Drones standing around today that this ground would put to work. This is
-    // the figure that makes the rate gain non-zero, and the reason a full hive
-    // should hatch before it expands.
-    employs: gained.working - before.working,
+    capacity,
     // Snapped to zero at a thousandth of a microgram. The two sides are sums of
     // the same terms in a different order, so "no change" comes out as −1e−16 —
     // and a panel reading "−0 µg/s" looks like a bug in a way that "0" does not.
     rateGain: Math.abs(gained.total - before.total) < 1e-9 ? 0 : gained.total - before.total,
-    // True when the land is already carrying every forager the hive owns, so
-    // the claim buys headroom and a changed mix rather than intake today.
-    headroomOnly: gained.working - before.working <= 0,
+    // Drones that would end up standing HERE, rather than drones newly put to
+    // work. Under per-biome room nobody is ever truly idle — a crowded crew is
+    // inefficient, not unemployed — so "how many more are working" is almost
+    // always zero and would be a useless thing to print. "How many walk over
+    // here" is the question with an answer, and it is zero exactly when every
+    // drone is pinned by a target somewhere else.
+    employs: moving,
+    // True when the claim buys room and nothing else today. Not a warning: it
+    // is the normal case once the player is assigning deliberately, and the
+    // room is what was being bought.
+    roomOnly: moving <= 0,
     shifts,
   };
 }

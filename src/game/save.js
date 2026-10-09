@@ -21,6 +21,7 @@ import { reactive } from 'vue';
 import {
   state, replaceState, createInitialState, SAVE_VERSION, OPEN_MAPS, pushLog,
 } from './state.js';
+import { DISCOVERY_RESCALE } from './discovery.js';
 import { logIntro } from './actions.js';
 
 export const SAVE_KEY = 'hiveidle.save.v2';
@@ -463,6 +464,31 @@ function migrate(raw) {
   // back with an empty slot and starts its first timed job off the queue.
   if ((raw.version ?? 0) < 22) {
     raw.building = null;
+  }
+
+  // v23 is the land rewrite: a patch is one drone's ground on one biome, room
+  // is counted per biome, and the player assigns drones to ground.
+  if ((raw.version ?? 0) < 23) {
+    // The old `patches` were keyed by drone type and each carried the biome it
+    // had rolled. There is no honest way to turn those into crews — the whole
+    // point is that a drone now belongs to a biome rather than rolling one — so
+    // they are dropped and the first tick rolls fresh. One forage cycle of
+    // intake, at most.
+    delete raw.patches;
+    raw.crews = {};
+    // No targets: every drone spreads by area share, which is what the hive was
+    // doing before any of this existed. A returning save therefore behaves as
+    // it did until the player opens the panel and says otherwise.
+    raw.assign ??= {};
+
+    // Discovery now records once per DRONE rather than once per patch, and the
+    // old patch count was capped at twelve however big the hive got. So the
+    // thresholds went up by an order of magnitude (see discovery.js), and the
+    // counts already banked have to go up with them or a hive that had pinned
+    // down forty finds would come back having forgotten all of them.
+    for (const bucket of Object.values(raw.found || {})) {
+      for (const key of Object.keys(bucket)) bucket[key] *= DISCOVERY_RESCALE;
+    }
   }
 
   raw.version = SAVE_VERSION;

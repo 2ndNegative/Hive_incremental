@@ -1722,6 +1722,92 @@ textarea.save-box {
   vertical-align: baseline;
 }
 
+/*
+ * Assigning drones to ground.
+ *
+ * A stepper plus a number plus a fill, on every (biome × type) pairing. Small
+ * controls on purpose: there is one row per pairing and the grid gets tall, so
+ * the row has to stay the height of its text.
+ */
+.assign-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: 0 0 auto;
+}
+
+.btn-mini {
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.35rem;
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1;
+  color: var(--text-strong);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.btn-mini.is-wide {
+  min-width: 2.4rem;
+  font-size: 0.7rem;
+}
+
+.btn-mini:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-mini:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.assign-input {
+  width: 3rem;
+  height: 1.5rem;
+  padding: 0 0.3rem;
+  text-align: right;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--text-strong);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* The spinner arrows are a second, worse stepper beside the one above. */
+.assign-input::-webkit-inner-spin-button,
+.assign-input::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.assign-input {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Who is standing there now, left of the target stepper. Dimmer than the
+   target: it is a reading, not a control. */
+.assign-now {
+  min-width: 1.6rem;
+  text-align: right;
+  font-size: 0.78rem;
+  color: var(--text-strong);
+  padding-right: 0.25rem;
+}
+
+/* One crew's heading inside a biome group — smaller than the biome, bigger
+   than the finds underneath it. */
+.crew-line {
+  padding: 0.3rem 0.6rem 0.1rem;
+  font-size: 0.74rem;
+  color: var(--text-strong);
+}
+
 .offer-empty {
   padding: 0 0.6rem 0.4rem;
   font-size: 0.75rem;

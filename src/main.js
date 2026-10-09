@@ -47,11 +47,12 @@ import {
 import { ITEMS } from './game/definitions/items/index.js';
 import { ORGANISMS, preyFor } from './game/definitions/organisms.js';
 import {
-  BIOMES, BIOME_IDS, biomeShares, totalArea, holdings, landCapacity, patchCount,
+  BIOMES, BIOME_IDS, biomeShares, totalArea, holdings,
   ARIDITY, aridity, aridityOf,
-  FORAGERS_PER_SQUARE_METRE, AREA_PER_PATCH, ADJACENCY, realmOf, isDangerous, isColonisable,
+  ADJACENCY, realmOf, isDangerous, isColonisable,
   rollAdjacent,
 } from './game/definitions/biomes.js';
+import * as landmod from './game/land.js';
 import {
   EXPEDITION_OUTCOMES, expeditionSeconds, resolveExpedition, advanceExpeditions,
   CACHE_GRAMS, PATCH_AREA,
@@ -83,6 +84,7 @@ import {
   setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
   togglePinned, resetPinned, setMolding, toggleMolding, setMoldTarget,
   claimCost, claimableArea, claimTerritory, abandonTerritory,
+  setLandTarget, clearLandTargets, fillLandTarget,
   setGeneralBan, toggleGeneralBan, generalContents,
   queueBuild, unqueueBuild, moveQueued, clearBuildQueue,
   CLAIM_COST_PER_SQUARE_METRE, DANGEROUS_CLAIM_MULTIPLIER,
@@ -175,8 +177,20 @@ window.hive = {
   dangerousClaimMultiplier: DANGEROUS_CLAIM_MULTIPLIER,
   totalArea: () => totalArea(state),
   holdings: () => holdings(state),
-  landCapacity: () => landCapacity(state),
-  patchCount: () => patchCount(state),
+  // Room, per biome and per type, and who the plan puts where. The land layer
+  // is reachable from the console because every suite that drives it has to
+  // reach it from inside the page, and a production build has no module paths.
+  land: {
+    use: () => landmod.landUse(state),
+    slots: (biomeId, typeId) => landmod.slotsOn(state, biomeId, typeId),
+    efficiency: landmod.efficiencyOf,
+    assignment: () => landmod.assignmentOf(state),
+    apportion: landmod.apportion,
+    setTarget: setLandTarget,
+    fillTarget: fillLandTarget,
+    clearTargets: clearLandTargets,
+    nextWhole: (biomeId) => landvalue.nextWholeDrone(state, biomeId),
+  },
   // What ground is WORTH, as an expectation. Exposed because the suite that
   // proves the estimate against a long run of the game has to be able to reach
   // it from inside the page, and a production build has no module paths.
@@ -191,8 +205,7 @@ window.hive = {
       harvest: computeDerived(state).land.harvest,
       ...opts,
     }),
-    hitChance: (gather, territory) =>
-      landvalue.hitChance(biomeShares({ territory: territory ?? state.territory }), gather),
+    offers: (gather, biomeId) => landvalue.offersAnything(gather, biomeId),
     labelFor: (key) => landvalue.labelFor(state, key),
     meanLoad: landvalue.meanLoad,
   },
@@ -271,8 +284,8 @@ window.hive = {
     unfiled: unfiledTypes,
     foraging: foragingTypes,
     cogitDrawOf,
-    patches: (id) => forage.patchesFor(state, id),
-    rollPatch: (id, patch) => forage.rollPatch(state, id, patch),
+    patches: (id, biomeId, want) => forage.patchesFor(state, id, biomeId, want),
+    rollPatch: (id, biomeId, patch) => forage.rollPatch(state, id, biomeId, patch),
     nextMoldable: () => nextMoldable(state, computeCognition(state).free),
     moldStatus: (id, free) => moldStatus(state, id, free ?? computeCognition(state).free),
     nextMoldableFree: (free) => nextMoldable(state, free ?? computeCognition(state).free),
@@ -302,8 +315,6 @@ window.hive = {
   buildingCategoryOrder: BUILDING_CATEGORY_ORDER,
   charges: () => computeCharges(state),
   brownoutSeconds: BROWNOUT_SECONDS,
-  foragersPerSquareMetre: FORAGERS_PER_SQUARE_METRE,
-  areaPerPatch: AREA_PER_PATCH,
   fuelSwitchSeconds: FUEL_SWITCH_SECONDS,
   fuelLock: (key) => fuelLockFor(state, key),
   larvaCarbPerSecond: LARVA_CARB_PER_SECOND,

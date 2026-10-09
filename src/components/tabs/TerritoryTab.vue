@@ -18,15 +18,16 @@ import {
   isDangerous, colonisationBlock,
 } from '../../game/definitions/biomes.js';
 import { squarify } from '../../game/treemap.js';
-import { FORAGERS_PER_SQUARE_METRE, AREA_PER_PATCH } from '../../game/definitions/biomes.js';
+
 import { GATHER_TYPES, poolFor } from '../../game/definitions/forage.js';
 import { ORGANISMS, preyFor } from '../../game/definitions/organisms.js';
 import { ITEMS } from '../../game/definitions/items/index.js';
-import { DRONE_TYPES } from '../../game/definitions/drones.js';
+import { DRONE_TYPES, foragingTypes } from '../../game/definitions/drones.js';
 import { describeSlot, FORAGE_CYCLE } from '../../game/forage.js';
 import { formatMass, formatMassFlow, formatArea } from '../../game/units.js';
 import {
   claimCost, claimableArea, claimTerritory, abandonTerritory, DANGEROUS_CLAIM_MULTIPLIER,
+  setLandTarget, fillLandTarget, clearLandTargets,
 } from '../../game/actions.js';
 import { NUTRIENTS, substitutedEntries } from '../../game/definitions/nutrients.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
@@ -37,7 +38,9 @@ import {
 import {
   isNamed, rateLabel, rateConfidence, timesFound, preyKey, RANGE_AT, EXACT_AT,
 } from '../../game/discovery.js';
-import { claimPreview, hitChance, meanLoad } from '../../game/landvalue.js';
+import { claimPreview, offersAnything } from '../../game/landvalue.js';
+import { efficiencyOf } from '../../game/land.js';
+import { SNACK_SHARE } from '../../game/definitions/castes.js';
 
 const area = computed(() => totalArea(state));
 const land = computed(() => holdings(state)); // already sorted largest first
@@ -301,118 +304,137 @@ const learned = computed(() => {
 });
 
 /**
- * What is out on the land right now.
+ * WHO IS STANDING WHERE, grouped by the ground they are standing on.
  *
- * ONE ROW PER PATCH, not per drone type. The hive works several places at once
- * — how many is decided by how much ground it holds — and each of them is its
- * own find with its own share of the drones on it. A hive on four patches is
- * bringing in four different things, which is the whole reason to expand.
+ * A crew is one drone TYPE on one BIOME, and a patch inside it is one drone.
+ * Both of those used to be something else — a patch was 36 m² of unspecified
+ * ground worked by a fraction of a drone, and which biome it rolled was luck —
+ * so this panel used to be a flat list of twenty-five rows in no order, each
+ * stamped with the same drones-per-patch figure as if it varied.
  *
- * NOTHING HERE READS THE CASTES. There used to be a second loop over
- * CASTE_ORDER giving each gathering caste a row of its own, from before drone
- * types took the job over. CASTE_ORDER is now `['dormant']` and dormant has no
- * `gather` route — being dormant is where a drone is when it has no job — so
- * the loop could not produce a row under any state the game can reach, and
- * `derived.droneForage` above is the whole answer.
+ * The rows are AGGREGATED BY ITEM rather than listed per drone. Eight foragers
+ * on acorns is one line that says eight, not eight lines that say one, and it
+ * keeps reading at sixty drones as well as at six — which the per-drone version
+ * would not, and that was the real objection to a patch being a drone.
  */
 const outNow = computed(() => {
-  const groups = new Map();
-  for (const f of Object.values(derived.value.droneForage ?? {})) {
-    for (const patch of f.patches) {
-      // A crew keeps a patch slot for every patch the LAND offers, and works as
-      // many of them as it has drones — so a scavenger ×4 on twelve-patch
-      // ground holds eight slots it cannot staff. Those contributed fourteen
-      // rows of "no drone on it, 0 g/s" to a twenty-four row panel and buried
-      // the ten rows that said anything. The crew line above already says how
-      // many of its patches are open; the rows are for what is being worked.
-      if (!patch.worked) continue;
-      // A worked patch with no biome is one whose roll has not landed yet.
-      const key = patch.biomeId ?? 'nowhere';
-      let group = groups.get(key);
-      if (!group) {
-        group = {
-          key,
-          biome: patch.biomeId ? BIOMES[patch.biomeId] : null,
-          rows: [],
-          rate: 0,
+  const groups = [];
+  for (const biome of derived.value.land?.biomes ?? []) {
+    const crews = [];
+    let rate = 0;
+    for (const crew of derived.value.crews ?? []) {
+      if (crew.biomeId !== biome.biomeId) continue;
+      // itemId -> { drones on it, what they are bringing in }
+      const byItem = new Map();
+      for (const patch of crew.patches) {
+        const key = patch.itemId ?? '';
+        const row = byItem.get(key) ?? {
+          key, itemId: patch.itemId, drones: 0, rate: 0, grams: 0,
         };
-        groups.set(key, group);
+        row.drones += 1;
+        row.rate += patch.rate;
+        row.grams += patch.grams;
+        byItem.set(key, row);
       }
-      const found = describeSlot(patch);
-      group.rows.push({
-        id: `${f.droneId}-${patch.index}`,
-        patch: patch.index + 1,
-        crew: DRONE_TYPES[f.droneId]?.name ?? f.droneId,
-        found,
-        itemId: found.itemId ?? null,
-        drones: patch.drones,
-        rate: patch.rate,
-        grams: patch.grams,
-        worked: patch.worked,
-        empty: patch.empty,
-      });
-      group.rate += patch.rate;
+      const rows = [...byItem.values()]
+        .map((row) => ({
+          ...row,
+          id: `${crew.droneId}-${biome.biomeId}-${row.key}`,
+          // The average trip weight across the drones on this find, which is
+          // what the tooltip wants — the sum would be a number nothing means.
+          each: row.drones > 0 ? row.grams / row.drones : 0,
+          found: describeSlot({ itemId: row.itemId }, biome.biomeId),
+        }))
+        .sort((a, b) => b.rate - a.rate);
+      crews.push({ ...crew, name: DRONE_TYPES[crew.droneId]?.name ?? crew.droneId, rows });
+      rate += crew.rate;
     }
+    if (crews.length) groups.push({ ...biome, crews, rate });
   }
-  for (const group of groups.values()) group.rows.sort((a, b) => b.rate - a.rate);
-  return [...groups.values()].sort((a, b) => b.rate - a.rate);
+  return groups.sort((a, b) => b.rate - a.rate);
 });
 
-/**
- * The crews, one line each — and the home of the figure that used to be stamped
- * on every patch row.
- *
- * `drones per patch` is `working / open` for the whole TYPE. It is identical on
- * every row of that type by construction, so "×2.1" printed twenty-five times
- * was telling the player that it varies. It belongs here, where it is stated
- * once and is true.
- */
-const crews = computed(() =>
-  Object.values(derived.value.droneForage ?? {}).map((f) => ({
-    droneId: f.droneId,
-    name: f.name,
-    gather: f.gather,
-    count: f.count,
-    working: f.working,
-    landless: f.landless,
-    open: f.open,
-    perPatch: f.open > 0 ? f.working / f.open : 0,
-    // How often a trip finds anything at all on this mix of ground. A route
-    // with nothing to look for comes back empty, and the rate alone cannot
-    // tell a player whether that is bad luck or bad land.
-    hit: hitChance(shares.value, f.gather),
-    trip: meanLoad(f.droneId),
-    rate: f.rate,
-  })),
-);
-
-/** What the ground will carry, and how many places it is worked in. */
+/** What the land is doing overall. */
 const ground = computed(
-  () => derived.value.land
-    ?? { capacity: 0, patches: 0, working: 0, landless: 0, patchHeadroom: 0 },
+  () => derived.value.land ?? { area: 0, patches: 0, working: 0, idle: 0, biomes: [] },
 );
 const totalRate = computed(() => outNow.value.reduce((a, g) => a + g.rate, 0));
+const anyPatches = computed(() => outNow.value.length > 0);
+
+/* --------------------------------------------------------------- assignment */
+
 /**
- * Patches actually being worked, across every crew.
+ * The assignment panel: every biome held, every forage type, and the room each
+ * pairing has.
  *
- * NOT `derived.land.patches`, which is how many the GROUND offers — a figure
- * each crew gets its own copy of. Two crews on twelve-patch ground are on up to
- * twenty-four separate finds, and a headline reading "12" beside a list of
- * twenty-four rows is the kind of arithmetic that makes a player distrust the
- * whole panel.
+ * `target` is the plan and `drones` is who actually turned up — they differ
+ * whenever the hive has not molded enough yet, which is the case the panel
+ * exists to make visible. `planned` is the efficiency the target WOULD run at,
+ * so a wetland laid out for four hunters reads as full before the first hunter
+ * exists.
  */
-const patchesWorked = computed(() => outNow.value.reduce((a, g) => a + g.rows.length, 0));
-const anyPatches = computed(() => patchesWorked.value > 0);
+const plan = computed(() =>
+  (derived.value.land?.biomes ?? []).map((biome) => {
+    const rows = FORAGE_TYPES.map((typeId) => {
+      const def = DRONE_TYPES[typeId];
+      const slots = biome.area / def.range;
+      const crew = biome.crews.find((c) => c.droneId === typeId);
+      const target = crew?.target ?? 0;
+      const drones = crew?.drones ?? 0;
+      return {
+        droneId: typeId,
+        name: def.name,
+        range: def.range,
+        crowding: def.crowding ?? 1,
+        slots,
+        room: Math.floor(slots),
+        target,
+        drones,
+        // Square metres to the next whole one. The threshold figure — it is
+        // what turns "buy some wetland" into "buy fourteen more square metres
+        // of wetland and you can field your first hunter".
+        toNext: (Math.floor(slots) + 1) * def.range - biome.area,
+        efficiency: efficiencyOf(slots, drones, def.crowding ?? 1),
+        planned: efficiencyOf(slots, target, def.crowding ?? 1),
+        // The share of its ration this crew would still owe the stores. A
+        // drone grazes in proportion to what it finds, so crowding raises the
+        // food bill at the same time as it lowers the haul — see SNACK_SHARE.
+        keep: 1 - SNACK_SHARE * (offersAnything(def.gather, biome.biomeId)
+          ? efficiencyOf(slots, target || drones, def.crowding ?? 1)
+          : 0),
+        // Ground that offers this route nothing at all. A crew sent here comes
+        // back empty every single time, which the panel has to say before the
+        // player spends an hour finding out.
+        offers: offersAnything(def.gather, biome.biomeId),
+        held: state.droneTypes?.[typeId] || 0,
+      };
+    });
+    return { ...biome, rows };
+  }),
+);
+
+/** Forage types that exist as drones, for the assignment grid's columns. */
+const FORAGE_TYPES = foragingTypes();
+
+function setTarget(biomeId, typeId, n) {
+  setLandTarget(biomeId, typeId, n);
+}
+function bump(biomeId, typeId, by) {
+  const row = plan.value
+    .find((b) => b.biomeId === biomeId)?.rows.find((r) => r.droneId === typeId);
+  setLandTarget(biomeId, typeId, Math.max(0, (row?.target ?? 0) + by));
+}
 
 /* ----------------------------------------------- what a claim would be worth */
 
 /**
  * The claim dialog's second half: not what this ground costs, but what it does.
  *
- * Recomputed as the player drags the slider, from the same arithmetic the engine
- * runs — see landvalue.js. The one thing it must not do is flatter the purchase:
- * a hive whose foragers are all already on ground gains NO intake from more of
- * the same, and the honest version of this panel says so in bold.
+ * Recomputed as the player moves the figure, from the same arithmetic the engine
+ * runs — see landvalue.js. What it leads with is now a count of whole drones
+ * this ground would carry, because that is the thing being bought. The intake
+ * delta is underneath, and is often zero: ground with nobody assigned to it
+ * grows nothing until the player sends someone.
  */
 const claimValue = computed(() => {
   const patch = claimPatch.value;
@@ -427,8 +449,8 @@ const claimValue = computed(() => {
     // Only the movers worth a line, and only ones the hive could name. An
     // unnamed find would be "??? +1.2 g/s", which spoils that there is
     // something there without saying anything useful about it.
-    movers: preview.shifts.filter((s) => s.label && Math.abs(s.delta) > 1e-4).slice(0, 4),
-    unknowns: preview.shifts.filter((s) => !s.label && s.delta > 1e-4).length,
+    movers: preview.shifts.filter((x) => x.label && Math.abs(x.delta) > 1e-4).slice(0, 4),
+    unknowns: preview.shifts.filter((x) => !x.label && x.delta > 1e-4).length,
   };
 });
 
@@ -652,60 +674,53 @@ const claimValue = computed(() => {
                 >{{ formatMassFlow(claimValue.rateGain) }}</span>
               </div>
 
-              <!-- THE HEADLINE IS THE HONEST ONE. Land is a ceiling on drones,
-                   not a multiplier on them, so a hive with every forager
-                   already on ground gains nothing today by buying more. That
-                   was invisible, and it is the whole decision. -->
-              <p
-                v-if="claimValue.headroomOnly"
-                class="notice is-warn"
-                style="margin: 0 0 0.45rem"
-              >
-                <strong class="warn">No extra intake today.</strong>
-                Every forager the hive owns is already on ground, so this buys room for
-                <strong>{{ claimValue.capacityGain }}</strong> more of them
-                <template v-if="claimValue.fresh">and a share of new ground</template>
-                — not a faster trip for the ones already out. Hatch into it and it pays.
-              </p>
-              <p v-else class="notice" style="margin: 0 0 0.45rem">
-                <strong class="good">Puts {{ claimValue.employs }}
-                  idle forager{{ claimValue.employs === 1 ? '' : 's' }} to work.</strong>
-                That is where the {{ formatMassFlow(claimValue.rateGain) }} comes from.
-              </p>
-
+              <!-- THE HEADLINE IS A COUNT OF DRONES. Room is per biome and
+                   per type now, so "what would this carry" has whole numbers in
+                   it, and the threshold — how much further to the next whole
+                   one — is the sentence that turns a price into a goal. -->
               <div class="data-table">
-                <div class="field-row">
-                  <span>Foragers the land will carry</span>
-                  <span class="num">
-                    {{ claimValue.before.capacity }} →
-                    <strong>{{ claimValue.after.capacity }}</strong>
-                  </span>
-                </div>
-                <div class="field-row stacked-help">
+                <div
+                  v-for="c in claimValue.capacity"
+                  :key="c.droneId"
+                  class="field-row stacked-help"
+                >
                   <span class="field-label">
-                    Patches worked
-                    <span v-if="!claimValue.patchGain" class="field-help">
-                      No new places — the hive is already working as many as it can read. Variety
-                      comes from the MIX of ground now, not from more of it.
-                    </span>
-                    <span v-else class="field-help">
-                      Each one its own find, rolled separately against the whole territory.
+                    {{ c.name }}
+                    <span v-if="!c.offers" class="bad">· nothing here for them</span>
+                    <span class="field-help">
+                      {{ c.range }} m² each.
+                      <template v-if="c.gain > 0">
+                        <span class="good">Room for {{ c.gain }} more.</span>
+                      </template>
+                      <template v-else-if="c.none">
+                        <span class="bad">Still {{ formatArea(c.needed) }} m² short of the
+                          first one</span> — this much is not enough ground for even one.
+                      </template>
+                      <template v-else>
+                        No extra room: {{ formatArea(c.shortBy) }} m² more would buy the next.
+                      </template>
                     </span>
                   </span>
                   <span class="num">
-                    {{ claimValue.before.patches }} →
-                    <strong>{{ claimValue.after.patches }}</strong>
-                  </span>
-                </div>
-                <div class="field-row">
-                  <span>Share of every roll</span>
-                  <span class="num">
-                    {{ ((shares[claimValue.biomeId] || 0) * 100).toFixed(0) }}% →
-                    <strong>{{ (((state.territory?.[claimValue.biomeId] || 0) + claimPatch.want)
-                      / (area + claimPatch.want) * 100).toFixed(0) }}%</strong>
+                    {{ c.was }} → <strong :class="c.gain > 0 ? 'good' : ''">{{ c.have }}</strong>
                   </span>
                 </div>
               </div>
+
+              <p v-if="claimValue.employs > 0" class="notice" style="margin: 0.45rem 0 0">
+                <strong class="good">{{ claimValue.employs }}
+                  drone{{ claimValue.employs === 1 ? '' : 's' }} would walk over on their
+                  own</strong>, pulled off ground nobody has claimed for them
+                <template v-if="claimValue.rateGain > 0">
+                  — worth {{ formatMassFlow(claimValue.rateGain) }}</template>. Set a target to
+                send more, or to send different ones.
+              </p>
+              <p v-else class="notice" style="margin: 0.45rem 0 0">
+                <strong>Nobody walks over on their own.</strong>
+                Every drone the hive owns is pinned by a target somewhere else, so this buys
+                room and nothing else until a target sends someone — which is usually the point
+                of buying it.
+              </p>
 
               <!-- What changes about WHAT comes in. The signed deltas matter:
                    more of one biome dilutes every other one, and a player about
@@ -753,127 +768,182 @@ const claimValue = computed(() => {
       </div>
     </div>
 
+    <!-- --------------------------------------------------- who works what ground -->
+    <div v-if="plan.length" class="panel-box" style="margin-bottom: 0.75rem">
+      <div class="panel-head">
+        <span>Who works what</span>
+        <span class="muted num">{{ ground.working }} out · {{ ground.idle }} idle</span>
+      </div>
+
+      <div class="panel-body">
+        <p class="muted" style="font-size: 0.78rem; margin: 0 0 0.5rem">
+          A drone works one biome and finds only what is on it. How many fit is the biome's
+          area over that type's <strong>range</strong> — and past that they start treading on
+          each other, gently or badly depending on the animal. Set a target and the hive sends
+          them; set one higher than the hive owns and the ground waits for the drones to exist.
+        </p>
+        <p v-if="ground.idle > 0" class="warn" style="font-size: 0.78rem; margin: 0 0 0.5rem">
+          <strong class="bad">{{ ground.idle }} standing idle.</strong>
+          Every target is filled and these had nowhere left to go — raise one, or take ground.
+        </p>
+      </div>
+
+      <div v-for="b in plan" :key="b.biomeId" class="panel-body tight">
+        <div class="offer-head">
+          <span>
+            <span class="terr-key-dot" :style="{ background: b.def.colour }"></span>
+            {{ b.def.name }}
+            <span class="muted">· {{ formatArea(b.area) }} m²</span>
+          </span>
+          <span class="offer-head-right">
+            <span
+              v-if="b.claimed > 1"
+              class="focus-note bad"
+            >planned at {{ (b.claimed * 100).toFixed(0) }}% of what it carries</span>
+            <button class="focus-clear" @click="clearLandTargets(b.biomeId)">clear</button>
+          </span>
+        </div>
+
+        <div v-for="r in b.rows" :key="r.droneId" class="field-row stacked-help assign-row">
+          <span class="field-label">
+            {{ r.name }}
+            <span v-if="!r.offers" class="bad">· nothing here for them</span>
+            <span class="field-help">
+              <template v-if="r.offers">
+                Room for <strong>{{ r.room }}</strong> at {{ r.range }} m² each.
+                <template v-if="r.room < 1">
+                  <span class="bad">{{ formatArea(r.toNext) }} m² short of the first one.</span>
+                </template>
+                <template v-else>
+                  {{ formatArea(r.toNext) }} m² more buys the next.
+                </template>
+                <template v-if="r.target > 0">
+                  Planned at <strong :class="r.planned > 0.85 ? 'good' : r.planned > 0.4
+                    ? 'warn' : 'bad'">{{ (r.planned * 100).toFixed(0) }}%</strong> each<template
+                      v-if="r.drones !== r.target"
+                    >, <span class="warn">{{ r.drones }} of {{ r.target }} there so far</span>
+                    </template>.
+                  <!-- Crowding costs twice: less comes in, and more goes out,
+                       because a drone that finds less snacks less. Said here
+                       because here is where the decision is made. -->
+                  Eating <strong :class="r.keep > 0.75 ? 'bad' : 'muted'">{{
+                    (r.keep * 100).toFixed(0) }}%</strong> of their keep from the stores.
+                </template>
+                <template v-else-if="r.drones > 0">
+                  <strong>{{ r.drones }} there now</strong>, spread automatically because
+                  nothing else has claimed them — set a target to pin them here.
+                </template>
+              </template>
+              <template v-else>
+                This ground offers the {{ r.name.toLowerCase() }} route nothing at all. A drone
+                sent here walks out, finds nothing and walks back, every single trip.
+              </template>
+            </span>
+          </span>
+
+          <span class="assign-controls">
+            <!-- What is actually standing there, beside what was asked for. The
+                 two differ while the hive is still molding into a plan, and
+                 that gap is the thing targets exist to make visible. -->
+            <span
+              class="assign-now num"
+              :class="r.drones > 0 ? '' : 'muted'"
+              :title="`${r.drones} ${r.name.toLowerCase()}${r.drones === 1 ? '' : 's'} here now`"
+            >{{ r.drones }}</span>
+            <button class="btn-mini" :disabled="r.target <= 0" @click="bump(b.biomeId, r.droneId, -1)">−</button>
+            <input
+              class="assign-input num"
+              type="number"
+              min="0"
+              :value="r.target"
+              :aria-label="`${r.name} on ${b.def.name}`"
+              @change="setTarget(b.biomeId, r.droneId, $event.target.value)"
+            />
+            <button class="btn-mini" @click="bump(b.biomeId, r.droneId, 1)">+</button>
+            <button
+              class="btn-mini is-wide"
+              :disabled="!r.offers || r.room < 1"
+              title="Fill this ground to the last drone it carries at full rate"
+              @click="fillLandTarget(b.biomeId, r.droneId)"
+            >fill</button>
+          </span>
+        </div>
+      </div>
+    </div>
+
     <!-- ------------------------------------------------------- who is on what -->
-    <div v-if="ground.patches || anyPatches" class="panel-box" style="margin-bottom: 0.75rem">
+    <div v-if="anyPatches" class="panel-box" style="margin-bottom: 0.75rem">
       <div class="panel-head">
         <span>Out now</span>
         <span class="muted num">{{ formatMassFlow(totalRate) }}</span>
       </div>
 
-      <!-- The three figures that decide what to do next, as figures rather than
-           as a paragraph: how much the ground will carry, how much of that is
-           taken, and how many places it is worked in. -->
       <div class="panel-body">
         <div class="land-stats">
           <span class="land-stat">
-            <span class="land-stat-num num">{{ ground.working.toFixed(0) }}<span
+            <span class="land-stat-num num">{{ ground.working }}<span
               class="muted"
-            >/{{ ground.capacity.toFixed(0) }}</span></span>
+            >/{{ ground.working + ground.idle }}</span></span>
             <span class="land-stat-label">drones out</span>
           </span>
           <span class="land-stat">
-            <span class="land-stat-num num">{{ patchesWorked }}</span>
-            <span class="land-stat-label">patches worked</span>
+            <span class="land-stat-num num">{{ outNow.length }}</span>
+            <span class="land-stat-label">biomes worked</span>
           </span>
           <span class="land-stat">
             <span class="land-stat-num num">{{ formatArea(area) }}</span>
             <span class="land-stat-label">m² held</span>
           </span>
         </div>
-
-        <p class="muted" style="font-size: 0.78rem; margin: 0.5rem 0 0">
-          Ground carries one forager per
-          {{ (1 / FORAGERS_PER_SQUARE_METRE).toFixed(1) }} m², and opens
-          <strong>{{ ground.patches }}</strong> patch{{ ground.patches === 1 ? '' : 'es' }}
-          <em>for each crew</em> — one per {{ AREA_PER_PATCH }} m², never fewer than the number
-          of biomes held, never more than {{ ground.patches + ground.patchHeadroom }}, and never
-          more than the crew has drones to staff. Each patch is its own find, rolled separately,
-          so <strong>patches decide what comes in and capacity decides how much</strong>.
-        </p>
-        <p
-          v-if="ground.patchHeadroom === 0"
-          class="muted"
-          style="font-size: 0.78rem; margin: 0.35rem 0 0"
-        >
-          The hive is working as many separate patches as it can read. More ground still carries
-          more foragers — it just will not add places.
-        </p>
-        <p v-if="ground.landless > 0" class="warn" style="font-size: 0.78rem; margin: 0.35rem 0 0">
-          <strong class="bad">{{ ground.landless.toFixed(0) }} with nowhere to work.</strong>
-          The hive holds more foragers than its ground will carry. More land, or fewer drones.
-        </p>
       </div>
 
-      <!-- One line per CREW, which is where the per-patch drone count lives.
-           It is `working / open` for the whole type, so it was identical on
-           every patch row it used to be printed on. -->
-      <div class="panel-body tight">
-        <div v-for="c in crews" :key="c.droneId" class="field-row stacked-help">
-          <span class="field-label">
-            {{ c.name }} <span class="muted">×{{ c.count }}</span>
-            <span class="field-help">
-              {{ c.working }} on the ground across {{ c.open }}
-              patch{{ c.open === 1 ? '' : 'es' }} —
-              <strong>{{ c.perPatch < 1 ? c.perPatch.toFixed(2) : c.perPatch.toFixed(1) }}
-                drone{{ c.perPatch === 1 ? '' : 's' }} per patch</strong>, each carrying about
-              {{ formatMass(c.trip) }} back every {{ FORAGE_CYCLE }}s.
-              <template v-if="c.hit < 0.999">
-                {{ ((1 - c.hit) * 100).toFixed(0) }}% of trips find nothing, because that share of
-                the hive's land offers this route nothing at all.
-              </template>
-              <template v-if="c.landless > 0">
-                <span class="bad">{{ c.landless }} cannot be fitted on.</span>
-              </template>
-            </span>
-          </span>
-          <span class="num" :class="c.rate > 0 ? 'good' : 'bad'">{{ formatMassFlow(c.rate) }}</span>
-        </div>
-      </div>
-
-      <!-- And the patches themselves, under the ground they are on. The panel's
-           job is to answer "which ground is worth more", and a flat list of
-           twenty-five rows in drone order never answered it. -->
-      <div v-for="g in outNow" :key="g.key" class="panel-body tight">
+      <!-- Grouped by ground, then by crew, then by find. One line per FIND
+           rather than per drone: eight foragers on acorns is one row that says
+           eight, which keeps reading at sixty drones as well as at six. -->
+      <div v-for="g in outNow" :key="g.biomeId" class="panel-body tight">
         <div class="offer-head">
           <span>
-            <span
-              v-if="g.biome"
-              class="terr-key-dot"
-              :style="{ background: g.biome.colour }"
-            ></span>
-            {{ g.biome ? g.biome.name : 'Nowhere' }}
-            <span class="muted">· {{ g.rows.length }}
-              patch{{ g.rows.length === 1 ? '' : 'es' }}</span>
+            <span class="terr-key-dot" :style="{ background: g.def.colour }"></span>
+            {{ g.def.name }}
+            <span class="muted">· {{ g.drones }} drone{{ g.drones === 1 ? '' : 's' }}</span>
           </span>
           <span class="num" :class="g.rate > 0 ? 'good' : 'muted'">
             {{ formatMassFlow(g.rate) }}
           </span>
         </div>
 
-        <div v-for="r in g.rows" :key="r.id" class="field-row stacked-help">
-          <span class="field-label">
-            <span class="muted">Patch {{ r.patch }}</span>
-            <span class="sep">·</span>
-            <template v-if="r.worked && !r.empty">
-              <button
-                v-if="r.itemId"
-                class="codex-link"
-                @click="showInCodex(r.itemId)"
-              >{{ r.found.label.toLowerCase() }}</button>
-              <strong v-else>{{ r.found.label.toLowerCase() }}</strong>
-            </template>
-            <span v-else-if="!r.worked" class="muted">no drone on it</span>
-            <span v-else class="warn">nothing of this kind here</span>
-            <span class="field-help">
-              {{ r.crew }}<span class="sep">·</span>{{
-                r.drones < 1 ? r.drones.toFixed(2) : r.drones.toFixed(1)
-              }} drone{{ r.drones === 1 ? '' : 's' }}<template v-if="r.grams">,
-                {{ formatMass(r.grams) }} each per trip, rolling again within
-                {{ FORAGE_CYCLE }}s</template>.
+        <template v-for="c in g.crews" :key="c.droneId">
+          <div class="crew-line">
+            {{ c.name }} ×{{ c.drones }}
+            <span
+              :class="c.efficiency > 0.85 ? 'muted' : c.efficiency > 0.4 ? 'warn' : 'bad'"
+            >· {{ (c.efficiency * 100).toFixed(0) }}% each</span>
+            <span v-if="c.slots < c.drones" class="muted">
+              · room for {{ Math.floor(c.slots) }}
             </span>
-          </span>
-          <span class="num" :class="r.rate > 0 ? 'good' : 'bad'">{{ formatMassFlow(r.rate) }}</span>
-        </div>
+          </div>
+
+          <div v-for="r in c.rows" :key="r.id" class="field-row stacked-help">
+            <span class="field-label">
+              <template v-if="r.itemId">
+                <button class="codex-link" @click="showInCodex(r.itemId)">
+                  {{ r.found.label.toLowerCase() }}
+                </button>
+              </template>
+              <span v-else class="warn">nothing found</span>
+              <span class="muted">×{{ r.drones }}</span>
+              <span class="field-help">
+                {{ c.name }}<span class="sep">·</span>{{ r.drones }}
+                drone{{ r.drones === 1 ? '' : 's' }}<template v-if="r.each">,
+                  {{ formatMass(r.each) }} each per trip, rolling again within
+                  {{ FORAGE_CYCLE }}s</template>.
+              </span>
+            </span>
+            <span class="num" :class="r.rate > 0 ? 'good' : 'bad'">
+              {{ formatMassFlow(r.rate) }}
+            </span>
+          </div>
+        </template>
       </div>
     </div>
 

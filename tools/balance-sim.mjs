@@ -19,6 +19,7 @@ import {
 } from '../src/game/engine.js';
 import {
   buildStructure, setMolding, setActive, research, consumeBiomass,
+  claimTerritory, claimableArea, claimCost, setMoldTarget,
 } from '../src/game/actions.js';
 import { chooseOrigin, originsFor } from '../src/game/run.js';
 import { RESEARCH, RESEARCH_ORDER } from '../src/game/definitions/research.js';
@@ -26,7 +27,7 @@ import { STRUCTURE_ORDER, STRUCTURES } from '../src/game/definitions/structures.
 import { payableCost } from '../src/game/definitions/nutrients.js';
 import { DRONE_TYPES, DRONE_TYPE_ORDER } from '../src/game/definitions/drones.js';
 import { NUTRIENTS, MACROS, MICROS, isRevealed } from '../src/game/definitions/nutrients.js';
-import { holdings, totalArea } from '../src/game/definitions/biomes.js';
+import { holdings, totalArea, isColonisable } from '../src/game/definitions/biomes.js';
 import { formatDuration } from '../src/game/format.js';
 import { formatMass, formatEnergy, formatPower, formatMassFlow } from '../src/game/units.js';
 
@@ -146,6 +147,112 @@ function botMold(derived) {
     if (!DRONE_TYPES[id].unlock(state)) continue;
     const on = Boolean(state.droneMolding?.[id]?.on);
     if (on !== room) setMolding(id, room);
+  }
+
+  // AND A SLOT HELD BACK FOR AN EXPLORER.
+  //
+  // `nextMoldable` presses the first eligible type in declared order and the
+  // Forager is first, so without a ceiling on it the Foragers fill the cap and
+  // no Explorer is ever pressed — which is exactly what happened: the bot ran
+  // six hours on its 36 m² landing site on every seed, and the sim reported the
+  // economy as broken when the truth was that the bot never went outside.
+  //
+  // A cap of three makes this an expensive reservation, a third of the
+  // workforce. That is the real trade and a player makes it too: the ground an
+  // Explorer finds is worth more than the grams a third Forager brings back.
+  // The ceiling has to be on the SUM, not on each type: giving every gathering
+  // type a target of cap−1 let the Forager take two and the Scavenger the
+  // third, and the Explorer — last in declared order — still never got pressed.
+  //
+  // AND ONLY WHEN IT CAN PAY FOR ONE. An Explorer costs 250 g of fat against a
+  // Forager's 5 — fifty times — plus 250 g each of water and (unassayed)
+  // mineral mass. Holding a slot open for one the hive cannot afford is a slot
+  // standing empty, so the reservation waits until the larder can cover it.
+  // Which is itself a finding: expansion is gated on fat, not on insight.
+  const canExplore = DRONE_TYPES.explorer?.unlock(state)
+    && canAfford(state, payableCost(state, DRONE_TYPES.explorer.cost));
+  const keep = canExplore ? EXPLORERS : 0;
+  if (keep) setMoldTarget('explorer', keep);
+  const gatherers = DRONE_TYPE_ORDER.filter(
+    (id) => id !== 'explorer' && DRONE_TYPES[id].unlock(state),
+  );
+  let slots = Math.max(1, derived.droneCap - keep);
+  for (const id of gatherers) {
+    // Front-loaded rather than split evenly: with three slots and two types,
+    // two Foragers and one Scavenger beats one and a half of each, and the
+    // declared order is the game's own answer to which matters more.
+    const share = Math.ceil(slots / Math.max(1, gatherers.length - gatherers.indexOf(id)));
+    setMoldTarget(id, share);
+    slots -= share;
+  }
+}
+
+/**
+ * KEEP ONE EXPLORER, AND TAKE THE GROUND IT FINDS.
+ *
+ * The bot used to sit on its landing site for the whole run. Six hours on
+ * 36 m², every time, on every seed — which meant the sim was measuring a game
+ * nobody plays, and measuring it badly: it reported "stalled before Glycolysis"
+ * on three seeds in seven and the honest reading was "the bot refused to
+ * expand", not "the economy is broken". Expansion is the main economic lever in
+ * the game and a bot that will not pull it is not a balance sim, it is a
+ * screenshot.
+ *
+ * Two parts, because expansion is two mechanics:
+ *
+ *   MAPPING. An Explorer walks out past the holdings and brings back ground.
+ *   Nothing can be claimed until one has found it, so the bot keeps exactly one
+ *   — enough to keep ground arriving, few enough that it is not a workforce
+ *   decision in disguise. A second Explorer is a real strategic choice and the
+ *   bot should not be making it silently.
+ *
+ *   CLAIMING. Ground is paid for in nutrients. The bot takes what it can afford
+ *   up to CLAIM_BITE, rather than everything it can afford, for the same reason
+ *   it saves up for the next building instead of buying a cheaper one: a hive
+ *   that spends its whole larder on dirt has no larder.
+ */
+
+/** Explorers the bot keeps. One. See above. */
+const EXPLORERS = 1;
+
+/**
+ * The most ground the bot takes in one go, in square metres.
+ *
+ * A bite rather than the lot. Thirty-six is the landing site, so this doubles a
+ * young hive in one claim and is a rounding error to an old one — which is the
+ * right shape: early ground is transformative and late ground is incremental.
+ */
+const CLAIM_BITE = 36;
+
+/**
+ * The share of a nutrient the bot will spend on ground in one claim.
+ *
+ * Ground is bought with the same protein and fibre the next building needs, and
+ * `botAct` saves up head-first — so an unbounded claim would quietly starve the
+ * build queue forever. Half is enough to keep expanding and not enough to stall
+ * construction.
+ */
+const CLAIM_BUDGET = 0.25;
+
+function botExpand() {
+  const mapped = Object.entries(state.unclaimed || {})
+    .filter(([id, area]) => area > 0 && isColonisable(state, id));
+  if (!mapped.length) return;
+
+  // Biggest find first: the one most likely to be worth a whole crew.
+  mapped.sort((a, b) => b[1] - a[1]);
+  for (const [biomeId] of mapped) {
+    const affordable = claimableArea(biomeId);
+    if (affordable <= 0) continue;
+    // What the budget allows, which is what stops ground competing with the
+    // building queue for the same protein.
+    const unit = claimCost(biomeId, 1);
+    let budgeted = CLAIM_BITE;
+    for (const [n, per] of Object.entries(unit)) {
+      if (per > 0) budgeted = Math.min(budgeted, ((state.nutrients[n] || 0) * CLAIM_BUDGET) / per);
+    }
+    const want = Math.min(affordable, CLAIM_BITE, budgeted);
+    if (want >= 1 && claimTerritory(biomeId, want) > 0) return;
   }
 }
 
@@ -321,6 +428,7 @@ while (elapsed < TOTAL) {
   const derived = tick(state, STEP);
   if (derived.energy.ratio < 0.999) starvedTicks += 1;
   botMold(derived);
+  botExpand();
   botAct();
   elapsed += STEP;
 

@@ -242,6 +242,19 @@ function formatReserve(seconds) {
                 · eating {{ formatMassFlow(-dronesFeed.wantGrams) }}
                 {{ NUTRIENTS[dronesFeed.nutrient].name.toLowerCase() }}
               </template>
+              <!-- A drone out on ground it can work is standing in its own
+                   dinner. Shown as a count of drones rather than a percentage,
+                   because the bill above is a headcount and the two should
+                   obviously be the same arithmetic. -->
+              <template v-if="dronesFeed.grazed > 0.05">
+                · <span class="good">{{ dronesFeed.grazed.toFixed(1) }} of them feeding
+                  themselves out there</span>, so the stores pay for
+                {{ dronesFeed.billable.toFixed(1) }}
+              </template>
+              <template v-else-if="dronesFeed.drones > 0">
+                · <span class="warn">none of them are feeding themselves</span> — nobody is on
+                ground that offers their route anything
+              </template>
               <template v-if="dronesFeed.hungry">
                 · <span class="bad">
                   short — only {{ Math.round(dronesFeed.ratio * 100) }}% of the ration, so the

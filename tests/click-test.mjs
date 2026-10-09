@@ -66,7 +66,7 @@ const load = await p.evaluate(() => {
   const def = hive.drones.types.forager;
   const out = [];
   for (let i = 0; i < 400; i += 1) {
-    const patch = hive.forage.rollPatch(hive.state, 'forager', {});
+    const patch = hive.forage.rollPatch(hive.state, 'forager', 'temperateForest', {});
     if (patch.itemId) out.push(patch.grams);
   }
   return { min: def.load.min, max: def.load.max, rolls: out };

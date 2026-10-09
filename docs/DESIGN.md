@@ -260,13 +260,15 @@ src/
   App.vue                  shell — topbar, nutrient panel, tab host
   units.js                 SI formatting for joules, grams and watts
   game/
-    state.js               the reactive state object, and SAVE_VERSION (22)
+    state.js               the reactive state object, and SAVE_VERSION (23)
     engine.js              computeDerived(), tick(), metabolism  <- the heart
     actions.js             everything the player can do
     save.js                localStorage, versioned and forward-tolerant
     offline.js             the catch-up: scaled step size, chunked, skippable
     run.js                 a run from seed mass to wherever it got to; restarting
-    forage.js              forage rolls — what a patch of land actually yields
+    forage.js              forage rolls — what one drone's ground yields
+    land.js                room per biome per type, crowding, who stands where
+    landvalue.js           what ground is worth, before it is paid for
     discovery.js           what the hive has found out about its own ground
     focus.js               telling a gathering route what to look for
     expedition.js          Explorers: they leave, and might not come back
@@ -430,68 +432,195 @@ caught that: given a bonus on a channel, **does the number it names actually mov
 channel, one at a time, against the figure its `applied` field points at. It is deliberately
 not a unit test of `factor()`; `factor()` was never the part that broke.
 
-## What ground is worth
+## Land: range, crowding, and who stands where
 
-Territory used to be the one purchase the game would not price. The tab said how big a patch
-was and what it cost in nutrients; what it would *do* was left to the player to find out by
-buying it and watching the intake for an hour. `src/game/landvalue.js` answers that question
-before the money changes hands, and the answer turned out to be less flattering — and more
-useful — than expected.
+Territory was decorative for most of the game's life. It had a price and a tooltip and no
+teeth, and the reason was arithmetic rather than design: a forager needed 2.5 m², so 540 m²
+carried 216 of them, and cognition caps the hive at a few dozen. The ceiling was two orders
+of magnitude above the floor. Three further things followed from the same model and all of
+them were wrong:
 
-### The patches cancel
+- **The patch size was the opening tile.** `AREA_PER_PATCH` was 36, and the Anthill starts on
+  36 m² of temperate forest. It had been chosen once and reasoned backwards from ever since.
+- **Holding a sliver of everything was strictly correct.** `patchCount` floored at the number
+  of biomes held, and every patch rolled a biome against the *whole* territory before it
+  rolled a find — so two square metres of anything bought full access to its forage table for
+  nothing. That was not an exploit players found. It was the rule, written down.
+- **There was no decision in any of it.** Drones were shared out in declared type order,
+  which is a tiebreak, not a choice.
 
-Work the engine's forage sum through symbolically. Per drone type, `computeDerived` has:
+### A patch is a drone
+
+The unit is the drone now. Each foraging type declares a `range` in square metres — the
+ground one of them needs to work at full rate — and room is counted **per biome**:
 
 ```
-open     = min(patches, floor(working))
-perPatch = working / open
-rate     = Σ over the `open` live patches of  grams × perPatch × vigour / FORAGE_CYCLE
+slots(biome, type) = area(biome) / range(type)
 ```
 
-Every live patch draws from the same distribution, so in expectation each carries the same
-grams — and `open × perPatch` is just `working` again. The whole thing collapses to:
+The hive does not run out of land. It runs out of *farmland*, and the ninety square metres of
+it that exist hold twenty-two foragers or six scavengers and not both. That is the decision,
+and it exists because the routes pay in different currencies: standing vegetation is water,
+fibre and carbohydrate, carrion is fat and protein. A hive drowning in fibre while starving
+for protein — which is what the balance sim has been reporting for months — now has a lever
+to pull that is not "build another store".
+
+### Crowding, in one number
+
+Past its room a drone loses ground, and how fast is the type's business:
 
 ```
-rate = working × P(a trip finds anything) × mean load × vigour / FORAGE_CYCLE × harvest
+efficiency per drone = min(1, slots / drones) ** crowding
 ```
 
-**The patch count is not in it.** Twelve patches bring in twelve things at a twelfth the rate
-each instead of one thing in a lump; the mass is identical. Patches are *variance*, and
-variance is worth real money downstream — a narrow intake overflows one item's shelf while
-the gut idles — but it is not intake, and a preview that implied otherwise would be lying to
-the player about the thing they were paying for.
+Below 1 the curve is concave and the total still climbs: a crowded forager is merely slower,
+because there is always another bush. At 1 the total caps — ten scavengers on one carcass
+bring back one carcass. Above 1 the total *falls*: two hunters inside one home range do not
+split the prey, they drive it off, and the second one costs the hive the first one's dinner.
 
-That leaves exactly two honest things to say about a patch of ground:
+| route | range | crowding | at 50% of its range | at 10% | drone |
+|---|---|---|---|---|---|
+| forager | 4 m² | `tolerant` 0.5 | 71% | 32% | Forager |
+| scavenger | 14 m² | `touchy` 1.5 | 35% | 3.2% | Scavenger |
+| excavator | 10 m² | `even` 1 | 50% | 10% | *not built* |
+| siphon | 25 m² | `territorial` 2.5 | 18% | 0.3% | *not built* |
+| hunter | 50 m² | `solitary` 4 | 6.3% | 0.01% | *not built* |
 
-1. **How many more foragers it will carry**, and therefore whether it adds any intake *at
-   all* today. Land is a ceiling on drones, not a multiplier on them. A hive whose every
-   forager is already on ground gains nothing this minute by buying more — it buys headroom.
-   That was invisible, and it is the whole decision: claim now, or hatch first.
-2. **What it changes about what comes in.** A biome's share of every roll is its area over
-   the total, so a strange biome rewrites the mix and more of a familiar one barely moves it.
-   This is where unfamiliar ground earns a price that familiar ground does not.
+One exponent gives both shapes, and it is what makes a sliver of ground *type-dependent*
+rather than merely small. Two square metres of farmland is half a forager's range — one
+forager at 71%, worth having. It is a twenty-fifth of a hunter's, which at `solitary` is three
+ten-thousandths of a hunter. The hive cannot nibble its way to a hunting ground; it has to
+take one. That is the pressure towards large contiguous holdings, and it replaces the old
+pressure towards a sliver of everything.
 
-The claim dialog says both, and when the first one is zero it says so in a warning box rather
-than printing `+0.0 g/s` and hoping nobody reads it.
+The bottom three routes have complete forage tables (119 huntable items plus the prey
+organisms, 13 excavated, 4 siphoned) and no drone to work them. Their figures are written
+down in `drones.js` so the whole table balances in one place. A Hunter in particular needs the
+carcass-into-cuts path wired through the drone route first; today only the parked hunter
+*caste* rolls prey.
 
-### It is checked against the game, not against itself
+### Snacking: crowding costs twice
 
-`tests/landvalue-test.mjs` sets up a hive, takes the estimate, then runs **twenty thousand
-ticks** of the real engine and averages its instantaneous forage rate. The two agree to
-within half a percent. Nothing else in the suites would have caught the cancellation being
-wrong, because every other figure on the tab comes out of the engine and would have been
-wrong in the same direction.
+A drone out on ground it can work is standing in the middle of its own dinner. It eats some
+of what it finds before it ever gets home — which is why the ration was priced where it was,
+on the assumption that a drone covers about half its own keep. `SNACK_SHARE` in `castes.js`
+makes that explicit, and the bill becomes
 
-It also checks that the preview never names a find the hive has not discovered. The offerings
-panel is careful about this and the preview has to be too, or claiming ground becomes a way
-to read the forage table for free.
+```
+billable = drones − Σ over crews of (drones × efficiency) × SNACK_SHARE
+```
+
+The interesting word is `efficiency`. A drone crammed onto a tenth of the ground it needs is
+finding a tenth as much, so it snacks a tenth as much, so it comes home nearly as hungry as
+one that never left. **Crowding therefore costs twice: less comes in and more goes out.**
+
+That is what gives the crowding curve a top. A `tolerant` type's total output is
+`sqrt(n × slots)` — it rises forever as you pile drones on, so without a second term there
+was no reason not to. With the food bill in, there is an optimum:
+
+| drones | efficiency | haul | food bill | net |
+|---|---|---|---|---|
+| 1× its room | 100% | 160 kW | 13 kW | 147 kW |
+| 4× | 50% | 320 kW | 77 kW | 244 kW |
+| **11×** | **30%** | **531 kW** | **238 kW** | **292 kW** |
+| 24× | 20% | 784 kW | 550 kW | 234 kW |
+| 40× | 16% | 1012 kW | 939 kW | 73 kW |
+
+Generous on purpose — the ceiling should be reachable by a player who is not watching, not a
+cliff they fall off. The curve is shallow around the optimum and punishing well past it, which
+is the right shape for something nobody should have to compute.
+
+Two drones eat nothing on the job, and both are correct. One with no ground at all, which is
+what makes an idle drone genuinely expensive. And one standing on a biome that offers its
+route **nothing** — a scavenger where there is no carrion comes back empty and comes back
+hungry, and the food bill is the only number on any screen that says the trip was wasted.
+
+It scales with efficiency rather than with grams actually hauled, so a drone on rich ground
+does not eat more than one on poor ground. The honest version would make the figure depend on
+each biome's load table, and the panel could then no longer say "half your keep" about
+anything.
+
+The `grazing` channel multiplies the share, which makes "the hive learns to eat on the move" a
+natural gene. It is checked in `modifier-test.mjs` twice: once that the channel moves the
+share by exactly ×1.5, and once that a bigger share actually lowers the bill — a share nothing
+reads would pass the first check while the drones ate exactly as much as before.
+
+### The biome roll is gone
+
+A drone assigned to wetland is standing in the wetland. It rolls what is on that ground and
+nothing else. Two rolls became one, which does three things:
+
+- The forage table becomes readable. A forager on temperate forest draws from that biome's 29
+  items, not from an area-weighted blend of every biome held.
+- Stars bite harder, because a star competes inside a pool the player chose. Assignment is a
+  coarse star and starring is the fine one — two tiers of the same verb.
+- Expansion stops being a lottery ticket. More of a biome is more room on *that* biome.
+
+### Targets, and drones that do not exist yet
+
+`state.assign` is biome → type → how many, and it is a **plan**, not a record. It may name
+drones the hive has not molded, which is the point: lay out a wetland for four hunters, watch
+the ground read as spoken for, then go and press four hunters. `land.js` resolves it against
+the headcount every tick.
+
+The rules, in order:
+
+1. **Targets are met first.** If more are asked for than exist, they are handed out in the
+   *ratio* asked, by largest remainder — three in the forest and two in the wetland with three
+   drones in hand is two and one, because a target is a ratio as much as a number.
+2. **Leftovers spread by area**, which is exactly what the game did before any of this
+   existed. A player who never opens the panel gets the old behaviour.
+3. **Ground with a target on it is skipped by the spread.** Asking for five foragers on the
+   farm and finding six there is the interface overruling the player. If every biome is
+   spoken for, the leftovers go out by area across all of them rather than standing idle.
+
+Which means nobody is ever really idle any more. A crowded crew is inefficient, not
+unemployed, and `idle` is non-zero only when the hive holds no ground a type can work. The
+old "N with nowhere to work" warning was about a cap being hit; the new one is about a plan
+with a hole in it.
+
+### What that did to the preview
+
+`landvalue.js` used to prove something true and useless. Under pooled capacity the patch count
+cancelled out of the forage sum, the hive never came close to filling its ground, and so the
+honest answer to "what would claiming this gain" was almost always *nothing*. The preview had
+a warning box for it. A preview whose main job is to talk you out of the purchase is a sign
+that the purchase has no mechanics behind it.
+
+Now it answers with edges in it: how many more of each type this ground would carry, whether
+the claim crosses a **threshold** (fourteen more square metres of wetland is the difference
+between no hunters and one hunter), and what the hive would actually bring in more of under
+the plan it currently has — which may still be nothing, because ground with nobody on it grows
+nothing, and that is now a fixable sentence rather than a dead end.
+
+`tests/landvalue-test.mjs` checks the estimate against twenty thousand ticks of the real
+engine and they agree to within half a percent. It also checks that the preview never names a
+find the hive has not discovered, because claiming ground must not become a way to read the
+forage table for free.
+
+### Discovery had to move with it
+
+`recordFind` fires once per roll, and a roll is now a drone rather than a patch — so a crew of
+sixty learns sixty times faster, where the old patch count was capped at twelve however large
+the hive grew. `RANGE_AT` went from 10 to 100 and `EXACT_AT` from 25 to 350, and the v23
+migration multiplies banked counts by `DISCOVERY_RESCALE` so a returning hive does not forget
+what it knew. Change the thresholds and the rescale together.
 
 ### One reader, still
 
 `harvest` is lifted out of the patch loop in `computeDerived` and published on `derived.land`,
-rather than being read a second time from the modifier layer. See the modifier layer's rule
-4: two `factor()` calls on one channel are two readers that have to be kept in step by hand,
+rather than being read a second time from the modifier layer. See the modifier layer's rule 4:
+two `factor()` calls on one channel are two readers that have to be kept in step by hand,
 which is precisely the bug the brood rate had.
+
+### Changing it
+
+- *"Land doesn't matter"* → lower the ranges, or check whether cognition is the real wall.
+- *"This type is pointless"* → its `range` against the biomes that carry its route, not its
+  load. A route whose biomes are all small is a route nobody can staff.
+- *"Crowding is too punishing"* → `CROWDING` in `drones.js`. Below 1 forgives, above 1 bites.
+- *"I have to micromanage"* → the spread rule is the defence. Check that leftovers still go
+  somewhere sensible before adding more controls.
 
 ## Storage, and the wall underneath it
 
@@ -903,19 +1032,28 @@ compounds, because no protein means no drones means no gathering means no protei
 is worth knowing about the economy and useless as a regression check, so the whole run now
 goes through one seeded generator. `--seed N` picks a different game; the default is fixed.
 
-**Current numbers: 7 of 12 techs in 6 simulated hours, no drones lost, starving 5.8% of
-ticks, stalling before Cellulolysis.** Reproducible on the default seed, and seeds 1–5 all
-give 7/12 — so the variance that used to swamp it was the unseeded RNG, not the economy.
+**Current numbers: 8 of 13 techs in 6 simulated hours on every seed from 1 to 6, no drones
+lost, starving 0–8% of ticks, stalling before Cellulolysis.**
 
-Two things that figure is telling us, both balance rather than tooling:
+**The bot now expands, and that changed what the sim is worth.** It used to sit on its 36 m²
+landing site for the whole run, on every seed, which meant it was measuring a game nobody
+plays — and measuring it wrong: three seeds in seven reported "stalled before Glycolysis,
+0/13 research", and the honest reading of that was not "the economy is broken" but "the bot
+refused to go outside". With one Explorer and a claim rule, the same three seeds reach 8/13.
+A balance sim that will not pull the main economic lever is a screenshot, not a measurement.
 
-- **The hive never gets past three drones.** `drones 3 / 3` means the cap is binding for
-  the entire run — the bot raises one of everything and never goes back for the Hivecore
-  levels that would widen it. Whether that is the bot being naive or the drone cap being
-  too tight is the open question, and it is the reason research stalls: three drones cannot
-  gather enough to reach Cellulolysis at its current cost.
-- **201 kg of fibre and 15 kg of mineral mass spilled.** The hive is drowning in what it
-  cannot store while starving for what it can use.
+Two things that took to make work, and both are findings rather than bot plumbing:
+
+- **The Explorer slot has to be reserved, and only when it can be paid for.** `nextMoldable`
+  presses the first eligible type in declared order and the Forager is first, so without a
+  ceiling on the gatherers the cap fills and no Explorer is ever pressed. The ceiling is on
+  their SUM, not per type — capping each at `cap − 1` just let the Forager take two and the
+  Scavenger the third.
+- **Expansion is gated on fat, not on insight.** An Explorer costs 250 g of fat against a
+  Forager's 5 — fifty times — plus 250 g each of water and unassayed mineral mass. A young
+  hive cannot afford one for a long while, and the ones it does afford sometimes do not come
+  back. That is why the bot's holdings end at 36–55 m² rather than hundreds: it is expanding
+  as fast as the fat allows, which is not very fast.
 
 One run is one sample. Before reading any of this as a result, sweep a few seeds.
 

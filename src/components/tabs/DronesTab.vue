@@ -91,10 +91,13 @@ const bands = computed(() =>
           cost: costLine(def),
           cogits: (def.cogitDraw || 0) * count,
           rate: flow?.rate || 0,
-          // Drones the hive is holding that its land will not carry. They cost
-          // bandwidth and bring nothing back, which is worth saying out loud.
-          landless: flow?.landless || 0,
-          patches: flow?.open || 0,
+          // Drones the hive is holding that are not standing on any ground.
+          // Not a cap being hit any more — under per-biome room a drone is idle
+          // because nobody sent it anywhere, which is fixable on the Territory
+          // tab, so the row says so rather than blaming the land.
+          idle: flow?.idle || 0,
+          // How many separate pieces of ground this type is spread across.
+          grounds: flow?.crews?.length || 0,
         };
       });
     return {
@@ -103,7 +106,7 @@ const bands = computed(() =>
       types,
       held: types.reduce((sum, t) => sum + t.count, 0),
       cogits: types.reduce((sum, t) => sum + t.cogits, 0),
-      landless: types.reduce((sum, t) => sum + t.landless, 0),
+      idle: types.reduce((sum, t) => sum + t.idle, 0),
       rate: types.reduce((sum, t) => sum + t.rate, 0),
       open: !state.ui.droneBands?.[id],
     };
@@ -118,8 +121,8 @@ function toggleBand(id) {
 const unfiled = computed(() => unfiledTypes());
 const total = computed(() => bands.value.reduce((sum, b) => sum + b.held, 0));
 const cogits = computed(() => bands.value.reduce((sum, b) => sum + b.cogits, 0));
-const landless = computed(() => bands.value.reduce((sum, b) => sum + b.landless, 0));
-const land = computed(() => derived.value.land ?? { capacity: 0, patches: 0 });
+const idle = computed(() => bands.value.reduce((sum, b) => sum + b.idle, 0));
+const land = computed(() => derived.value.land ?? { area: 0, patches: 0, working: 0 });
 const hauling = computed(() => bands.value.reduce((sum, b) => sum + b.rate, 0));
 const cognition = computed(() => derived.value.cognition);
 
@@ -203,16 +206,16 @@ function commitTarget(id) {
       Holding {{ formatCogits(cogits) }} of the hive's {{ formatCogits(cognition.capacity) }}
       cognition<span v-if="cognition.over" class="bad"> — which is already over budget</span>.
       <template v-if="hauling > 0">
-        Bringing in {{ formatMassFlow(hauling) }} across {{ land.patches }}
-        patch{{ land.patches === 1 ? '' : 'es' }} of ground.
+        Bringing in {{ formatMassFlow(hauling) }}, with {{ land.working }} of them
+        out on the ground.
       </template>
     </div>
 
-    <div v-if="landless > 0" class="notice is-warn">
-      <strong class="bad">{{ landless.toFixed(0) }} with nowhere to work.</strong>
-      The hive's land carries {{ land.capacity.toFixed(0) }} foraging
-      drone{{ land.capacity === 1 ? '' : 's' }}, and it is holding more than that. They still
-      cost bandwidth and still eat; they just have nowhere to go. Take more ground.
+    <div v-if="idle > 0" class="notice is-warn">
+      <strong class="bad">{{ idle.toFixed(0) }} standing idle.</strong>
+      They are not on any ground. Either every target on the Territory tab is already
+      filled, or the hive holds no biome this type can work. They still cost bandwidth and
+      still eat; they just have nowhere to go.
     </div>
 
     <div class="band-stack">
@@ -252,9 +255,14 @@ function commitTarget(id) {
                   >{{ part.text }}</span></template> a press
                 </span>
                 <span v-if="t.count && t.rate > 0" class="job-desc good" style="display: block">
-                  {{ formatMassFlow(t.rate) }} coming in across {{ t.patches }}
-                  patch{{ t.patches === 1 ? '' : 'es' }}<span v-if="t.landless > 0" class="bad">
-                  · {{ t.landless.toFixed(0) }} with nowhere to work</span>
+                  {{ formatMassFlow(t.rate) }} coming in across {{ t.grounds }}
+                  piece{{ t.grounds === 1 ? '' : 's' }} of ground<span
+                    v-if="t.idle > 0"
+                    class="bad"
+                  > · {{ t.idle.toFixed(0) }} standing idle</span>
+                </span>
+                <span v-else-if="t.count && t.idle > 0" class="job-desc bad" style="display: block">
+                  {{ t.idle.toFixed(0) }} standing idle — needs ground on the Territory tab.
                 </span>
               </span>
               <span class="job-count" :class="t.count > 0 ? '' : 'muted'">{{ t.count }}</span>

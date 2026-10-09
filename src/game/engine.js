@@ -71,6 +71,7 @@ import {
   CASTES,
   CASTE_ORDER,
   DRONE_RATION_JOULES,
+  SNACK_SHARE,
   BASAL_WATER_PER_SECOND,
   WATER_PER_DRONE_TARGET,
   HYDRATION_FLOOR,
@@ -78,9 +79,9 @@ import {
 import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import { ORGANISMS } from './definitions/organisms.js';
-import {
-  BIOMES, totalArea, landCapacity, patchCount, aridity, MAX_PATCHES,
-} from './definitions/biomes.js';
+import { BIOMES, totalArea, aridity } from './definitions/biomes.js';
+import { landUse, crewKey, offersAnything } from './land.js';
+
 import { BASE_COGIT_CAPACITY, COGIT_PER_DRONE } from './definitions/cognition.js';
 import {
   DRONE_TYPES,
@@ -858,14 +859,39 @@ export const RATION_KEY = 'drones';
  * does, for the same reason — a hive that starves to death while the player is
  * asleep is a hive nobody comes back to.
  */
-export function computeRation(state, mod = null) {
+export function computeRation(state, mod = null, use = null) {
   const drones = droneCount(state);
+
+  // WHAT THEY ATE OUT THERE. A drone on ground it can work feeds itself partly
+  // off that ground — see SNACK_SHARE in castes.js. Counted in drone-equivalents
+  // so the bill stays a simple headcount: a crew of ten at 40% each covers four
+  // drones' worth of grazing between them.
+  //
+  // `live` matters as much as efficiency. A crew standing on a biome that
+  // offers its route nothing finds nothing, so it grazes nothing, and the food
+  // bill becomes the only thing on any screen that says the trip was wasted.
+  const biomes = use ?? landUse(state);
+  let grazed = 0;
+  for (const biome of biomes) {
+    for (const crew of biome.crews) {
+      if (!crew.drones || !offersAnything(DRONE_TYPES[crew.droneId].gather, crew.biomeId)) continue;
+      grazed += crew.drones * crew.efficiency;
+    }
+  }
+  // Clamped at 1: a bonus big enough to make a working drone free is a fine
+  // thing to aim a gene at, one that pays the hive to hold drones is not.
+  const share = Math.min(1, SNACK_SHARE * factor(mod, 'grazing'));
+  const billable = Math.max(0, drones - grazed * share);
+
   // Also a COST channel: +0.2 means the drones eat twenty per cent more. It is
   // applied to the JOULES rather than to the grams, so it costs the same share
   // of the hive's energy whatever fuel the Metabolism tab is pointed at.
-  const joules = drones * DRONE_RATION_JOULES * factor(mod, 'rationCost');
+  const joules = billable * DRONE_RATION_JOULES * factor(mod, 'rationCost');
   const empty = {
     drones,
+    grazed,
+    billable,
+    share,
     joules,
     nutrient: null,
     grams: 0,
@@ -898,6 +924,9 @@ export function computeRation(state, mod = null) {
   const ratio = wantGrams > EPSILON ? grams / wantGrams : 1;
   return {
     drones,
+    grazed,
+    billable,
+    share,
     joules,
     nutrient,
     grams,
@@ -959,8 +988,16 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   // multiply what the colony can DO — never what the generators make, because a
   // hive that cannot make energy cannot fetch water or food, and that is a hole
   // with no bottom.
+  // Who is standing where, and with how much elbow room. Worked out here rather
+  // than down in the forage block because the RATION needs it: a drone grazes
+  // on the ground it is working, so what the hive owes its drones depends on
+  // how well they are placed. It reads only territory, targets and headcount —
+  // nothing downstream of vigour — so there is no circularity, and computing it
+  // once and passing it down saves the second pass.
+  const use = landUse(state);
+
   const hydration = computeHydration(state, mod);
-  const ration = computeRation(state, mod);
+  const ration = computeRation(state, mod, use);
 
   // One number, because they compound honestly: a hive that is both parched and
   // hungry is in twice the trouble, and should feel it.
@@ -1484,10 +1521,6 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   }
 
   const area = totalArea(state);
-  const capacity = landCapacity(state);
-  const patchesAvailable = patchCount(state);
-  const droneForage = {};
-  let roomLeft = capacity;
 
   // Hoisted, not called per patch: ONE reader per channel is modifiers.js rule
   // 4, and the territory preview needs the same number to tell the player what
@@ -1495,69 +1528,98 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   // have to be kept in step by hand.
   const harvest = factor(mod, 'harvest');
 
+  /*
+   * FORAGING, PER CREW.
+   *
+   * A crew is one drone TYPE standing on one BIOME, and a patch inside it is
+   * one drone's ground. Where a crew is was decided by the player's targets
+   * (land.js), so there is no biome roll left here and no land to share out in
+   * declared order — the only thing left to work out is how hard the ground is
+   * being leaned on, which is the crowding curve.
+   *
+   *   rate = Σ over the crew's drones of  grams × efficiency × vigour / CYCLE
+   *
+   * `efficiency` is per drone and identical across the crew; it is NOT folded
+   * into the loop's grams because grams is what one trip actually weighed and
+   * the interface shows it as such. Crowding happens on the way home, not in
+   * the basket.
+   */
+  const crews = [];
+  const droneForage = {};
+
+  for (const biome of use) {
+    for (const crew of biome.crews) {
+      if (crew.drones < 1) continue;
+      const def = DRONE_TYPES[crew.droneId];
+      const held = state.crews?.[crewKey(crew.droneId, crew.biomeId)] ?? [];
+      const patches = [];
+      let rate = 0;
+
+      for (let i = 0; i < held.length; i += 1) {
+        const patch = held[i];
+        const grams = patch.grams || 0;
+        const perSecond = ((grams * crew.efficiency * vigour) / FORAGE_CYCLE) * harvest;
+        patches.push({
+          index: i,
+          droneId: crew.droneId,
+          biomeId: crew.biomeId,
+          itemId: patch.itemId ?? null,
+          grams,
+          rate: perSecond,
+          empty: !patch.itemId,
+        });
+        rate += perSecond;
+
+        if (patch.itemId && perSecond > EPSILON) {
+          itemFlow[patch.itemId] = (itemFlow[patch.itemId] || 0) + perSecond;
+          if (explain) (itemSources[patch.itemId] ||= []).push({
+            label: `${def.name} in ${biome.def.name.toLowerCase()}`,
+            amount: perSecond,
+            droneId: crew.droneId,
+            biomeId: crew.biomeId,
+          });
+        }
+      }
+
+      crews.push({ ...crew, patches, rate });
+      // Rolled up per type as well, because the Drones tab asks "what is this
+      // type bringing in" and should not have to sum the map itself.
+      const roll = (droneForage[crew.droneId] ||= {
+        droneId: crew.droneId,
+        name: def.name,
+        gather: def.gather,
+        count: state.droneTypes?.[crew.droneId] || 0,
+        working: 0,
+        rate: 0,
+        crews: [],
+      });
+      roll.working += crew.drones;
+      roll.rate += rate;
+      roll.crews.push(crew.biomeId);
+    }
+  }
+
+  // Types with drones that ended up nowhere — no territory at all, or every
+  // target pointing at ground the hive has since given up. They get a row so
+  // the tab can say "eight foragers, none of them anywhere".
   for (const typeId of foragingTypes()) {
     const count = state.droneTypes?.[typeId] || 0;
-    if (!count) continue;
-    const def = DRONE_TYPES[typeId];
-
-    // Declared order shares out the ground, the same rule the molding chambers
-    // use to decide what to press: predictable beats clever.
-    const working = Math.max(0, Math.min(count, roomLeft));
-    roomLeft -= working;
-
-    // One patch per drone until the land runs out of patches. A single forager
-    // works one patch properly rather than a twelfth of twelve.
-    const held = state.patches?.[typeId] ?? [];
-    const open = Math.min(held.length || patchesAvailable, Math.max(1, Math.floor(working)));
-    const perPatch = open > 0 ? working / open : 0;
-
-    const patches = [];
-    let rate = 0;
-    for (let i = 0; i < held.length; i += 1) {
-      const patch = held[i];
-      const live = i < open;
-      const grams = patch.grams || 0;
-      const perSecond = live
-        ? ((grams * perPatch * vigour) / FORAGE_CYCLE) * harvest
-        : 0;
-      const biome = patch.biomeId ? BIOMES[patch.biomeId] : null;
-      patches.push({
-        index: i,
-        droneId: typeId,
-        biomeId: patch.biomeId ?? null,
-        itemId: patch.itemId ?? null,
-        grams,
-        drones: live ? perPatch : 0,
-        rate: perSecond,
-        worked: live,
-        empty: !patch.itemId,
-      });
-      rate += perSecond;
-
-      if (live && patch.itemId && perSecond > EPSILON) {
-        const where = biome ? ` in ${biome.name.toLowerCase()}` : '';
-        itemFlow[patch.itemId] = (itemFlow[patch.itemId] || 0) + perSecond;
-        if (explain) (itemSources[patch.itemId] ||= []).push({
-          label: `${def.name}${where}`,
-          amount: perSecond,
-          droneId: typeId,
-          biomeId: patch.biomeId,
-        });
-      }
-    }
-
+    if (!count || droneForage[typeId]) continue;
     droneForage[typeId] = {
       droneId: typeId,
-      name: def.name,
-      gather: def.gather,
+      name: DRONE_TYPES[typeId].name,
+      gather: DRONE_TYPES[typeId].gather,
       count,
-      working,
-      // Drones the land cannot find room for. The whole point of the cap.
-      landless: count - working,
-      patches,
-      open,
-      rate,
+      working: 0,
+      rate: 0,
+      crews: [],
     };
+  }
+  for (const roll of Object.values(droneForage)) {
+    // Drones standing in the hive with nowhere to work. No longer a cap being
+    // hit — under per-biome room a drone is idle because the player has not
+    // given it ground, which is a different sentence and a fixable one.
+    roll.idle = roll.count - roll.working;
   }
 
   /* -- 6. digestion --------------------------------------------------------- */
@@ -1676,9 +1738,17 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   if (ration.nutrient && ration.grams > EPSILON) {
     burn[ration.nutrient] = (burn[ration.nutrient] || 0) + ration.grams;
     if (explain) (flowSources[ration.nutrient] ||= []).push({
-      label: ration.hungry
-        ? `Drones ×${ration.drones} (short)`
-        : `Drones ×${ration.drones}`,
+      // The headcount is what the player recognises, so it leads — but the
+      // bill is for the share NOT fed on the ground, and a line that said
+      // "Drones ×40" next to a figure for twenty-six of them would read as
+      // broken arithmetic rather than as a mechanic.
+      label: [
+        `Drones ×${ration.drones}`,
+        ration.grazed > EPSILON
+          ? `− ${ration.grazed.toFixed(1)} fed on the job`
+          : null,
+        ration.hungry ? '(short)' : null,
+      ].filter(Boolean).join(' '),
       amount: -ration.wantGrams,
     });
   }
@@ -1835,19 +1905,22 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
     // patches it is worked in, and what each type is actually doing on it.
     land: {
       area,
-      capacity,
-      patches: patchesAvailable,
+      // Per biome and per type: room, who is on it, what the plan asks for.
+      // The whole territory picture in one place, because every screen that
+      // mentions land wants a different slice of exactly this.
+      biomes: use,
       working: Object.values(droneForage).reduce((a, f) => a + f.working, 0),
-      landless: Object.values(droneForage).reduce((a, f) => a + f.landless, 0),
-      full: capacity > 0 && roomLeft <= EPSILON,
+      idle: Object.values(droneForage).reduce((a, f) => a + f.idle, 0),
+      // Patches being worked, which is now simply drones on ground. There is
+      // no patch COUNT any more — a patch is a drone, so counting them twice
+      // would be counting drones twice.
+      patches: crews.reduce((a, c) => a + c.patches.length, 0),
       // Passed out so landvalue.js can run the same sum on hypothetical ground
       // without reaching into the modifier layer for a second read of a channel
       // that is only allowed one.
       harvest,
-      // Ground the hive could still put a patch on. Zero at MAX_PATCHES, which
-      // is the point at which "more land is more places" stops being true.
-      patchHeadroom: MAX_PATCHES - patchesAvailable,
     },
+    crews,
     droneForage,
     // What is out past the edge of the map, and how far through it is.
     expeditions,

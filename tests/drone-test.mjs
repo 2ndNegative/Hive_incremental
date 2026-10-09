@@ -74,7 +74,9 @@ const decl = await p.evaluate(() => {
     gather: def.gather,
     load: def.load,
     foraging: hive.drones.foraging(),
-    patches: hive.patchCount(),
+    range: def.range,
+    crowding: def.crowding,
+    slots: hive.land.slots('temperateForest', 'forager'),
     cycle: hive.forage.FORAGE_CYCLE,
   };
 });
@@ -84,8 +86,11 @@ check('and the forager gather route', decl.gather === 'forager', decl.gather);
 check('and a 20–45 g load per trip',
   decl.load?.min === 20 && decl.load?.max === 45, JSON.stringify(decl.load));
 check('it is listed as a foraging type', decl.foraging.includes('forager'), decl.foraging.join(','));
-check('and the landing site is worked as one patch',
-  decl.patches === 1, `${decl.patches} patch`);
+check('it declares a range and how badly it minds company',
+  decl.range === 4 && decl.crowding > 0 && decl.crowding < 1,
+  `${decl.range} m², crowding ${decl.crowding}`);
+check('and the 36 m² landing site carries nine of them',
+  decl.slots === 9, `${decl.slots} slots`);
 check('the trip cycle is the one the castes used', decl.cycle === 12, `${decl.cycle}`);
 
 /* ================================================= 2. cogit upkeep is paid */
@@ -132,7 +137,7 @@ await p.evaluate(() => { hive.state.power.hivecore = 1; hive.state.droneTypes.fo
 const rolls = await p.evaluate(() => {
   const out = [];
   for (let i = 0; i < 400; i += 1) {
-    const patch = hive.forage.rollPatch(hive.state, 'forager', {});
+    const patch = hive.forage.rollPatch(hive.state, 'forager', 'temperateForest', {});
     if (patch.itemId) out.push(patch.grams);
   }
   return out;
@@ -153,31 +158,41 @@ check('and averages near the midpoint', Math.abs(mean - 32.5) < 1.5, `mean ${mea
 
 /* ============================================= 4. what that is worth a second */
 
+// Three Foragers are now three PATCHES, one each, rather than three drones
+// sharing one. So the rate is the sum of three separate trips rather than one
+// trip multiplied — and each drone may be on a different find, which is what
+// the per-item check has to account for.
 const flow = await p.evaluate(() => {
   hive.state.droneTypes.forager = 3;
   hive.forage.resetForage(hive.state);
-  hive.tick(0.1); // one tick rolls the first trip
-  const [patch] = hive.state.patches.forager;
+  hive.tick(0.1); // one tick rolls the first trips
+  const patches = hive.state.crews['forager:temperateForest'];
   const d = hive.derived();
   const entry = d.droneForage.forager;
-  const source = (d.itemSources?.[patch.itemId] || []).find((s) => s.droneId === 'forager');
+  const grams = patches.reduce((a, q) => a + (q.grams || 0), 0);
+  const one = patches.find((q) => q.itemId);
+  const onIt = patches.filter((q) => q.itemId === one.itemId);
+  const source = (d.itemSources?.[one.itemId] || []).find((s) => s.droneId === 'forager');
   return {
-    grams: patch.grams,
-    itemId: patch.itemId,
+    patches: patches.length,
+    grams,
+    itemId: one.itemId,
     count: entry?.count,
     rate: entry?.rate,
-    expected: (patch.grams * 3) / hive.forage.FORAGE_CYCLE,
+    expected: grams / hive.forage.FORAGE_CYCLE,
     label: source?.label,
-    sourceAmount: source?.amount,
-    itemFlow: d.itemFlow?.[patch.itemId],
+    itemFlow: d.itemFlow?.[one.itemId],
+    expectedItem: onIt.reduce((a, q) => a + q.grams, 0) / hive.forage.FORAGE_CYCLE,
   };
 });
 
-check('three Foragers show a rate of load × three over the cycle',
+check('three Foragers work three patches, one each', flow.patches === 3, `${flow.patches}`);
+check('and the rate is their three trips over the cycle',
   Math.abs(flow.rate - flow.expected) < 1e-9,
-  `${flow.rate?.toFixed(3)} g/s on a ${flow.grams?.toFixed(2)} g trip`);
-check('the mass arrives as the item they found',
-  Math.abs(flow.itemFlow - flow.expected) < 1e-9, `${flow.itemId} at ${flow.itemFlow?.toFixed(3)} g/s`);
+  `${flow.rate?.toFixed(3)} g/s on ${flow.grams?.toFixed(2)} g of trips`);
+check('the mass arrives as the items they found',
+  Math.abs(flow.itemFlow - flow.expectedItem) < 1e-9,
+  `${flow.itemId} at ${flow.itemFlow?.toFixed(3)} g/s`);
 check('and the inflow is attributed to them by name',
   /^Forager in /.test(flow.label || ''), flow.label);
 
@@ -185,7 +200,7 @@ check('and the inflow is attributed to them by name',
 // since a hive with no Digestive Caecum cannot break raw matter down at all.
 const grew = await p.evaluate(() => {
   hive.state.structures.caecum = 1;
-  const before = hive.state.items[hive.state.patches.forager[0].itemId] || 0;
+  const before = hive.state.items[hive.state.crews['forager:temperateForest'][0].itemId] || 0;
   const nutrientsBefore = Object.values(hive.state.nutrients).reduce((a, b) => a + b, 0);
   hive.tick(30);
   const nutrientsAfter = Object.values(hive.state.nutrients).reduce((a, b) => a + b, 0);
@@ -203,12 +218,13 @@ const none = await p.evaluate(() => {
   const foundBefore = JSON.stringify(hive.state.found);
   hive.tick(60);
   return {
-    slot: hive.state.patches?.forager ?? null,
+    slot: hive.state.crews?.['forager:temperateForest'] ?? null,
+    crewKeys: Object.keys(hive.state.crews || {}),
     rate: hive.derived().droneForage?.forager ?? null,
     learnedNothing: JSON.stringify(hive.state.found) === foundBefore,
   };
 });
-check('no Foragers means no trips rolled', none.slot === null, JSON.stringify(none.slot));
+check('no Foragers means no trips rolled', !none.slot, JSON.stringify(none.crewKeys));
 check('and nothing in the forage readout', none.rate === null);
 check('and the hive learns nothing about ground it never walked', none.learnedNothing);
 
@@ -237,16 +253,24 @@ check('and what is coming in right now', /coming in/.test(tab.row));
 
 await openTab(p, 'Territory');
 await p.waitForTimeout(220);
+// Two panels on this tab mention Foragers now and they say different things:
+// "Who works what" is the PLAN and "Out now" is what is actually happening. The
+// assertions belong on the second one.
 const terr = await p.evaluate(() => {
-  const row = [...document.querySelectorAll('.field-row')].find((r) => /Forager/.test(r.innerText));
-  return row?.innerText || '';
+  const box = [...document.querySelectorAll('.panel-box')]
+    .find((b) => /^out now/i.test(b.innerText));
+  return {
+    crew: [...(box?.querySelectorAll('.crew-line') ?? [])].map((n) => n.innerText).join(' | '),
+    rows: [...(box?.querySelectorAll('.field-row') ?? [])].map((n) => n.innerText).join(' | '),
+  };
 });
-check('Territory shows the Foragers out on the land', /Forager\s*×4/.test(terr), terr.replace(/\n/g, ' | '));
-// The crew row carries the trip weight now. It used to be stamped on every
-// patch row instead, alongside a drones-per-patch figure that was the same on
-// all of them — see TerritoryTab's `crews`.
-check('and what a trip is worth', /carrying about [\d.]+\s*g back every \d+s/.test(terr),
-  terr.replace(/\n/g, ' | '));
+check('Territory shows the Foragers out on the land', /Forager\s*×4/.test(terr.crew), terr.crew);
+// The crew line carries the headcount and how hard the ground is being leaned
+// on; the rows underneath carry the trips. Both used to be stamped on every
+// patch row, alongside a drones-per-patch figure identical on all of them.
+check('and how much room they have', /%\s*each/.test(terr.crew), terr.crew);
+check('and what a trip is worth', /g each per trip/.test(terr.rows),
+  terr.rows.slice(0, 120));
 
 /* ===================================================== 7. a save round-trips */
 
@@ -256,7 +280,7 @@ const round = await p.evaluate(() => {
   return {
     version: raw?.version ?? raw?.state?.version ?? null,
     forager: raw?.droneTypes?.forager ?? raw?.state?.droneTypes?.forager ?? null,
-    slot: (raw?.patches ?? raw?.state?.patches)?.forager?.[0] ?? null,
+    slot: (raw?.crews ?? raw?.state?.crews)?.['forager:temperateForest']?.[0] ?? null,
   };
 });
 const SAVE_VERSION = await p.evaluate(() => hive.saveVersion);

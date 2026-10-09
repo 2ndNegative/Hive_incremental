@@ -55,8 +55,10 @@ async function fixture() {
     s.focus = {};
     s.found = { temperateForest: {} };
     // Pin down everything the forest offers a forager, so the gate is open.
+    // Off the real threshold, not a number: EXACT_AT moved by an order of
+    // magnitude when a roll became a drone rather than a patch.
     for (const e of hive.poolFor('forager', 'temperateForest')) {
-      s.found.temperateForest[e.itemId] = 40;
+      s.found.temperateForest[e.itemId] = hive.discovery.EXACT_AT + 15;
     }
     const pool = hive.poolFor('forager', 'temperateForest');
     const total = pool.reduce((a, e) => a + e.weight, 0);
@@ -78,7 +80,7 @@ const gate = await p.evaluate(() => {
   const pool = hive.poolFor('forager', 'temperateForest');
   const known = pool[0].itemId;
   const unknown = pool[1].itemId;
-  s.found.temperateForest[unknown] = 24; // one short of EXACT_AT
+  s.found.temperateForest[unknown] = hive.discovery.EXACT_AT - 1; // one short
   return {
     knownOk: hive.focus_.starrable('temperateForest', known),
     unknownOk: hive.focus_.starrable('temperateForest', unknown),
@@ -122,7 +124,7 @@ async function sample(n, stars = []) {
     const counts = {};
     const patch = { elapsed: 0 };
     for (let i = 0; i < n; i += 1) {
-      hive.drones.rollPatch('forager', patch);
+      hive.drones.rollPatch('forager', 'temperateForest', patch);
       if (patch.itemId) counts[patch.itemId] = (counts[patch.itemId] || 0) + 1;
     }
     return counts;
@@ -211,9 +213,10 @@ const separate = await p.evaluate(() => {
   const s = hive.state;
   s.territory = { temperateForest: 20, grassland: 20 };
   s.found.grassland = {};
-  for (const e of hive.poolFor('forager', 'grassland')) s.found.grassland[e.itemId] = 40;
+  const PINNED = hive.discovery.EXACT_AT + 15;
+  for (const e of hive.poolFor('forager', 'grassland')) s.found.grassland[e.itemId] = PINNED;
   for (const e of hive.poolFor('scavenger', 'temperateForest')) {
-    s.found.temperateForest[e.itemId] = 40;
+    s.found.temperateForest[e.itemId] = PINNED;
   }
   s.focus = {};
   const forestForage = hive.poolFor('forager', 'temperateForest')[0].itemId;
@@ -292,7 +295,9 @@ check('a find the hive has only bracketed shows no star at all',
   gated.found && gated.hasStar === false,
   'the gate is visible, not just enforced');
 
-await p.evaluate((key) => { hive.state.found.temperateForest[key] = 40; }, vague);
+await p.evaluate((key) => {
+  hive.state.found.temperateForest[key] = hive.discovery.EXACT_AT + 15;
+}, vague);
 await p.waitForTimeout(300);
 
 const clicked = await p.evaluate(() => {
@@ -303,7 +308,12 @@ const clicked = await p.evaluate(() => {
 });
 await p.waitForTimeout(300);
 const afterClick = await p.evaluate(() => {
-  const head = document.querySelector('.offer-head');
+  // Scoped to the offerings panel. Three panels on this tab use `.offer-head`
+  // now — the assignment grid and "Out now" both group by biome the same way —
+  // so an unscoped query picks whichever is highest on the page.
+  const panel = [...document.querySelectorAll('.panel-box')]
+    .find((b) => /ground offers/i.test(b.innerText));
+  const head = panel?.querySelector('.offer-head');
   const chip = [...document.querySelectorAll('.offer-chip')].find((c) =>
     c.querySelector('.star-btn.star-on'));
   return {
@@ -321,7 +331,9 @@ check('and the biome header says how much of the route is spoken for',
   afterClick.note.slice(0, 80));
 
 await p.evaluate(() => {
-  document.querySelector('.focus-clear').click();
+  const panel = [...document.querySelectorAll('.panel-box')]
+    .find((b) => /ground offers/i.test(b.innerText));
+  panel.querySelector('.focus-clear').click();
 });
 await p.waitForTimeout(300);
 const cleared = await p.evaluate(() => ({
@@ -393,11 +405,11 @@ await q.waitForTimeout(400);
 const afterLoad = await q.evaluate(() => {
   hive.loop.stop();
   const patch = { elapsed: 0 };
-  hive.drones.rollPatch('forager', patch);
+  hive.drones.rollPatch('forager', 'temperateForest', patch);
   return {
     focus: hive.state.focus,
     version: hive.state.version,
-    rolls: patch.biomeId || 'none',
+    rolls: patch.itemId ? 'temperateForest' : 'none',
   };
 });
 check('a save from before focus loads and focuses nothing',
