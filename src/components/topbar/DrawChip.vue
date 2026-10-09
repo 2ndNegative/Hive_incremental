@@ -1,5 +1,5 @@
 <script setup>
-import { state, derived } from '../../game/useGame.js';
+import { derived } from '../../game/useGame.js';
 import { computed } from 'vue';
 import { formatPower } from '../../game/units.js';
 

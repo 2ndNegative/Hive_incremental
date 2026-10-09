@@ -13,7 +13,9 @@
 import { computed } from 'vue';
 import { state, derived, showInCodex } from '../../game/useGame.js';
 import { ITEMS, CATEGORIES, itemJoulesPerGram } from '../../game/definitions/items/index.js';
-import { NUTRIENTS, MACROS, MICROS, isRevealed, itemYield } from '../../game/definitions/nutrients.js';
+import {
+  NUTRIENTS, ASSAY_GROUPS, isRevealed, itemYield,
+} from '../../game/definitions/nutrients.js';
 import { formatMass, formatMassFlow, formatEnergy } from '../../game/units.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
 
@@ -25,6 +27,60 @@ const SORTS = {
 };
 
 const d = computed(() => derived.value);
+
+/**
+ * WHAT A BREAKDOWN DEPENDS ON — AND WHY IT IS CACHED RATHER THAN RECOMPUTED.
+ *
+ * What 100 g of an item turns into is decided by exactly two things: the item's
+ * composition, which is frozen at module load and can never change, and which
+ * assays the hive has run, which changes five times in an entire game. It does
+ * not depend on how much is held, what is flowing, or anything else the 100 ms
+ * tick moves — so recomputing it per render is pure waste, and the waste was
+ * large: `itemYield` is a 35-key scan plus a 28-micro loop with a nested parent
+ * walk, and the tooltip asked for it three times per row for text nobody is
+ * looking at. Forty rows at ten renders a second was tens of thousands of
+ * iterations a second.
+ *
+ * The cache is keyed on the item AND the five assay flags rather than being
+ * cleared when research lands. A stale breakdown is the one failure mode here
+ * that would be invisible rather than loud: it would either name compounds the
+ * player has not assayed yet — handing over the micronutrient panel for free,
+ * which is the whole point of assay research — or keep hiding ones they have
+ * just paid for. Folding the flags into the key makes that unrepresentable
+ * instead of relying on somebody remembering to invalidate.
+ */
+const BREAKDOWNS = new Map();
+
+/** The five assay flags as a string, cheap enough to rebuild per recompute. */
+function assaySignature() {
+  let sig = '';
+  for (const assay of ASSAY_GROUPS) sig += state.tech[assay.id] ? '1' : '0';
+  return sig;
+}
+
+/**
+ * What one sample of an item becomes, showing only what the hive can identify —
+ * naming an unassayed compound here would hand over the micronutrient panel
+ * for free and undo the point of assay research.
+ */
+function breakdownOf(id, assays) {
+  const key = `${id}\u0000${assays}`;
+  const hit = BREAKDOWNS.get(key);
+  if (hit) return hit;
+
+  const yielded = itemYield(state, ITEMS[id].per100g, 100);
+  const known = [];
+  let unresolved = 0;
+  for (const [n, grams] of Object.entries(yielded)) {
+    if (grams <= 1e-9) continue;
+    if (isRevealed(state, n)) known.push({ n, name: NUTRIENTS[n].name, grams });
+    else unresolved += 1;
+  }
+  known.sort((a, b) => b.grams - a.grams);
+  const out = { known: known.slice(0, 8), more: Math.max(0, known.length - 8), unresolved };
+  BREAKDOWNS.set(key, out);
+  return out;
+}
 
 /** Everything currently held OR flowing, which is what the player cares about. */
 const rows = computed(() => {
@@ -40,6 +96,7 @@ const rows = computed(() => {
   // the five of them together are what fills the 500 g was the old lie.
   const total = Object.values(state.items || {}).reduce((a, b) => a + (b || 0), 0);
 
+  const assays = assaySignature();
   const out = [];
   for (const id of ids) {
     const item = ITEMS[id];
@@ -61,6 +118,7 @@ const rows = computed(() => {
       spilled: state.spilledItems?.[id] || 0,
       sources: d.value.itemSources[id] || [],
       perGram: itemJoulesPerGram(item),
+      breakdown: breakdownOf(id, assays),
     });
   }
   return out.sort(SORTS[state.ui.storageSort] ?? SORTS.mass);
@@ -90,23 +148,6 @@ const gutFill = computed(() => {
   return gut > 0 ? Math.min(100, (d.value.harvestRate / gut) * 100) : 0;
 });
 
-/**
- * What one gram of an item becomes, showing only what the hive can identify —
- * naming an unassayed compound here would hand over the micronutrient panel
- * for free and undo the point of assay research.
- */
-function breakdown(id) {
-  const yielded = itemYield(state, ITEMS[id].per100g, 100);
-  const known = [];
-  let unresolved = 0;
-  for (const [n, grams] of Object.entries(yielded)) {
-    if (grams <= 1e-9) continue;
-    if (isRevealed(state, n)) known.push({ n, name: NUTRIENTS[n].name, grams });
-    else unresolved += 1;
-  }
-  known.sort((a, b) => b.grams - a.grams);
-  return { known: known.slice(0, 8), more: Math.max(0, known.length - 8), unresolved };
-}
 </script>
 
 <template>
@@ -290,12 +331,12 @@ function breakdown(id) {
 
             <hr style="border-color: var(--border); margin: 0.3rem 0" />
             <span class="tip-title" style="font-size: 0.72rem">Breaks down into, per 100 g</span>
-            <span v-for="b in breakdown(r.id).known" :key="b.n" class="tip-row">
+            <span v-for="b in r.breakdown.known" :key="b.n" class="tip-row">
               <span>{{ b.name }}</span>
               <span>{{ formatMass(b.grams) }}</span>
             </span>
-            <span v-if="breakdown(r.id).unresolved" class="tip-row muted">
-              <span>+{{ breakdown(r.id).unresolved }} unresolved in this sample</span>
+            <span v-if="r.breakdown.unresolved" class="tip-row muted">
+              <span>+{{ r.breakdown.unresolved }} unresolved in this sample</span>
               <span>?</span>
             </span>
 

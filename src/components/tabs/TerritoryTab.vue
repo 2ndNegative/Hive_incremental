@@ -22,9 +22,8 @@ import { FORAGERS_PER_SQUARE_METRE, AREA_PER_PATCH } from '../../game/definition
 import { GATHER_TYPES, poolFor } from '../../game/definitions/forage.js';
 import { ORGANISMS, preyFor } from '../../game/definitions/organisms.js';
 import { ITEMS } from '../../game/definitions/items/index.js';
-import { CASTES, CASTE_ORDER } from '../../game/definitions/castes.js';
 import { DRONE_TYPES } from '../../game/definitions/drones.js';
-import { describeFind, describeSlot } from '../../game/forage.js';
+import { describeSlot } from '../../game/forage.js';
 import { formatMass, formatMassFlow, formatArea } from '../../game/units.js';
 import {
   claimCost, claimableArea, claimTerritory, abandonTerritory, DANGEROUS_CLAIM_MULTIPLIER,
@@ -94,6 +93,14 @@ const tiles = computed(() =>
       def,
       share,
       area: t.value,
+      // Worked out HERE rather than called from the template, for two reasons.
+      // It was `topFinds(t.id)` down there, and for a mapped tile `t.id` is
+      // "unclaimed:forest" rather than a biome — so every hatched tile reported
+      // that the ground offers nothing at all, which is the one tooltip a
+      // player reads before deciding whether to pay for it. And the template
+      // called it twice per tile, each call walking the whole forage table, on
+      // every one of the ten renders a second.
+      finds: topFinds(biomeId),
       roomForName,
       roomForFigure,
       // A tooltip on a tile at the right-hand edge of the map opens off the
@@ -300,7 +307,12 @@ const learned = computed(() => {
  * own find with its own share of the drones on it. A hive on four patches is
  * bringing in four different things, which is the whole reason to expand.
  *
- * The parked castes still get a row each, read from their old single slot.
+ * NOTHING HERE READS THE CASTES. There used to be a second loop over
+ * CASTE_ORDER giving each gathering caste a row of its own, from before drone
+ * types took the job over. CASTE_ORDER is now `['dormant']` and dormant has no
+ * `gather` route — being dormant is where a drone is when it has no job — so
+ * the loop could not produce a row under any state the game can reach, and
+ * `derived.droneForage` above is the whole answer.
  */
 const working = computed(() => {
   const rows = [];
@@ -317,20 +329,6 @@ const working = computed(() => {
         empty: patch.empty,
       });
     }
-  }
-  for (const id of CASTE_ORDER) {
-    if (!CASTES[id].gather || (state.castes[id] || 0) <= 0) continue;
-    const found = describeFind(state, id);
-    rows.push({
-      id,
-      name: CASTES[id].name,
-      assigned: state.castes[id],
-      found,
-      rate: derived.value.forage?.[id]?.rate || 0,
-      grams: 0,
-      worked: true,
-      empty: found.empty,
-    });
   }
   return rows;
 });
@@ -430,11 +428,11 @@ const totalRate = computed(() => working.value.reduce((a, r) => a + r.rate, 0));
               <span class="tip-title" style="font-size: 0.72rem">
                 Likeliest {{ GATHER_TYPES[gather].name.toLowerCase() }} here
               </span>
-              <span v-for="fnd in topFinds(t.id)" :key="fnd.name" class="tip-row">
+              <span v-for="fnd in t.finds" :key="fnd.name" class="tip-row">
                 <span>{{ fnd.name }}</span>
                 <span>{{ (fnd.chance * 100).toFixed(0) }}%</span>
               </span>
-              <span v-if="!topFinds(t.id).length" class="tip-row warn">
+              <span v-if="!t.finds.length" class="tip-row warn">
                 <span>Nothing for this caste</span><span>—</span>
               </span>
             </span>

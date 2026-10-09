@@ -64,13 +64,15 @@ import {
 } from './definitions/structures.js';
 import { buildWork as workOf } from './definitions/times.js';
 import {
+  emptyModifiers, addModifiers, factor, channelTotal,
+} from './definitions/modifiers.js';
+import {
   CASTES,
   CASTE_ORDER,
   DRONE_RATION_JOULES,
   BASAL_WATER_PER_SECOND,
   WATER_PER_DRONE_TARGET,
   HYDRATION_FLOOR,
-  MULTIPLIERS,
 } from './definitions/castes.js';
 import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
@@ -444,18 +446,36 @@ export function computeCognition(state, charges = computeCharges(state)) {
 
 /* -------------------------------------------------------------------- derived */
 
-function computeMultipliers(state, charges) {
-  const mult = {};
-  for (const channel of MULTIPLIERS) mult[channel] = 0;
+/**
+ * EVERYTHING THAT MAKES SOMETHING BETTER OR WORSE, summed once per derive.
+ *
+ * The single place contributions are gathered, and the only thing the nine
+ * modified sites below read. Sources, in the order they are added:
+ *
+ *   structures  their `mult` map, times how many are RUNNING at the charge they
+ *               are running at — a browned-out building gives a browned-out
+ *               bonus, which falls out of `working()` rather than being a rule
+ *               each channel has to remember.
+ *   research    its `mult` map, flat: a tech is known or it is not.
+ *
+ * GENETICS GOES HERE, as a third block, and that is the whole reason this
+ * function has the shape it has. Adding "this gene lays 20% faster" should be a
+ * line in a definition and nothing else — not a hunt through the engine for the
+ * nine places a rate is worked out.
+ *
+ * See definitions/modifiers.js for the channel list and the four rules.
+ */
+function computeModifiers(state, charges) {
+  const mod = emptyModifiers();
   for (const id of STRUCTURE_ORDER) {
     const units = working(state, charges, id);
-    const bonuses = STRUCTURES[id].mult;
-    if (!units || !bonuses) continue;
-    for (const [channel, value] of Object.entries(bonuses)) {
-      mult[channel] = (mult[channel] || 0) + value * units;
-    }
+    if (!units) continue;
+    addModifiers(mod, STRUCTURES[id].mult, units);
   }
-  return mult;
+  for (const id of RESEARCH_ORDER) {
+    if (state.tech?.[id]) addModifiers(mod, RESEARCH[id].mult);
+  }
+  return mod;
 }
 
 /** Metabolic efficiency per fuel: joules extracted per joule of stored mass. */
@@ -506,7 +526,7 @@ function computeEfficiency(state) {
  * new hive would spill the very mass it needs to build the generator that would
  * have saved it, within thirty seconds of landing, every time.
  */
-function computeCaps(state, charges) {
+function computeCaps(state, charges, mod = null) {
   const capMult = { bulk: 0, mineral: 0, vitamin: 0 };
   for (const id of STRUCTURE_ORDER) {
     const units = activeCount(state, id);
@@ -514,6 +534,12 @@ function computeCaps(state, charges) {
     if (!units || !m) continue;
     for (const [group, value] of Object.entries(m)) capMult[group] += value * units;
   }
+  // The modifier channels land in the SAME running totals the buildings feed,
+  // before the `1 +` below — which is what makes a gene and a building stack
+  // additively with each other rather than compounding. modifiers.js rule 2.
+  capMult.bulk += channelTotal(mod, 'storage');
+  capMult.mineral += channelTotal(mod, 'mineralStorage');
+  capMult.vitamin += channelTotal(mod, 'vitaminStorage');
 
   // The hive holds NOTHING on its own — every nutrient's baseCap is zero. Room
   // is a flat sum of what each standing structure declares, and only then do
@@ -583,6 +609,13 @@ function computeCaps(state, charges) {
     digestion += (def.digestion || 0) * units;
     itemCapMult += (def.itemCapMult || 0) * units;
   }
+  // The gut's throughput, modified HERE rather than where the capacity is spent
+  // — so `derived.digestion`, which is the figure the screen shows, and the
+  // grams the gut actually gets through this tick are the same number times dt.
+  // Applying it at the spending end instead would have made the Storage tab
+  // quietly disagree with the simulation, which is the whole class of bug the
+  // derived/authored split exists to prevent.
+  digestion *= factor(mod, 'digestion');
   // Whole matter obeys the same rule: nowhere to put it until something is
   // built that can hold it.
   //
@@ -767,7 +800,7 @@ export function droneCount(state) {
  * `draw` is what the hive is losing a second, and it is the land that decides
  * it: see biomes.js ARIDITY.
  */
-export function computeHydration(state) {
+export function computeHydration(state, mod = null) {
   const drones = droneCount(state);
   const target = drones * WATER_PER_DRONE_TARGET;
   const held = state.nutrients?.water || 0;
@@ -782,7 +815,10 @@ export function computeHydration(state) {
     ratio,
     multiplier,
     aridity: dryness,
-    draw: drones * BASAL_WATER_PER_SECOND * dryness,
+    // `waterCost` is a COST channel — see modifiers.js rule 3. A positive total
+    // means a thirstier colony, so it multiplies the draw rather than dividing
+    // it, and a gene that makes drones frugal contributes a negative number.
+    draw: drones * BASAL_WATER_PER_SECOND * dryness * factor(mod, 'waterCost'),
     parched: ratio < 1,
   };
 }
@@ -807,9 +843,12 @@ export const RATION_KEY = 'drones';
  * does, for the same reason — a hive that starves to death while the player is
  * asleep is a hive nobody comes back to.
  */
-export function computeRation(state) {
+export function computeRation(state, mod = null) {
   const drones = droneCount(state);
-  const joules = drones * DRONE_RATION_JOULES;
+  // Also a COST channel: +0.2 means the drones eat twenty per cent more. It is
+  // applied to the JOULES rather than to the grams, so it costs the same share
+  // of the hive's energy whatever fuel the Metabolism tab is pointed at.
+  const joules = drones * DRONE_RATION_JOULES * factor(mod, 'rationCost');
   const empty = {
     drones,
     joules,
@@ -860,8 +899,27 @@ export function computeRation(state) {
  * `dt` is the window the fuel allocation is planned over. It only matters at
  * the moment a store empties, where it decides how much of this step the
  * preferred fuel can still cover before the fallback takes the rest.
+ *
+ * `explain` is about who is asking.
+ *
+ * Most of what this returns is a number the simulation needs. Some of it is
+ * ATTRIBUTION — `flowSources` and `itemSources`, the "where is all this beef
+ * coming from" breakdowns behind the tooltips. Those are the most expensive
+ * thing in here per unit of value: `flowSources` alone allocates one small
+ * object per nutrient per digested item, which on a hive holding sixty items is
+ * roughly eleven hundred throwaway objects every call.
+ *
+ * And `tick` never reads them. It reads `net`, `storage`, `power`, `brood`,
+ * `molding` and a dozen others; the attribution exists for two components. So
+ * the tick path asks for `explain: false` and skips building them, which is the
+ * single biggest saving available here — it is felt as OFFLINE CATCH-UP, where
+ * this runs twenty thousand times behind a progress bar rather than ten times a
+ * second behind a screen nobody is reading.
+ *
+ * The maps are still PRESENT and still empty-safe when skipped, so a caller
+ * that reads them gets `[]` rather than a crash. They are simply never filled.
  */
-export function computeDerived(state, dt = TICK_SECONDS) {
+export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}) {
   // Charge first: every benefit below is scaled by it, and it depends on
   // nothing computed here.
   const charges = computeCharges(state);
@@ -869,10 +927,10 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // in the right place in the ordering without anything having to be kept in
   // step by hand.
   const priority = powerPriority();
-  const mult = computeMultipliers(state, charges);
+  const mod = computeModifiers(state, charges);
   const efficiency = computeEfficiency(state);
   const { caps, capsMax, storage, capMult, droneCap, insightCap, throughput, digestion, itemCap } =
-    computeCaps(state, charges);
+    computeCaps(state, charges, mod);
   const slots = computeSlots(state, charges);
   const cognition = computeCognition(state, charges);
 
@@ -886,8 +944,8 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // multiply what the colony can DO — never what the generators make, because a
   // hive that cannot make energy cannot fetch water or food, and that is a hole
   // with no bottom.
-  const hydration = computeHydration(state);
-  const ration = computeRation(state);
+  const hydration = computeHydration(state, mod);
+  const ration = computeRation(state, mod);
 
   // One number, because they compound honestly: a hive that is both parched and
   // hungry is in twice the trouble, and should feel it.
@@ -957,8 +1015,12 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       affordable: moldAffordable,
       pace,
       progress: state.molding?.[id] || 0,
+      // CYCLES per second — see the note on the brood block. One press is one
+      // drone, so for molding this is also the drone rate; it is named
+      // separately anyway so tick() has one thing to read on both paths.
+      cycleRate: active ? (units * pace) / def.seconds : 0,
       // Drones per second at this many chambers, at this charge, at this pace.
-      rate: active ? (units * pace) / def.seconds : 0,
+      rate: active ? ((units * pace) / def.seconds) * factor(mod, 'moldRate') : 0,
       // Work in front of it and an empty brood behind it.
       starved: wants && larvaeOnHand === false,
       // Work in front of it and nothing to build it out of.
@@ -1276,8 +1338,16 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       progress: state.brood?.[id] || 0,
       // How much faster a full brood makes this go. One with nothing in it.
       pace,
+      // CYCLES per second, which is what tick() advances the progress bar by.
+      // Worked out HERE and nowhere else: the same expression used to be
+      // written a second time inside tick, and the two agreed only because they
+      // were kept in step by hand. A modifier applied to one and not the other
+      // is a hive whose screen and whose simulation disagree about how fast it
+      // is breeding, which is the one failure the authored/derived split exists
+      // to make impossible.
+      cycleRate: (units * pace) / def.seconds,
       // Larvae per second at this many chambers, at this charge, at this pace.
-      rate: (units * pace * (def.yield ?? 1)) / def.seconds,
+      rate: ((units * pace) / def.seconds) * (def.yield ?? 1) * factor(mod, 'broodRate'),
       affordable: Object.entries(def.cost).every(
         ([n, g]) => (state.nutrients[n] || 0) >= g - EPSILON,
       ),
@@ -1303,7 +1373,10 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     const assigned = state.castes[id] || 0;
     const def = CASTES[id];
     if (!assigned || !def.assignable) continue;
-    const scale = (1 + (def.mult ? mult[def.mult] || 0 : 0)) * energyRatio * vigour;
+    // `factor` is `1 + the channel's total`, which is exactly what the old
+    // hand-written `1 + (mult[def.mult] || 0)` was — see definitions/modifiers.js
+    // rule 2. A caste naming no channel is simply unmodified.
+    const scale = (def.mult ? factor(mod, def.mult) : 1) * energyRatio * vigour;
 
     if (def.gather && def.harvestRate) {
       const slot = state.forage?.[id];
@@ -1328,7 +1401,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
         for (const [itemId, fraction] of Object.entries(org.parts)) {
           const amount = liveGrams * fraction;
           itemFlow[itemId] = (itemFlow[itemId] || 0) + amount;
-          (itemSources[itemId] ||= []).push({
+          if (explain) (itemSources[itemId] ||= []).push({
             label: `${def.name} ×${assigned} working ${org.name}${where}`,
             amount,
             casteId: id,
@@ -1339,7 +1412,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       } else if (slot?.itemId) {
         const amount = def.harvestRate * assigned * scale;
         itemFlow[slot.itemId] = (itemFlow[slot.itemId] || 0) + amount;
-        (itemSources[slot.itemId] ||= []).push({
+        if (explain) (itemSources[slot.itemId] ||= []).push({
           label: `${def.name} ×${assigned}${where}`,
           amount,
           casteId: id,
@@ -1423,7 +1496,9 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       const patch = held[i];
       const live = i < open;
       const grams = patch.grams || 0;
-      const perSecond = live ? (grams * perPatch * vigour) / FORAGE_CYCLE : 0;
+      const perSecond = live
+        ? ((grams * perPatch * vigour) / FORAGE_CYCLE) * factor(mod, 'harvest')
+        : 0;
       const biome = patch.biomeId ? BIOMES[patch.biomeId] : null;
       patches.push({
         index: i,
@@ -1441,7 +1516,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
       if (live && patch.itemId && perSecond > EPSILON) {
         const where = biome ? ` in ${biome.name.toLowerCase()}` : '';
         itemFlow[patch.itemId] = (itemFlow[patch.itemId] || 0) + perSecond;
-        (itemSources[patch.itemId] ||= []).push({
+        if (explain) (itemSources[patch.itemId] ||= []).push({
           label: `${def.name}${where}`,
           amount: perSecond,
           droneId: typeId,
@@ -1525,21 +1600,30 @@ export function computeDerived(state, dt = TICK_SECONDS) {
 
   const inflow = {};
   const flowSources = {}; // nutrient -> [{ label, amount, itemId }]
+  // WHICH MICROS THE HIVE CAN SEE, decided once for the whole block.
+  //
+  // It is the same answer for every item — an assay cannot complete halfway
+  // through a derive — and `itemYield` would otherwise re-ask it twenty-eight
+  // times per item, through Vue's reactive proxy. See itemYield in
+  // nutrients.js for the measurement.
+  const revealedMicros = new Set(MICROS.filter((id) => isRevealed(state, id)));
   for (const [itemId, gramsPerSecond] of Object.entries(digestFlow)) {
     const item = ITEMS[itemId];
     if (!item || gramsPerSecond <= EPSILON) continue;
     // itemYield carves resolved micronutrients out of the macro fraction that
     // was carrying them, so a gram of potassium arriving in the ash is counted
     // once, as potassium, and the ash figure drops to match.
-    for (const [nutrient, amount] of Object.entries(itemYield(state, item.per100g, gramsPerSecond))) {
+    for (const [nutrient, amount] of Object.entries(
+      itemYield(state, item.per100g, gramsPerSecond, revealedMicros),
+    )) {
       if (amount <= EPSILON) continue;
       inflow[nutrient] = (inflow[nutrient] || 0) + amount;
-      (flowSources[nutrient] ||= []).push({ label: item.name, amount, itemId });
+      if (explain) (flowSources[nutrient] ||= []).push({ label: item.name, amount, itemId });
     }
   }
   const ingestRate = digestRate;
   for (const [nutrient, grams] of Object.entries(burn)) {
-    (flowSources[nutrient] ||= []).push({ label: 'Metabolised', amount: -grams });
+    if (explain) (flowSources[nutrient] ||= []).push({ label: 'Metabolised', amount: -grams });
   }
 
   // The brood eats. A larva is not a consumer of ENERGY — it is a consumer of
@@ -1556,7 +1640,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     // brood that costs nothing — the second is how a player ends up with a
     // thousand larvae and no idea why the carbohydrate never moves.
     burn.carb = (burn.carb || 0) + larvaeDrain;
-    (flowSources.carb ||= []).push({
+    if (explain) (flowSources.carb ||= []).push({
       label:
         larvaeWant - larvaeDrain > EPSILON
           ? `Larvae ×${larvaeCount} (unfed)`
@@ -1570,7 +1654,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   // is short reads as short rather than as thrifty.
   if (ration.nutrient && ration.grams > EPSILON) {
     burn[ration.nutrient] = (burn[ration.nutrient] || 0) + ration.grams;
-    (flowSources[ration.nutrient] ||= []).push({
+    if (explain) (flowSources[ration.nutrient] ||= []).push({
       label: ration.hungry
         ? `Drones ×${ration.drones} (short)`
         : `Drones ×${ration.drones}`,
@@ -1587,7 +1671,7 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   );
   if (waterLoss > 0) {
     burn.water = (burn.water || 0) + waterLoss;
-    (flowSources.water ||= []).push({
+    if (explain) (flowSources.water ||= []).push({
       label: hydration.aridity > 1.05
         ? `Transpiration ×${hydration.drones} (arid ground, ×${hydration.aridity.toFixed(1)})`
         : `Transpiration ×${hydration.drones}`,
@@ -1611,7 +1695,6 @@ export function computeDerived(state, dt = TICK_SECONDS) {
 
   /* -- unlocks and reveals --------------------------------------------------- */
 
-  const revealed = NUTRIENT_IDS.filter((id) => isRevealed(state, id));
   const unlocked = {
     structures: STRUCTURE_ORDER.filter((id) => STRUCTURES[id].unlock(state)),
     castes: CASTE_ORDER.filter((id) => CASTES[id].unlock(state)),
@@ -1621,7 +1704,11 @@ export function computeDerived(state, dt = TICK_SECONDS) {
   };
 
   return {
-    mult,
+    // The modifier channels, summed from every source that fed them. Exposed
+    // so a screen can say WHY something is faster than its base rate — the old
+    // `mult` map was returned here too and read by nothing, which is how it
+    // went six channels deep with no live contributor and nobody noticed.
+    mod,
     efficiency,
     caps,
     capsMax,
@@ -1741,12 +1828,44 @@ export function computeDerived(state, dt = TICK_SECONDS) {
     ingestRate,
     // Scaled by the same slack. A hive thinking with twenty spare cogits both
     // holds three times as much and gets there three times as fast.
-    insightRate: insightRate * focus,
+    // ONE reader for the channel — modifiers.js rule 4 — so it is applied here
+    // to the finished figure rather than at each of the two places insight is
+    // accumulated. Those two would have to be kept in step by hand, which is
+    // precisely the bug the brood rate had.
+    insightRate: insightRate * focus * factor(mod, 'insight'),
     insightRateBase: insightRate,
     growthRate,
-    revealed,
     unlocked,
   };
+}
+
+/**
+ * JUST THE STORAGE SHAPE, for callers that want to open a store and nothing else.
+ *
+ * `openStore` needs `derived.storage` — the dedicated room per nutrient and the
+ * size of the shared pool — and four places in actions.js were calling the whole
+ * of `computeDerived` to get it. That is about a millisecond against the handful
+ * of microseconds the capacity pass actually costs, and one of the four is
+ * `ingestItem`, which is on the Consume button: every press paid a full derive
+ * on top of the render it was already triggering.
+ *
+ * It recomputes charges and modifiers rather than taking them, because the
+ * callers do not have them either and a stale charge here would quietly size the
+ * store wrong.
+ */
+export function storageFor(state) {
+  const charges = computeCharges(state);
+  return computeCaps(state, charges, computeModifiers(state, charges)).storage;
+}
+
+/** The same, for caste slots. */
+export function slotsFor(state) {
+  return computeSlots(state, computeCharges(state));
+}
+
+/** And for cognition, whose `free` is the only field any caller wants. */
+export function cognitionFor(state) {
+  return computeCognition(state, computeCharges(state));
 }
 
 /* --------------------------------------------------------------- cost helpers */
@@ -1785,28 +1904,6 @@ export function canAfford(state, cost) {
     if (!isRevealed(state, n)) return false;
     return (state.nutrients[n] || 0) >= amount - EPSILON;
   });
-}
-
-export function affordableCount(state, id, max = 1000) {
-  let count = 0;
-  const spent = {};
-  const owned = state.structures[id] || 0;
-  // A levelled structure cannot go past its cap, so "max" means "up to the cap".
-  const ceiling = Math.min(max, maxLevelOf(id) - owned);
-  while (count < ceiling) {
-    // Payable, not raw — otherwise "max" would refuse to count anything priced
-    // in a mineral the hive has not assayed, while the Build button next to it
-    // happily grows one.
-    const next = payableCost(state, STRUCTURES[id].cost(owned + count));
-    const ok = Object.entries(next).every(([n, amount]) => {
-      if (!isRevealed(state, n)) return false;
-      return (state.nutrients[n] || 0) - (spent[n] || 0) >= amount;
-    });
-    if (!ok) break;
-    for (const [n, amount] of Object.entries(next)) spent[n] = (spent[n] || 0) + amount;
-    count += 1;
-  }
-  return count;
 }
 
 /** Seconds until a cost becomes affordable at current rates, or null. */
@@ -1974,7 +2071,10 @@ export function tick(state, dt) {
   // Derived first, forage after: this tick delivers what the castes were
   // already carrying, and only then do they go out and find the next thing.
   // Rolling first would mean a find the player never saw arrive.
-  const derived = computeDerived(state, dt);
+  // `explain: false`: the tick needs the numbers, not the tooltips. See
+  // computeDerived — this is what keeps offline catch-up from spending most of
+  // its time building attribution nobody will ever look at.
+  const derived = computeDerived(state, dt, { explain: false });
 
   // Storage first: `itemNet` already has the cap and the spoilage folded in,
   // because the amount digestion could reach depended on both.
@@ -2064,10 +2164,9 @@ export function tick(state, dt) {
   if (derived.brood.length) {
     const broodStore = openStore(state, derived.storage);
     for (const b of derived.brood) {
-      let progress = b.progress;
-      // The pace is read from derived rather than recomputed, so one step is
-      // worked at one pace however many larvae the step itself lays.
-      if (b.units > 0) progress += (b.units * b.pace * dt) / b.seconds;
+      // The RATE is read from derived rather than recomputed here. One
+      // expression, one place — see the note beside cycleRate.
+      let progress = b.progress + b.cycleRate * dt;
       while (progress >= 1) {
         progress -= 1;
         const canPay = Object.entries(b.cost).every(
@@ -2140,8 +2239,7 @@ export function tick(state, dt) {
     // the same step and waking up over budget.
     let free = derived.cognition.free;
     for (const m of derived.molding) {
-      let progress = m.progress;
-      if (m.active && m.units > 0) progress += (m.units * m.pace * dt) / m.seconds;
+      let progress = m.progress + m.cycleRate * dt;
       while (progress >= 1) {
         progress -= 1;
         // Re-read at the moment of completion rather than taken from `derived`,

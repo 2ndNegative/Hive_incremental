@@ -27,6 +27,21 @@ const droneCount = computed(
     Object.values(state.droneTypes || {}).reduce((sum, n) => sum + (n || 0), 0),
 );
 
+/**
+ * FOLD STATE IS DELIBERATELY SESSION-ONLY.
+ *
+ * `state.ui.buildBands` and `state.ui.droneBands` persist, and this does not,
+ * which looks like an oversight. It is not. Those two fold away bands of things
+ * the player has decided they are done with for the rest of the run; a folded
+ * micronutrient group is almost always "I am reading the macros right now", and
+ * a panel that came back from a reload with thirty-five freshly assayed
+ * compounds hidden would read as the assay having failed to land.
+ *
+ * Persisting it would also mean a key in `createInitialState` that every save
+ * written before it existed does not have, for a preference worth less than the
+ * migration. If that judgement ever flips, it is a declared `state.ui`
+ * key — not a ref that happens to get saved.
+ */
 const collapsed = ref({});
 function toggle(key) {
   collapsed.value[key] = !collapsed.value[key];
@@ -67,15 +82,37 @@ function row(id) {
 
 // Groups appear only once their assay is done. Before that the nutrients are
 // accumulating all the same — there is simply nothing in the interface to say so.
+//
+// A COLLAPSED GROUP BUILDS NO ROWS AT ALL. `row()` is not cheap — it reads four
+// derived maps and spreads every flow source into a nested `from` array — and
+// this whole computed invalidates on the 100 ms tick, so a fully assayed hive
+// was rebuilding thirty-five of them, ten times a second, to feed a template
+// that was hiding twenty-eight of them behind `v-show`. Folding a group away is
+// the player asking not to be shown it; before this it bought them nothing
+// whatsoever, which is the opposite of what a fold is for.
+//
+// `ids` and `count` are what survive the skip, because the two things that read
+// a folded group still need them: the header shows the count, and the general-
+// storage rules dialog lists every revealed nutrient whether its group is open
+// or not. Dropping to `rows` alone would have quietly emptied that dialog.
 const groups = computed(() => {
-  const out = [{ key: 'bulk', name: 'Macronutrients', rows: MACROS.map(row) }];
+  const out = [groupOf('bulk', 'Macronutrients', MACROS)];
   for (const assay of ASSAY_GROUPS) {
     if (!state.tech[assay.id]) continue;
-    const ids = MICROS.filter((id) => NUTRIENTS[id].group === assay.id);
-    out.push({ key: assay.id, name: assay.name, rows: ids.map(row) });
+    out.push(groupOf(assay.id, assay.name, MICROS.filter((id) => NUTRIENTS[id].group === assay.id)));
   }
   return out;
 });
+
+function groupOf(key, name, ids) {
+  return {
+    key,
+    name,
+    ids,
+    count: ids.length,
+    rows: collapsed.value[key] ? [] : ids.map(row),
+  };
+}
 
 const hiddenCount = computed(() => MICROS.filter((id) => !isRevealed(state, id)).length);
 
@@ -105,8 +142,9 @@ const ruleRows = computed(() => {
   const q = ruleSearch.value.trim().toLowerCase();
   const out = [];
   for (const group of groups.value) {
-    const rows = group.rows
-      .map((r) => r.id)
+    // `ids`, not `rows` — a folded group has no rows, and the rules it is under
+    // are about the shared pool rather than about what the panel is showing.
+    const rows = group.ids
       .filter((id) => isRevealed(state, id))
       .filter((id) => !q || NUTRIENTS[id].name.toLowerCase().includes(q))
       .map((id) => ({
@@ -272,10 +310,13 @@ const lastGather = computed(() => {
     <div v-for="group in groups" :key="group.key">
       <button class="group-head" @click="toggle(group.key)">
         <span>{{ collapsed[group.key] ? '▸' : '▾' }} {{ group.name }}</span>
-        <span class="muted">{{ group.rows.length }}</span>
+        <span class="muted">{{ group.count }}</span>
       </button>
 
-      <div v-show="!collapsed[group.key]" class="panel-body tight">
+      <!-- v-if, not v-show. Every row carries a `.tip-body` full of flow rows,
+           and under v-show all of it stayed mounted and re-rendering on the
+           tick while being invisible. -->
+      <div v-if="!collapsed[group.key]" class="panel-body tight">
         <div
           v-for="r in group.rows"
           :key="r.id"

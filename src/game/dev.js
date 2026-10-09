@@ -11,7 +11,7 @@ import { ASSAY_GROUPS } from './definitions/nutrients.js';
 import { computeDerived, advance } from './engine.js';
 import { ingestItem } from './actions.js';
 import { ITEMS } from './definitions/items/index.js';
-import { BIOMES, BIOME_IDS } from './definitions/biomes.js';
+import { BIOMES } from './definitions/biomes.js';
 import { grantTerritory } from './run.js';
 import { resetForage } from './forage.js';
 import { formatMass } from './units.js';

@@ -18,7 +18,9 @@
 // browser, not the hive, and it must never end up inside the thing being saved.
 
 import { reactive } from 'vue';
-import { state, replaceState, createInitialState, SAVE_VERSION, pushLog } from './state.js';
+import {
+  state, replaceState, createInitialState, SAVE_VERSION, OPEN_MAPS, pushLog,
+} from './state.js';
 import { logIntro } from './actions.js';
 
 export const SAVE_KEY = 'hiveidle.save.v2';
@@ -244,20 +246,50 @@ export function measureStorageHeadroom() {
   return { supported: true, usedBytes, freeBytes: written };
 }
 
-/** Recursively fill in anything the save is missing from the defaults. */
-function mergeDefaults(defaults, loaded) {
+/**
+ * Recursively fill in anything the save is missing from the defaults.
+ *
+ * CLOSED BY DEFAULT. For an ordinary object the SCHEMA decides what exists:
+ * only keys `createInitialState` declares survive, which is what makes a field
+ * removed from the game disappear from old saves instead of haunting them
+ * forever. That is the right rule for almost everything.
+ *
+ * OPEN WHERE THE PLAYER INVENTS THE KEYS. A map keyed by something the schema
+ * cannot know — which generator is burning what, which nutrients are barred
+ * from the pool — has to be taken from the save as it stands, or every setting
+ * the player made is erased on reload.
+ *
+ * Openness is declared TWO ways, and both are needed:
+ *
+ *   1. `state.js` OPEN_MAPS names the path. This is the one that counts.
+ *   2. The default object is empty, so there is nothing to merge anyway.
+ *
+ * Rule 2 alone is what this used to do, and it is a trap: it infers a design
+ * decision from a count. `energy.overrides` was open for exactly as long as it
+ * had no default entries — the moment v21 gave the drone ration a default, the
+ * map silently became closed and every generator and caste fuel choice the
+ * player had made was destroyed on their next reload. Nothing failed, nothing
+ * logged; the dropdowns simply went back to default. Rule 1 exists because a
+ * map's openness is a fact about what it is FOR, not about how many entries it
+ * happens to ship with.
+ *
+ * An open map MERGES rather than replacing: saved keys win, and default keys
+ * the save has never heard of are added. So a new shipped default appears for
+ * an existing player without a migration, and their own keys survive it.
+ */
+function mergeDefaults(defaults, loaded, path = '') {
   if (Array.isArray(defaults)) return Array.isArray(loaded) ? loaded : defaults;
   if (defaults && typeof defaults === 'object') {
-    // An empty default object is an open-ended map (energy source overrides,
-    // say). It has no known keys to merge, so take the saved one wholesale —
-    // iterating the defaults here would silently erase the player's settings.
-    if (Object.keys(defaults).length === 0) {
-      return loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? loaded : {};
+    const saved = loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? loaded : null;
+    if (OPEN_MAPS.has(path) || Object.keys(defaults).length === 0) {
+      return saved ? { ...defaults, ...saved } : { ...defaults };
     }
     const out = {};
     for (const key of Object.keys(defaults)) {
-      const value = loaded && typeof loaded === 'object' ? loaded[key] : undefined;
-      out[key] = value === undefined ? defaults[key] : mergeDefaults(defaults[key], value);
+      const value = saved ? saved[key] : undefined;
+      out[key] = value === undefined
+        ? defaults[key]
+        : mergeDefaults(defaults[key], value, path ? `${path}.${key}` : key);
     }
     return out;
   }

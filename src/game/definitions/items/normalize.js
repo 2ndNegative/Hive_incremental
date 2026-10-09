@@ -95,16 +95,6 @@ function assertNutrient(id, itemId) {
   }
 }
 
-/** Nutrient yield (grams) from consuming `grams` of an item. */
-export function yieldOf(item, grams) {
-  const out = {};
-  const scale = grams / 100;
-  for (const [id, per100] of Object.entries(item.per100g)) {
-    if (per100) out[id] = per100 * scale;
-  }
-  return out;
-}
-
 /** Energy density of an item, in joules per gram. */
 export function itemJoulesPerGram(item) {
   let total = 0;

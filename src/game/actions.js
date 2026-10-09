@@ -13,13 +13,14 @@ import {
   payableCost,
 } from './definitions/nutrients.js';
 import { STRUCTURES, maxLevelOf, isLeveled } from './definitions/structures.js';
-import { CASTES, CASTE_ORDER } from './definitions/castes.js';
+import { CASTES } from './definitions/castes.js';
 import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
 import {
-  structureCost,
   canAfford,
-  computeDerived,
+  storageFor,
+  slotsFor,
+  cognitionFor,
   cancelBuild,
   inFlightCount,
   queueRoom,
@@ -75,10 +76,12 @@ function manualGrams() {
 export function ingestItem(itemId, grams) {
   const item = ITEMS[itemId];
   if (!item || grams <= 0) return 0;
-  const derived = computeDerived(state);
+  // The storage shape only — see storageFor. This is the Consume button, so it
+  // runs on every press, and a full derive here cost about a millisecond for
+  // one field of it.
   // Same two-tier store as the tick: dedicated room first, the shared general
   // pool after it, and whatever fits in neither is lost.
-  const store = openStore(state, derived.storage);
+  const store = openStore(state, storageFor(state));
   for (const [nutrient, amount] of Object.entries(itemYield(state, item.per100g, grams))) {
     if (amount <= 0) continue;
     const lost = store.apply(nutrient, amount);
@@ -356,10 +359,10 @@ export function adjustActive(id, delta) {
 export function assignCaste(id, delta) {
   const def = CASTES[id];
   if (!def || !def.assignable || !def.unlock(state)) return 0;
-  const derived = computeDerived(state);
+  const slots = slotsFor(state);
 
   if (delta > 0) {
-    const room = derived.slots[id] - state.castes[id];
+    const room = slots[id] - state.castes[id];
     const moved = Math.min(delta, state.castes.dormant, room);
     if (moved <= 0) return 0;
     state.castes.dormant -= moved;
@@ -372,15 +375,6 @@ export function assignCaste(id, delta) {
   state.castes[id] -= moved;
   state.castes.dormant += moved;
   return moved;
-}
-
-export function clearCastes() {
-  for (const id of CASTE_ORDER) {
-    if (id === 'dormant' || !CASTES[id].assignable) continue;
-    state.castes.dormant += state.castes[id];
-    state.castes[id] = 0;
-  }
-  pushLog('All drones returned to dormancy.', 'info');
 }
 
 /* -------------------------------------------------------------- energy source */
@@ -452,9 +446,8 @@ export function setGeneralBan(nutrientId, banned) {
     let pooled = 0;
     for (const id of covers) pooled += state.general?.[id] || 0;
     if (pooled > EPSILON_GRAMS) {
-      const derived = computeDerived(state);
       // reconcile() is what performs the eviction; this only reports it.
-      const lost = openStore(state, derived.storage).reconcile();
+      const lost = openStore(state, storageFor(state)).reconcile();
       let gone = 0;
       for (const id of covers) {
         const mass = lost[id] || 0;
@@ -478,11 +471,6 @@ export function setGeneralBan(nutrientId, banned) {
 
 export function toggleGeneralBan(nutrientId) {
   return setGeneralBan(nutrientId, !state.generalBans?.[nutrientId]);
-}
-
-/** Is this nutrient allowed into the shared pool? */
-export function generalAllows(nutrientId) {
-  return !state.generalBans?.[nutrientId];
 }
 
 /**
@@ -564,8 +552,7 @@ export function claimTerritory(biomeId, area) {
   const cost = claimCost(biomeId, want);
   if (!canAfford(state, cost)) return 0;
 
-  const derived = computeDerived(state);
-  const store = openStore(state, derived.storage);
+  const store = openStore(state, storageFor(state));
   for (const [n, grams] of Object.entries(cost)) store.apply(n, -grams);
 
   state.unclaimed[biomeId] = mapped - want;
@@ -672,7 +659,7 @@ export function reserveCogits(key, amount, label) {
   state.cognition.reservations ??= {};
 
   const existing = state.cognition.reservations[key]?.amount || 0;
-  const { free } = computeDerived(state).cognition;
+  const { free } = cognitionFor(state);
   if (amount - existing > free) return false;
 
   state.cognition.reservations[key] = { amount, label: label || key };
@@ -700,9 +687,22 @@ export function research(id) {
   // player does.
   if (!RESEARCH_ORDER.includes(id)) return false;
   if (!def.requires.every((req) => state.tech[req])) return false;
-  if (!canAfford(state, def.cost)) return false;
 
-  for (const [n, amount] of Object.entries(def.cost)) {
+  // THROUGH payableCost, like a building's cost and a drone's mold cost.
+  //
+  // A tech priced in an element the hive cannot see yet is otherwise not
+  // expensive, it is IMPOSSIBLE: `canAfford` refuses any unrevealed nutrient,
+  // so the entry would sit greyed out forever with no way to tell that from
+  // "cannot afford it yet". Substitution charges it to the parent at
+  // LOCKED_COST_MULTIPLIER instead — a bad rate the assay later fixes, which is
+  // the same bargain every other cost in the game offers.
+  //
+  // It matters most for what has not been written yet. Nothing in the live tree
+  // is priced in a micro today; a genetics tree almost certainly will be.
+  const cost = payableCost(state, def.cost);
+  if (!canAfford(state, cost)) return false;
+
+  for (const [n, amount] of Object.entries(cost)) {
     if (n === 'insight') state.insight -= amount;
     else state.nutrients[n] -= amount;
   }

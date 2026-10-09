@@ -4,6 +4,38 @@
    another [data-theme] block.
 --------------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------------
+   BUILDING A NEW TAB? REUSE THESE.
+
+   Every tab in the game is assembled from the list below, and a new one should
+   be too. The failure mode this is here to prevent is cheap and permanent: a
+   Genes tab grows a `.gene-card` beside the existing `.action-card` because
+   writing forty lines was quicker than reading them, and from then on there are
+   two card designs that drift apart on every restyle. Nothing warns you — both
+   look fine in isolation. Add a MODIFIER to one of these (`.action-card.is-x`)
+   rather than a sibling, and if a block genuinely does not fit, widen the block
+   here so the next tab inherits the fix.
+
+   panels     .panel-box / .panel-head / .panel-body
+   bands      .band-stack / .band / .band-head / .band-toggle / .band-body
+              / .band-empty                       — collapsible groups
+   cards      .action-grid / .action-card / .action-head / .action-name
+              / .action-count / .action-desc / .effect-list
+   job rows   .job-row / .job-name / .job-desc / .job-count / .stepper
+   stats      .stat-grid / .stat-tile
+   tables     .data-table
+   chips      .offer-chip
+   bars       the bar family — see "the bar family" below
+   forms      .notice / .field-row / .field-label / .field-help
+   tooltips   .tip / .tip-body / .tip-title / .tip-row
+   tone       .num / .good / .bad / .warn / .muted
+
+   `.num` on anything numeric: it is the tabular-figures class, and a column of
+   numbers without it jitters as the digits change. The three tone colours are
+   not decorative — see "One colour, one meaning" in docs/DESIGN.md before
+   reaching for `.warn`.
+--------------------------------------------------------------------------- */
+
 :root {
   --bg: #15171a;
   --bg-deep: #0f1113;
@@ -23,6 +55,13 @@
   --research: #b58de0;
   --radius: 3px;
   --mono: 'Consolas', 'SF Mono', 'Menlo', monospace;
+
+  /* The hairline between rows in a list. A full --border reads as a table
+     grid, which is why every row divider was already fading it — but at four
+     sites it had drifted to 45%, 45%, 40% and 35%, with nothing distinguishing
+     them and no way to restyle "the divider" in one place. One value now.
+     Derived from --border rather than hard-coded so it follows the theme. */
+  --rule: color-mix(in srgb, var(--border) 45%, transparent);
 }
 
 :root[data-theme='light'] {
@@ -84,7 +123,6 @@ body {
 
 /* Bulma writes its own colours onto these; pull them back to our tokens. */
 .title,
-.subtitle,
 strong,
 label {
   color: var(--text-strong);
@@ -253,7 +291,7 @@ a:hover {
   grid-template-columns: 1fr auto;
   gap: 0.25rem 0.5rem;
   padding: 0.28rem 0.6rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+  border-bottom: 1px solid var(--rule);
   position: relative;
 }
 
@@ -287,23 +325,66 @@ a:hover {
   text-align: right;
 }
 
-.res-bar {
-  grid-column: 1 / -1;
+/* ------------------------------------------------------------- the bar family
+
+   Five 3px bars across four tabs — a resource, a store, the click combo, a
+   building's power and a chamber's cycle — used to be five hand-written copies
+   of the same six declarations, and .power-bar and .cycle-bar were byte for
+   byte identical. The cost of that was never the bytes: it is that the sixth
+   bar gets written as a seventh copy, and that changing the family's height or
+   radius means finding all of them first.
+
+   A caller now sets --bar-fill and keeps only what is genuinely its own: its
+   margin, and .res-bar's grid span. The class names are deliberately NOT
+   collapsed into a single `.bar` — a dozen Playwright suites select
+   `.cycle-bar > span` and friends and read their inline style.width, so these
+   names are a tested interface, not an implementation detail.
+
+   The fallback on --bar-fill is load-bearing. Plain `background: var(--bar-fill)`
+   computes to transparent when a caller forgets to set it, so a bar sitting at
+   70% draws as an empty trough — which reads as "nothing is getting through"
+   rather than as a missing declaration. That exact bug shipped once on
+   .power-bar. A wrong colour is a bug you can see; an invisible fill is not.
+
+   One transition for all five, where there were three values (0.1s, 0.12s, 0.2s
+   and, on .store-bar, none at all). Nothing distinguished them.
+
+   .progress-track and .gut-meter are deliberately OUT of the family: both
+   differ in height, radius and border, so each would need three overrides to
+   rejoin it — more lines than collapsing them saves. */
+.res-bar,
+.store-bar,
+.combo-bar,
+.power-bar,
+.cycle-bar {
+  display: block;
   height: 3px;
-  background: var(--bg-deep);
+  background: var(--border);
   border-radius: 2px;
   overflow: hidden;
 }
 
-.res-bar > span {
+.res-bar > span,
+.store-bar > span,
+.combo-bar > span,
+.power-bar > span,
+.cycle-bar > span {
   display: block;
   height: 100%;
-  background: var(--accent-dim);
-  transition: width 0.2s linear;
+  background: var(--bar-fill, var(--accent));
+  transition: width 0.12s linear;
 }
 
-.res-bar.is-full > span {
-  background: var(--warn);
+.res-bar {
+  grid-column: 1 / -1;
+  /* Sidebar rows sit on --panel and are already separated by --rule, so a
+     --border track would read as a second divider. This one digs a trough. */
+  background: var(--bg-deep);
+  --bar-fill: var(--accent-dim);
+}
+
+.res-bar.is-full {
+  --bar-fill: var(--warn);
 }
 
 /* ------------------------------------------------------------------ tabs */
@@ -457,7 +538,7 @@ a:hover {
   align-items: center;
   gap: 0.6rem;
   padding: 0.45rem 0.6rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+  border-bottom: 1px solid var(--rule);
 }
 
 .job-row:last-child {
@@ -587,19 +668,8 @@ a:hover {
 }
 
 .combo-bar {
-  display: block;
-  height: 3px;
   margin-top: 0.25rem;
-  background: var(--border);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.combo-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--good);
-  transition: width 0.1s linear;
+  --bar-fill: var(--good);
 }
 
 .log-list {
@@ -614,7 +684,7 @@ a:hover {
 
 .log-list li {
   padding: 0.22rem 0.6rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
+  border-bottom: 1px solid var(--rule);
   color: var(--text);
 }
 
@@ -749,7 +819,7 @@ textarea.save-box {
   gap: 0.5rem;
   align-items: center;
   padding: 0.35rem 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  border-bottom: 1px solid var(--rule);
 }
 
 .fuel-row:last-child {
@@ -775,7 +845,6 @@ textarea.save-box {
   font-family: inherit;
   font-size: 0.8rem;
   padding: 0.25rem 0.4rem;
-  width: 100%;
 }
 
 .fuel-select:hover {
@@ -833,11 +902,6 @@ textarea.save-box {
 .codex-search:focus {
   outline: none;
   border-color: var(--accent-dim);
-}
-
-.codex-controls .fuel-row .field-help {
-  display: block;
-  margin-top: 0.1rem;
 }
 
 .fuel-select {
@@ -1344,8 +1408,10 @@ textarea.save-box {
   display: block;
   margin-top: 0.35rem;
   font-size: 0.68rem;
-  color: var(--text-dim, var(--text));
-  opacity: 0.6;
+  /* --muted IS the dim-text token; the 0.6 opacity that used to sit here was
+     compensating for colouring this with --text, and the two land on the same
+     rendered grey. Keeping both would make it half as bright again. */
+  color: var(--muted);
 }
 
 .tip.is-pinned .tip-hint {
@@ -1419,8 +1485,11 @@ textarea.save-box {
   }
 }
 
+/* The same gesture as .res-row:hover, and the same token: --bg-raise was never
+   declared anywhere, so the rgba white wash behind it always won — which on the
+   light theme washes #ffffff with white and the hover disappeared entirely. */
 .store-row:hover {
-  background: var(--bg-raise, rgba(255, 255, 255, 0.03));
+  background: var(--panel-alt);
 }
 
 .store-row .store-name {
@@ -1431,20 +1500,11 @@ textarea.save-box {
 
 .store-bar {
   grid-column: 1 / -1;
-  height: 3px;
-  background: var(--border);
-  border-radius: 2px;
-  overflow: hidden;
+  --bar-fill: var(--accent);
 }
 
-.store-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--accent, #6cf);
-}
-
-.store-bar.is-full > span {
-  background: var(--warn, #e8a33d);
+.store-bar.is-full {
+  --bar-fill: var(--warn);
 }
 
 .gut-meter {
@@ -1647,10 +1707,20 @@ textarea.save-box {
   color: var(--accent);
 }
 
-.star-on,
-.star-btn.star-on {
+.star-on {
   color: var(--warn);
   opacity: 1;
+}
+
+/* A filled star keeps its colour under the cursor. This used to happen by
+   accident: the rule above was written `.star-on, .star-btn.star-on`, and the
+   compound half tied with .star-btn:hover on specificity and won on source
+   order. Collapsing it to the bare .star-on — which does cover every other
+   case — silently turned a starred star accent-blue on hover, and the accent
+   means "you could star this", which is the wrong thing to say about one that
+   already is. Stated outright rather than left to a tie. */
+.star-btn.star-on:hover {
+  color: var(--warn);
 }
 
 .offer-chip .offer-focused {
@@ -1792,12 +1862,6 @@ textarea.save-box {
   padding: 0.2rem 0 0;
 }
 
-.queue-btn {
-  width: auto;
-  height: auto;
-  padding: 0.1rem 0.5rem;
-  font-size: 0.74rem;
-}
 
 .queue-mine {
   font-size: 0.72rem;
@@ -2023,27 +2087,30 @@ textarea.save-box {
   margin-bottom: 0.35rem;
 }
 
+/* The fill needs a colour of its own, because the bar is drawn for every state
+   except `steady` — see engine.js, where `holding` is the normal resting state
+   of a browned-out building. Without a default the fill was transparent, so a
+   building settled at 70% drew an empty bar: it read as nothing reaching the
+   building at all, directly beside a sentence saying it runs at 70%. */
 .power-bar {
-  display: block;
-  height: 3px;
-  background: var(--border);
-  border-radius: 2px;
-  overflow: hidden;
   margin-bottom: 0.2rem;
+  --bar-fill: var(--muted);
 }
 
-.power-bar > span {
-  display: block;
-  height: 100%;
-  transition: width 0.12s linear;
+/* Settled below full and staying there. Not an emergency — it is where the
+   hive has decided this building lives — so it is the caution colour rather
+   than the bad one, and it does not share the `recovering` reading of "this is
+   on its way back up". */
+.power-bar.holding {
+  --bar-fill: var(--warn);
 }
 
-.power-bar.failing > span {
-  background: var(--bad);
+.power-bar.failing {
+  --bar-fill: var(--bad);
 }
 
-.power-bar.recovering > span {
-  background: var(--warn);
+.power-bar.recovering {
+  --bar-fill: var(--good);
 }
 
 /* A chamber part-way through a cycle. Same bar as the power one, read the
@@ -2061,23 +2128,12 @@ textarea.save-box {
 }
 
 .cycle-bar {
-  display: block;
-  height: 3px;
-  background: var(--border);
-  border-radius: 2px;
-  overflow: hidden;
   margin-bottom: 0.2rem;
+  --bar-fill: var(--good);
 }
 
-.cycle-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--good);
-  transition: width 0.12s linear;
-}
-
-.action-cycle.is-stalled .cycle-bar > span {
-  background: var(--muted);
+.action-cycle.is-stalled .cycle-bar {
+  --bar-fill: var(--muted);
 }
 
 .cycle-label {
@@ -2214,12 +2270,6 @@ textarea.save-box {
   padding: 0.5rem 0.6rem;
 }
 
-/* The right-hand column of a job row. */
-.job-note {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  text-align: right;
-}
 
 .mold-controls {
   display: flex;

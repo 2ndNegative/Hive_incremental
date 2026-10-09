@@ -2,9 +2,9 @@
 import { BIOMES, BIOME_IDS } from '../../game/definitions/biomes.js';
 import { ref, computed } from 'vue';
 import { state, derived } from '../../game/useGame.js';
-import { NUTRIENTS, NUTRIENT_IDS, MACROS, MICROS, isRevealed } from '../../game/definitions/nutrients.js';
+import { NUTRIENTS, NUTRIENT_IDS, isRevealed } from '../../game/definitions/nutrients.js';
 import { RESEARCH, RESEARCH_ORDER } from '../../game/definitions/research.js';
-import { ITEMS, ITEM_IDS, ITEMS_BY_CATEGORY } from '../../game/definitions/items/index.js';
+import { ITEMS, ITEMS_BY_CATEGORY } from '../../game/definitions/items/index.js';
 import { formatMass } from '../../game/units.js';
 import * as dev from '../../game/dev.js';
 

@@ -1,10 +1,9 @@
 <script setup>
 import { computed } from 'vue';
 import { offline, skipOffline } from '../game/offline.js';
-import { state } from '../game/useGame.js';
+import { state, derived } from '../game/useGame.js';
 import { formatDuration } from '../game/format.js';
 import { formatMass, formatEnergy } from '../game/units.js';
-import { derived } from '../game/useGame.js';
 
 const percent = computed(() =>
   offline.total > 0 ? Math.min(100, (offline.done / offline.total) * 100) : 0,

@@ -25,7 +25,7 @@ import { preyFor, ORGANISMS } from './definitions/organisms.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
 import { DRONE_TYPES, foragingTypes } from './definitions/drones.js';
 import { recordFind, preyKey } from './discovery.js';
-import { pickFocused, keyOfEntry, focusedOdds } from './focus.js';
+import { pickFocused } from './focus.js';
 import { ITEMS } from './definitions/items/index.js';
 
 
@@ -233,60 +233,4 @@ export function describeSlot(slot) {
 /** The same, for one of the parked castes' slots. */
 export function describeFind(state, casteId) {
   return describeSlot(state.forage?.[casteId]);
-}
-
-/**
- * What a caste is worth per drone, averaged over everything it could roll.
- *
- * A caste no longer has a fixed yield, so "is this drone paying for itself"
- * cannot be read off its definition any more — it depends on the ground. This
- * walks the same two-stage distribution the roll uses and returns the expected
- * joules per second per drone, counting only fuels the hive can actually open.
- */
-export function expectedYield(state, casteId, nutrients, tech, efficiency = {}) {
-  const def = CASTES[casteId];
-  if (!def?.gather || !def.harvestRate) return 0;
-
-  const itemJoules = (itemId, grams) => {
-    const item = ITEMS[itemId];
-    if (!item) return 0;
-    let total = 0;
-    for (const [n, per100] of Object.entries(item.per100g)) {
-      const nut = nutrients[n];
-      if (!nut?.fuel) continue;
-      if (nut.fuelRequires && !tech[nut.fuelRequires]) continue;
-      total += ((per100 * grams) / 100) * nut.kjPerGram * 1000 * (efficiency[n] ?? 1);
-    }
-    return total;
-  };
-
-  let expected = 0;
-  for (const [biomeId, share] of Object.entries(biomeShares(state))) {
-    const pool =
-      def.gather === 'hunter'
-        ? preyFor(biomeId).map((p) => ({ weight: p.weight, organismId: p.organismId }))
-        : poolFor(def.gather, biomeId);
-    const total = pool.reduce((a, e) => a + e.weight, 0);
-    if (total <= 0) continue; // this ground offers this caste nothing
-
-    // The focused distribution, not the natural one: a player who has told
-    // this route to fetch hazelnuts has changed what a drone is worth, and the
-    // figure that answers "is this drone paying for itself" has to know it.
-    const odds = focusedOdds(state, def.gather, biomeId, pool);
-
-    for (const entry of pool) {
-      const chance = odds[keyOfEntry(entry)] ?? entry.weight / total;
-      let joules = 0;
-      if (entry.organismId) {
-        const org = ORGANISMS[entry.organismId];
-        for (const [itemId, fraction] of Object.entries(org.parts)) {
-          joules += itemJoules(itemId, def.harvestRate * fraction);
-        }
-      } else {
-        joules = itemJoules(entry.itemId, def.harvestRate);
-      }
-      expected += share * chance * joules;
-    }
-  }
-  return expected;
 }

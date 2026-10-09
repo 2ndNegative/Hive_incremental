@@ -173,4 +173,9 @@ export const CASTE_ORDER = ['dormant'];
 export const DEPRECATED_CASTE_ORDER = ['siphon', 'forager', 'analyst', 'scavenger', 'excavator', 'hunter'];
 
 /** Multiplier channels that castes and structures feed into. */
-export const MULTIPLIERS = ['forager', 'analyst', 'hunter', 'storage', 'mineralStorage', 'vitaminStorage'];
+// The old multiplier channel list. Superseded by CHANNELS in
+// definitions/modifiers.js, which names channels after what they multiply
+// rather than after the caste that happened to supply them — see rule 1 there.
+// Kept un-exported purely as a record of what the six used to be.
+const LEGACY_MULTIPLIERS = ['forager', 'analyst', 'hunter', 'storage', 'mineralStorage', 'vitaminStorage'];
+void LEGACY_MULTIPLIERS;

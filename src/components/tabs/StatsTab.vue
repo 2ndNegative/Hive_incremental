@@ -3,12 +3,24 @@ import { computed } from 'vue';
 import { state, derived } from '../../game/useGame.js';
 import { NUTRIENTS, MACROS, MICROS, isRevealed } from '../../game/definitions/nutrients.js';
 import { STRUCTURE_ORDER, STRUCTURES } from '../../game/definitions/structures.js';
+import { RESEARCH_ORDER } from '../../game/definitions/research.js';
 import { ITEMS } from '../../game/definitions/items/index.js';
 import { formatNumber, formatDuration } from '../../game/format.js';
 import { lifetimeTotals } from '../../game/run.js';
-import { formatMass, formatMassFlow, formatEnergy, formatPower } from '../../game/units.js';
+import { formatMass, formatMassFlow, formatEnergy } from '../../game/units.js';
 
 const lifetime = computed(() => lifetimeTotals());
+
+/**
+ * How many techs there are to finish, counted rather than typed.
+ *
+ * It read `/ 12` in three places on this screen and a fourth on Settings. All
+ * four were correct, and all four would have gone quietly wrong the first time
+ * a tech was added to the ladder — a progress figure that is wrong by one is
+ * the kind of thing a player notices long before a developer does, and nothing
+ * in the code would have objected.
+ */
+const researchTotal = RESEARCH_ORDER.length;
 
 const tiles = computed(() => [
   { label: 'This run', value: formatDuration(state.playtime) },
@@ -16,7 +28,7 @@ const tiles = computed(() => [
   { label: 'Energy metabolised', value: formatEnergy(state.stats.metabolised) },
   { label: 'Manual intakes', value: formatNumber(state.stats.clicks, { notation: 'plain' }) },
   { label: 'Structures grown', value: formatNumber(state.stats.built, { notation: 'plain' }) },
-  { label: 'Research complete', value: `${state.stats.researched} / 12` },
+  { label: 'Research complete', value: `${state.stats.researched} / ${researchTotal}` },
   { label: 'Peak drones', value: formatNumber(state.stats.peakDrones, { notation: 'plain' }) },
   { label: 'Drones starved', value: formatNumber(state.stats.dronesLost, { notation: 'plain' }) },
 ]);
@@ -104,9 +116,9 @@ const built = computed(() =>
             </tr>
             <tr>
               <td>Research complete</td>
-              <td class="right num">{{ state.stats.researched }} / 12</td>
+              <td class="right num">{{ state.stats.researched }} / {{ researchTotal }}</td>
               <td class="right num">{{ lifetime.researched }}</td>
-              <td class="right num">{{ lifetime.bestResearched }} / 12</td>
+              <td class="right num">{{ lifetime.bestResearched }} / {{ researchTotal }}</td>
             </tr>
             <tr>
               <td>Structures grown</td>

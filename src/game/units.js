@@ -112,15 +112,6 @@ export function formatMassFlow(gramsPerSecond, opts) {
 }
 
 /**
- * Energy per second IS power, so this prints watts with no "/s" suffix —
- * writing "kW/s" would claim an acceleration nobody meant.
- */
-export function formatEnergyFlow(joulesPerSecond, opts) {
-  const sign = joulesPerSecond > 0 ? '+' : joulesPerSecond < 0 ? '−' : '';
-  return `${sign}${formatPower(Math.abs(joulesPerSecond), opts)}`;
-}
-
-/**
  * Larvae, counted. One larva, two larvae — the singular is the whole reason
  * this is a function rather than a template string.
  */

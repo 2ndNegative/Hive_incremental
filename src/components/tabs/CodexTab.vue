@@ -1,8 +1,8 @@
 <script setup>
 import { computed } from 'vue';
-import { state, derived } from '../../game/useGame.js';
+import { state } from '../../game/useGame.js';
 import { ITEMS, ITEM_IDS, CATEGORIES, itemJoulesPerGram } from '../../game/definitions/items/index.js';
-import { ORGANISMS, ORGANISM_IDS, butcherYield } from '../../game/definitions/organisms.js';
+import { ORGANISMS, ORGANISM_IDS } from '../../game/definitions/organisms.js';
 import {
   NUTRIENTS, NUTRIENT_IDS, MACROS, MICROS, isRevealed,
 } from '../../game/definitions/nutrients.js';

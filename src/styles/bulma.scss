@@ -1,21 +1,72 @@
 // Only the Bulma pieces HiveIdle actually uses.
 //
-// The full bundle is ~690 kB of CSS; this trim keeps it near 240 kB (~25 kB
+// The full bundle is ~690 kB of CSS; this trim keeps it near 140 kB (~18 kB
 // gzipped). Add a line when you start using another Bulma component — the names
 // match the folders under node_modules/bulma/sass/.
 //
-// `themes` is what defines Bulma's --bulma-* custom properties. theme.css then
-// remaps the important ones onto HiveIdle's own tokens, so any Bulma component
-// you drop in picks up the dark skin automatically.
+// The themes/* modules are what define Bulma's --bulma-* custom properties.
+// theme.css then remaps the important ones onto HiveIdle's own tokens, so any
+// Bulma component you drop in picks up the dark skin automatically.
 
 @use 'bulma/sass/utilities';
 @use 'bulma/sass/base';
-@use 'bulma/sass/themes';
+
+// The theme halves, @use'd individually so the blocks below can be written by
+// hand. See "the themes" further down for why.
+@use 'bulma/sass/themes/light';
+@use 'bulma/sass/themes/dark';
+@use 'bulma/sass/themes/setup';
 
 // Elements
+//
+// `tag` and `progress` were dropped: the markup has no class="…tag…" anywhere,
+// and no <progress> element either — OfflineModal draws its own .progress-track
+// because it needs a skippable, animated bar rather than a native widget.
 @use 'bulma/sass/elements/table';
-@use 'bulma/sass/elements/tag';
-@use 'bulma/sass/elements/progress';
 
 // Layout
+//
+// Still carrying its weight: StatsTab and SettingsTab lay out with .columns.
 @use 'bulma/sass/grid/columns';
+
+// --------------------------------------------------------------- the themes
+//
+// These two blocks replace `@use 'bulma/sass/themes'`, which emits the same
+// ~560 custom properties FIVE times — 2,792 declarations, 128 kB raw and
+// 12.4 kB gzipped — of which HiveIdle can only ever read two:
+//
+//   :root                                  <- kept
+//   @media (prefers-color-scheme: light)   <- dropped
+//   @media (prefers-color-scheme: dark)    <- dropped
+//   [data-theme=light], .theme-light       <- dropped
+//   [data-theme=dark],  .theme-dark        <- kept, as [data-theme=dark] alone
+//
+// The two media blocks are dead because the game never consults the OS: the
+// theme is a toggle, written to documentElement.dataset.theme in main.js, and
+// index.html ships data-theme="dark" so there is a value from the first paint.
+// The `.theme-*` selectors are dead for the same reason — nothing adds those
+// classes.
+//
+// The light `[data-theme=light]` block is dead for a subtler reason, and this
+// is the part to understand before touching it: its content is byte-identical
+// to the host block, and `:root` and `[data-theme=light]` are THE SAME ELEMENT
+// — <html>. So the host block below already dresses the light theme, and
+// emitting it again under a second selector changes nothing.
+//
+// That leaves dark as the only theme needing a block of its own, because it is
+// the only one whose values differ from the host's.
+//
+// Keep the host block even though the app always sets data-theme: it is the
+// only definition of the ~540 properties the dark block does not override, and
+// dropping it would leave those referenced-but-undefined. A third theme needs
+// a block here AND a token block in theme.css.
+
+:root {
+  @include light.light-theme;
+  @include setup.setup-theme;
+}
+
+[data-theme='dark'] {
+  @include dark.dark-theme;
+  @include setup.setup-theme;
+}

@@ -15,11 +15,19 @@ import { tryUnlockDev } from '../../game/dev.js';
 import { restartRun, lifetimeTotals } from '../../game/run.js';
 import { formatDuration } from '../../game/format.js';
 import { formatMass, formatEnergy } from '../../game/units.js';
+import { RESEARCH_ORDER } from '../../game/definitions/research.js';
 import ConfirmDialog from '../ConfirmDialog.vue';
 
 const showWipe = ref(false);
 const showRestart = ref(false);
 const lifetime = computed(() => lifetimeTotals());
+
+/**
+ * Counted, not typed. The lifetime line read "/ 12" and was right, and would
+ * have been silently wrong the first time a tech joined the ladder — a stat
+ * that is quietly short by one is worse than no stat at all.
+ */
+const researchTotal = RESEARCH_ORDER.length;
 
 function doRestart() {
   restartRun();
@@ -133,7 +141,15 @@ function doImport() {
             Show zero flows
             <span class="field-help">Keep nutrients with no movement visible in the store list.</span>
           </span>
-          <input type="checkbox" v-model="state.settings.showZeroFlows" />
+          <!-- aria-label rather than a <label for>: the text beside it is a
+               <span class="field-label">, so without this a screen reader
+               reaches an unnamed checkbox and has nothing at all to announce.
+               A real <label> would want ids on every control on the page. -->
+          <input
+            type="checkbox"
+            v-model="state.settings.showZeroFlows"
+            aria-label="Show zero flows"
+          />
         </div>
       </div>
     </div>
@@ -166,15 +182,27 @@ function doImport() {
             Autosave
             <span class="field-help">Every 30 seconds, plus when the tab closes.</span>
           </span>
-          <input type="checkbox" v-model="state.settings.autosave" />
+          <input type="checkbox" v-model="state.settings.autosave" aria-label="Autosave" />
         </div>
 
         <div class="field-row">
           <span class="field-label">
             Offline progress
-            <span class="field-help">Simulate up to 8 hours of time away on load.</span>
+            <!-- This used to say "up to 8 hours", which was the opposite of
+                 what offline.js does: there is no cap, and the step size grows
+                 with the gap instead so that a year stays bounded work. The
+                 help text was telling the player their absence would be
+                 truncated, which would make coming back look like a bug. -->
+            <span class="field-help">
+              Simulate time away on load. There is no cap — come back after a year and a year is
+              simulated, in coarser steps the longer you were gone.
+            </span>
           </span>
-          <input type="checkbox" v-model="state.settings.offlineProgress" />
+          <input
+            type="checkbox"
+            v-model="state.settings.offlineProgress"
+            aria-label="Offline progress"
+          />
         </div>
 
         <div class="field-row">
@@ -291,7 +319,7 @@ function doImport() {
           <tr><td>Energy metabolised, all runs</td><td class="right num">{{ formatEnergy(lifetime.metabolised) }}</td></tr>
           <tr><td>Best run</td><td class="right num">{{ formatDuration(lifetime.bestPlaytime) }}</td></tr>
           <tr><td>Most drones ever</td><td class="right num">{{ lifetime.bestDrones }}</td></tr>
-          <tr><td>Most research ever</td><td class="right num">{{ lifetime.bestResearched }} / 12</td></tr>
+          <tr><td>Most research ever</td><td class="right num">{{ lifetime.bestResearched }} / {{ researchTotal }}</td></tr>
         </tbody>
       </table>
 

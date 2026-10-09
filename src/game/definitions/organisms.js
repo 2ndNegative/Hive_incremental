@@ -356,8 +356,6 @@ export const ORGANISMS = {
 
 export const ORGANISM_IDS = Object.keys(ORGANISMS);
 
-export const HABITATS = [...new Set(ORGANISM_IDS.map((id) => ORGANISMS[id].habitat))];
-
 /** Everything huntable in a given biome, with its weight. */
 export function preyFor(biomeId) {
   const out = [];

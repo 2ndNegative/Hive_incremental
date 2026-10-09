@@ -95,3 +95,8 @@ Thumbs.db
 ehthumbs.db
 desktop.ini
 $RECYCLE.BIN/
+
+# Screenshots the test suites take on their way through. Evidence for a human
+# reading a failure, never assertions — so they are regenerated on every run and
+# never committed. The suites themselves, in tests/, ARE committed.
+tests/.shots/

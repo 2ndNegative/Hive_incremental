@@ -42,7 +42,14 @@ import { formatMassFlow, formatLarvae } from '../../game/units.js';
                 <span>{{ Math.ceil(derived.larvae.secondsToNext) }}s</span>
               </span>
               <span v-if="derived.larvae.dying" class="tip-row bad">
-                <span>Dying at</span><span>one every {{ 1 / derived.larvae.deathRate }}s</span>
+                <!-- Rounded, because `deathRate` is 1/LARVA_DEATH_SECONDS and
+                     inverting it back lands on 2.0000000000000004. The raw
+                     figure is a float artefact rather than information, and it
+                     also disagreed on sight with the "one every 2s" the grace
+                     line below quotes from the same constant. One decimal, so
+                     a death interval that really is fractional still shows. -->
+                <span>Dying at</span>
+                <span>one every {{ Math.round(10 / derived.larvae.deathRate) / 10 }}s</span>
               </span>
               <span v-else class="tip-row muted">
                 <span>Grace</span><span>{{ derived.larvae.grace }}s unfed, then one every 2s</span>

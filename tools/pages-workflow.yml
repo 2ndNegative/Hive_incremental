@@ -28,6 +28,11 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      # Lint and the item validator both gate the deploy. Neither needs a
+      # browser, so they cost seconds; the browser suites are not run here on
+      # purpose — they want a Chromium download and several minutes, and the
+      # thing this workflow protects is "does a broken build reach Pages".
+      - run: npm run lint
       - run: npm run validate
       - run: npm run build
       - uses: actions/configure-pages@v5

@@ -44,9 +44,13 @@ npm run build      # production bundle into dist/
 npm run single     # one self-contained HiveIdle.html, see below
 npm run validate   # check the item database
 npm run balance    # headless progression simulation
+npm test           # all 32 browser suites, building and serving the game itself
+npm run lint
+npm run check      # lint, then validate, then the suites
 ```
 
-Requires Node 20 or newer.
+Requires Node 20 or newer. `Check HiveIdle.bat` is `npm run check` with the first-run
+installs done for you, including the Chromium the suites drive.
 
 ### The portable build
 
@@ -162,14 +166,25 @@ Energy per second is printed as watts with no `/s`, since that is what a watt is
 
 ## The item database
 
-184 items and 13 prey organisms, in `src/game/definitions/items/`.
+497 items in `src/game/definitions/items/`, and 25 prey organisms in
+`src/game/definitions/organisms.js` — a sibling of that directory, not a file inside it.
 
-| File | Contents |
-| --- | --- |
-| `animal.js` | meat, organs, fish and shellfish, insects, eggs and dairy, hominid tissue |
-| `plant.js` | grains, legumes, nuts and seeds, vegetables, fruit, fungi, algae, raw forage |
-| `material.js` | fats and oils, refined foods, minerals, metals, bulk materials, fluids |
-| `organisms.js` | prey species and what fraction of live mass butchers into which item |
+| File | Items | Contents |
+| --- | --- | --- |
+| `animal.js` | 63 | meat, organs, fish and shellfish, insects, eggs and dairy, hominid tissue |
+| `plant.js` | 72 | grains, legumes, nuts and seeds, vegetables, fruit, fungi, algae, raw forage |
+| `material.js` | 49 | fats and oils, refined foods, minerals, metals, bulk materials, fluids |
+| `processed.js` | 136 | what the locals cooked, cured, refined, bottled or extruded — and the only route to several nutrients that barely occur in wild tissue |
+| `wild.js` | 177 | what lives where nobody is farming: open ocean to abyssal plain, sea ice, tundra, high desert, canopy |
+| `index.js` | — | concatenates all five, normalises, throws on a duplicate id |
+
+The files are organised by **provenance** — where a thing came from — while the codex and
+the validator organise by `category`. The two cut across each other: eighteen of the
+twenty categories are split over two or more files, `fat` and `refined` over four. That is
+deliberate, because provenance is what an author editing a batch of items is thinking
+about and category is what a player browsing the codex is thinking about, and neither
+should be bent to the other. What is missing is a rule for which file a *new* item goes
+in; until there is one, follow the nearest neighbour already in the database.
 
 Composition is authored in the units nutrition tables actually print, and converted to
 grams on load:
@@ -213,20 +228,29 @@ node tools/validate-items.mjs            # errors and warnings
 node tools/validate-items.mjs --verbose  # plus every item's energy density
 ```
 
-It checks macro mass balance, mineral containment (identified minerals cannot outweigh
-the ash they live in, exempting sulfur and phosphorus which have major organic forms),
-micronutrient plausibility, referential integrity of organism parts, and an energy
-regression against 26 published kcal figures.
+It checks macro mass balance, parent containment (a micronutrient cannot outweigh the
+macro fraction it is declared to live in — the minerals inside the ash, the fat-soluble
+vitamins inside the fat, the water-soluble ones inside the water), micronutrient
+plausibility, referential integrity of organism parts, an energy regression against 26
+published kcal figures, and forage coverage: every item classified in `forage.js`, naming
+real biomes, reachable by some route, and every biome offering every caste something.
+
+Sulfur is the one nutrient with two parents, `['ash', 'protein']`, and the check lets it
+spill from the first into the second exactly as the engine does. Phosphorus is `['ash']`
+alone and gets no such latitude.
 
 It earns its keep — it caught five real errors during the build, including kale carrying
 2.4 g of available carbohydrate when its carb-by-difference is 4.4 g and its fibre alone
 is 4.1 g.
 
-The energy regression tolerates 12%, because the hive uses the **general** Atwater
-factors for everything while published kcal often use food-specific ones. Pure sugar
-reads about 5% high here (sucrose is 3.87 kcal/g against the general 4.06). That is a
-consequence of keeping one density per nutrient, which the whole game depends on, so it
-is tolerated rather than corrected.
+The energy regression tolerates 12% relative *or* 5 kcal absolute, whichever is kinder —
+both have to be exceeded before it errors. The 12% is because the hive uses the
+**general** Atwater factors for everything while published kcal often use food-specific
+ones: pure sugar reads about 5% high here (sucrose is 3.87 kcal/g against the general
+4.06). That is a consequence of keeping one density per nutrient, which the whole game
+depends on, so it is tolerated rather than corrected. The 5 kcal floor is because on a
+23 kcal vegetable a 2 kcal rounding difference in the source row is 9% and means nothing.
+Drift over 4% warns instead.
 
 ## Layout
 
@@ -236,24 +260,46 @@ src/
   App.vue                  shell — topbar, nutrient panel, tab host
   units.js                 SI formatting for joules, grams and watts
   game/
-    state.js               the reactive state object
+    state.js               the reactive state object, and SAVE_VERSION (22)
     engine.js              computeDerived(), tick(), metabolism  <- the heart
     actions.js             everything the player can do
-    save.js                localStorage, offline catch-up, export/import
+    save.js                localStorage, versioned and forward-tolerant
+    offline.js             the catch-up: scaled step size, chunked, skippable
+    run.js                 a run from seed mass to wherever it got to; restarting
+    forage.js              forage rolls — what a patch of land actually yields
+    discovery.js           what the hive has found out about its own ground
+    focus.js               telling a gathering route what to look for
+    expedition.js          Explorers: they leave, and might not come back
+    dev.js                 the cheats behind the access code
+    format.js              number formatting; treemap.js  squarified layout
+    tips.js                pinned tooltips; useGame.js  the shared reactive view
     definitions/
-      nutrients.js         35 nutrients, densities, assay gating
-      structures.js        hive structures
-      castes.js            drone castes and what they harvest (parked)
-      drones.js            drone castes, the types inside them, and what they cost
-      research.js          the tech ladder
+      nutrients.js         35 nutrients (7 macro, 28 micro), densities, assay gating
+      modifiers.js         the modifier channels — see *The modifier layer*
+      structures.js        hive structures: 16 live, 7 deprecated
+      castes.js            the old caste layer; all of it bar `dormant` is parked
+      drones.js            the worker caste and the types inside it, and what they cost
+      research.js          the tech ladder: 12 live, 2 parked (lithovory, predation)
+      costs.js             the amount ladder and the growth curves
+      times.js             the duration ladder and BUILD_COUNT_EXPONENT
+      biomes.js            the 26 biomes; forage.js  what each one holds
       organisms.js         prey and butchery yields
-      items/               the composition database
+      origins.js           landing sites; cognition.js  insight; topbar.js  the chips
+      items/               the composition database, five files
   components/
     NutrientPanel.vue      stores, grouped by assay, hidden groups absent
-    tabs/                  Hive, Drones, Metabolism, Research, Codex, Stats, Settings
+    topbar/                the chips: energy, draw, cognition, insight, larvae, hydration
+    tabs/                  Hive, Drones, Territory, Storage, Metabolism, Research,
+                           Genetics, Codex, Stats, Settings, Dev
+tests/
+  run-all.mjs              the runner — see *The test suites*
+  harness.mjs              the only three facts a suite needs from outside itself
+  *-test.mjs, smoke, verify  32 suites, each a standalone script
 tools/
   balance-sim.mjs          headless progression simulator
   validate-items.mjs       database validator
+  build-single.mjs         the one-file portable build
+  needs-build.mjs          whether the launcher has to rebuild
 ```
 
 `state.js` holds only *authored* state. Everything derivable — capacities, flows, energy,
@@ -336,6 +382,54 @@ Being **over** budget does not push it below ×1. A hive that has overcommitted 
 already punished by being over budget; compounding that into *"and you also forget things"*
 is a hole with no bottom.
 
+## The modifier layer
+
+`definitions/modifiers.js`. A **channel** is a named fact about the game that can be made
+better or worse — `broodRate` is "how fast larvae are laid", `harvest` is "how much a
+gathering drone brings back" — that any number of sources contribute to and that exactly
+one place in the engine reads. Structures contribute through their `mult` map, research
+through its own, and genetics will contribute through its without a line of engine code
+moving. **This is the seam.**
+
+The rules, in short:
+
+- **A channel is named for what it multiplies, never for what supplies it.** The layer this
+  replaced had six channels called `forager`, `analyst` and the like, and when those castes
+  were parked the names stopped meaning anything.
+- **Bonuses add; the result multiplies.** Sources sum into a running total and the engine
+  applies `1 + total`, so two sources of +20% give +40%, not +44%. A product of a dozen
+  terms is a number nobody can predict from the screen. A total at or below −1 stops the
+  thing entirely; `factor()` clamps there rather than going negative.
+- **A channel ending in `Cost` means more cost, so a negative contribution is the good
+  one.** `rationCost: +0.2` is drones eating twenty per cent more; a gene for frugality
+  contributes −0.2. There is no `lower: true` flag on purpose — a flag can be forgotten,
+  a name is read every time anyone types it.
+- **One reader per channel.** A second reader means two places are computing the same thing,
+  which is the bug the brood rate had when `computeDerived` and `tick` each worked the lay
+  rate out from scratch and agreed only because someone kept them in step by hand.
+- **A building contributes at charge.** `mult` times how many are running, at the charge
+  they are running at, so a browned-out building gives a browned-out bonus.
+- **An unknown channel name throws.** A typo would otherwise be a bonus that is written,
+  summed and silently absent — the hardest balance bug to see, because the number is in the
+  file and the screen says the building is built.
+
+Ten live channels: `broodRate`, `moldRate`, `harvest`, `insight`, `digestion`, `storage`,
+`mineralStorage`, `vitaminStorage`, `rationCost`, `waterCost`. Three are parked and openly
+labelled so, kept only because two parked structures still declare them.
+
+### Why it is tested the way it is
+
+The layer before this one was not wrong. Its channels were declared, the `mult` maps were
+summed correctly, the arithmetic came out right — and nothing read the result. `derived.mult`
+was computed and discarded on every tick for months, and it looked completely healthy from
+the inside, because everything it did, it did correctly.
+
+So `factor()` and `channelTotal()` record which channels they have been asked for, and
+`tests/modifier-test.mjs` drives the real game and asks the only question that would have
+caught that: given a bonus on a channel, **does the number it names actually move?** Every
+channel, one at a time, against the figure its `applied` field points at. It is deliberately
+not a unit test of `factor()`; `factor()` was never the part that broke.
+
 ## What things cost
 
 Every build cost in the game is a **named amount** of an **exactly named resource**, plus a
@@ -344,6 +438,7 @@ Every build cost in the game is a **named amount** of an **exactly named resourc
 ```js
 cost: build('steady', { fiber: 'large', protein: 'small', fat: 'slight' })
 cost: flat({ fat: 'minuscule' })          // drones: no curve, the hundredth costs what the first did
+cost: tech({ insight: 'theory', protein: 'massive' })   // research: no curve either
 ```
 
 The ladder and the curves live in `definitions/costs.js`, and that file is the only place
@@ -363,15 +458,22 @@ A 1‑2.5‑5 preferred series, in grams. Round, readable, about ×2.2 a step:
 
 | rung | g | | rung | g |
 |---|---|---|---|---|
-| `trace` | 2 | | `modest` | 100 |
-| `minuscule` | 5 | | `medium` | 250 |
-| `tiny` | 10 | | `large` | 500 |
-| `slight` | 25 | | `heavy` | 1000 |
-| `small` | 50 | | `massive` | 2500 |
+| `trace` | 2 | | `medium` | 250 |
+| `minuscule` | 5 | | `large` | 500 |
+| `tiny` | 10 | | `heavy` | 1000 |
+| `slight` | 25 | | `massive` | 2500 |
+| `small` | 50 | | `colossal` | 5000 |
+| `modest` | 100 | | `titanic` | 10000 |
 
 Roughly what each band is for as the table stands: `trace`–`tiny` for micronutrients and
-drone mold costs, `slight`–`modest` for the fat, ash, sugar and water a building needs,
-`medium`–`large` for fibre and protein, `heavy`–`massive` for research.
+drone mold costs, `slight`–`modest` for the fat, ash, carbohydrate and water a building
+needs, `medium`–`large` for fibre and protein, `heavy`–`massive` for research and whatever
+ends up being built once.
+
+The top two rungs exist for **research**, the one thing in the game that consumes mass by
+the kilo rather than by the handful: a tech is a single irreversible purchase, so it can
+ask for more than any building ever does. If a *building* wants `colossal`, the question to
+ask is whether its growth curve is wrong.
 
 ### The growth curves
 
@@ -394,6 +496,29 @@ treat a curve change as the serious edit it is.
 it will end up with a lot of, `steady` is the default, `steep` for something where each one
 is a real decision, `brutal` for a thing that should hurt to repeat (nothing uses it yet).
 
+### The insight ladder
+
+A separate table from `AMOUNT`, because insight is not mass and the two have no exchange
+rate — `medium` meaning 250 g and 250 insight at once would be a coincidence dressed up as
+a system. Same ×2.2 spacing and the same 1‑2.5‑5 series, for the same reasons.
+
+| rung | insight | | rung | insight |
+|---|---|---|---|---|
+| `glimmer` | 50 | | `theory` | 1250 |
+| `inkling` | 125 | | `doctrine` | 2500 |
+| `notion` | 250 | | `synthesis` | 5000 |
+| `concept` | 500 | | `paradigm` | 12500 |
+
+The names are a scale of **understanding**, not of size, because that is what the number
+measures: a `glimmer` is noticing something, a `paradigm` is the hive rebuilding how it
+thinks. Eight rungs spanning 50 to 12,500 is the real range of a tech tree.
+
+Research was the last table to join the ladder, and it shows why the ladder exists: it
+carried fourteen hand-written costs — 50, 140, 260, 320, 480, 900, 1200, 1600, 1800, 2600,
+3400, 4800, 6500, 9000 — all fourteen distinct, with step ratios wandering between ×1.13
+and ×2.8. Two of them were also priced in `ash`, which rule 5 forbids and which `build()`
+would have thrown on; research never called `build()`, so nothing ever checked.
+
 ### The rules
 
 1. **The spacing is about ×2.2, and that is not arbitrary.** Below ×1.6 the rungs stop
@@ -413,8 +538,11 @@ is a real decision, `brutal` for a thing that should hurt to repeat (nothing use
    it is the bag the minerals are hiding in. Pricing a building in ash says the hive needs
    *some mineral, any mineral*, which is true of nothing that is actually built: a
    generator needs iron because iron carries oxygen. So a cost names the element, assayed
-   or not, and `build()` and `flat()` throw on `ash` rather than leaving it to whoever reads
-   this.
+   or not, and `build()`, `flat()` and `tech()` throw on `ash` at module load rather than
+   leaving it to whoever reads this — a cost priced in mineral mass is a game that does not
+   start, which is the right loudness for a rule that `ash` appearing in every resource list
+   makes very easy to break by accident. The one exception is `tech(..., { sampling: true })`,
+   for an assay learning to sort the pile out of samples of the pile.
 
    Nothing is lost by it. An unassayed mineral is charged to its parent at
    `LOCKED_COST_MULTIPLIER` (50×), so a young hive still pays in mineral mass, at a bad
@@ -611,8 +739,9 @@ rules that make it legible are:
 ## Balance
 
 ```bash
-node tools/balance-sim.mjs 6           # 6 hours of simulated time
-node tools/balance-sim.mjs 24 --quiet  # final report only
+node tools/balance-sim.mjs 6              # 6 hours of simulated time
+node tools/balance-sim.mjs 24 --quiet     # final report only
+node tools/balance-sim.mjs 6 --seed 4     # a different opening
 ```
 
 A greedy bot feeds the hive, researches and builds, then reports where it got to and what
@@ -623,14 +752,84 @@ micronutrients  24 resolved, 4 still invisible
   (unseen) Chromium    holding 2.8 g, quietly discarded 656 g
 ```
 
-Current numbers reach 10 of 12 techs in 6 simulated hours with no starvation.
+**It is deterministic, and that was not free.** The same command used to give different
+answers — two consecutive runs came back with `0/12 research, stalled before Glycolysis`
+and `7/12, stalled before Cellulolysis`. Not noise around a figure: two different games.
+The forage rolls decide what the hive finds in its first minutes and a bad opening
+compounds, because no protein means no drones means no gathering means no protein. That
+is worth knowing about the economy and useless as a regression check, so the whole run now
+goes through one seeded generator. `--seed N` picks a different game; the default is fixed.
+
+**Current numbers: 7 of 12 techs in 6 simulated hours, no drones lost, starving 5.8% of
+ticks, stalling before Cellulolysis.** Reproducible on the default seed, and seeds 1–5 all
+give 7/12 — so the variance that used to swamp it was the unseeded RNG, not the economy.
+
+Two things that figure is telling us, both balance rather than tooling:
+
+- **The hive never gets past three drones.** `drones 3 / 3` means the cap is binding for
+  the entire run — the bot raises one of everything and never goes back for the Hivecore
+  levels that would widen it. Whether that is the bot being naive or the drone cap being
+  too tight is the open question, and it is the reason research stalls: three drones cannot
+  gather enough to reach Cellulolysis at its current cost.
+- **201 kg of fibre and 15 kg of mineral mass spilled.** The hive is drowning in what it
+  cannot store while starving for what it can use.
+
+One run is one sample. Before reading any of this as a result, sweep a few seeds.
+
+## The test suites
+
+32 of them in `tests/`, each a standalone script that opens a real browser, drives the real
+game and prints `PASS`/`FAIL` lines. There is no shared framework on purpose: a suite that
+goes red can be run on its own with `node tests/<name>.mjs` and read top to bottom with no
+indirection, which is how most of them got written.
+
+```bash
+npm test                  # build, serve, run all 32
+npm test -- queue water   # just those two, by name
+npm test -- --bail        # stop at the first red suite
+npm test -- --no-build    # against whatever dist/ already holds
+npm run lint              # eslint over src, tools, tests and the configs
+npm run validate          # the item database
+npm run check             # lint, then validate, then the suites
+```
+
+What `tests/run-all.mjs` guarantees, and why:
+
+- **It builds and serves the game itself**, on port 4188 — not 4173 and not 5173, so a run
+  started while `npm run dev` is open does not fight it for the port. A runner that assumed
+  a server was already up would silently test a stale build, which is worse than testing
+  nothing because it looks like it passed. `tests/harness.mjs` reads the URL from `HIVE_URL`,
+  so a single suite can be pointed at a server you already have running instead.
+- **It runs them strictly one at a time.** Every suite clears `localStorage` for the origin
+  and then drives a fresh hive; two at once on the same origin would wipe each other
+  mid-run and fail at random. The price is wall-clock time, which is the right thing to
+  spend here.
+- **The order is cheap-and-foundational first**, so a break in something everything else
+  depends on is the first line you read rather than the twenty-ninth. Anything not named in
+  `ORDER` still runs, after those.
+- **It exits non-zero if anything is red**, and prints only the lines that say what went
+  wrong — the suites print a `PASS` line per check and there are hundreds of them.
+
+Playwright needs a browser. After `npx playwright install chromium` it finds its own and
+nothing has to be configured. Set **`PW_CHROMIUM`** to an existing Chromium binary to point
+it at that instead, for a machine that already ships one and does not want a second few
+hundred megabytes downloaded.
+
+`single-test.mjs` opens `HiveIdle.html`, so the runner rebuilds the portable one-file build
+as well as `dist/` — otherwise it would be testing a version of the game nobody is running.
 
 ## Not built yet
 
-- **Hunting.** The data is in place — organisms, live masses, butchery yields, difficulty
-  ratings — and the Hunter caste already butchers deer through it. What is missing is the
-  loop around it: biomes to scout, prey populations that regenerate and deplete, choosing
-  a target species, and the risk that a hunt costs drones.
+- **Hunting.** The data is in place — organisms, live masses, butchery yields, biome
+  weights — and so is the engine path: `forage.js` pools prey with huntable items for a
+  `gather: 'hunter'` route, and `engine.js` turns one roll into a carcass and butchers it
+  into its cuts. What is missing is a drone that does it. `DRONE_TYPES` has forager,
+  scavenger and explorer; the old Hunter caste is parked with the rest of the caste layer,
+  so nothing in a live hive ever takes that branch. Also missing: prey populations that
+  regenerate and deplete, choosing a target species, and the risk that a hunt costs drones.
+- **Genetics.** The tab is a reserved empty slot, so the navigation settles into its final
+  shape before there is anything to put in it. The seam it will contribute through is
+  already built — see *The modifier layer*.
 - A prestige layer, and achievements.
 
 ## Developer mode
@@ -639,9 +838,10 @@ Enter **`Code Midas`** in Settings → Access code. A Dev tab appears, and the u
 persists in the save until you lock it again.
 
 It can fill every store to capacity (or only the ones you have actually assayed, which is
-the honest way to test), grant or revoke research, resolve all five assays at once to
-inspect the full 35-nutrient panel, add insight and drones, ingest any item from the
-database at any quantity, and fast-forward by up to a year.
+the honest way to test), empty them again, grant or revoke research, resolve all five
+assays at once to inspect the full 35-nutrient panel, add insight and drones, ingest any
+item from the database at any quantity, fill or stock the storage racks, grant and clear
+territory, reroll what the hive's land is offering, and skip time.
 
 Every action sets `stats.devUsed` on the save, so a doctored run is never mistaken for a
 real one.
@@ -656,7 +856,14 @@ hive.derived()                 // every computed number, including the fuel allo
 hive.tick(3600)                // fast-forward an hour
 hive.research('bulkMineralAssay')
 hive.ingestItem('beef_liver', 5000)
+hive.loop.stop()               // hand control of the clock, so samples are exact
+hive.mods.now()                // the live modifier totals, channel by channel
 ```
+
+The handle is also the test suites' whole interface to the game: `loop.stop()` is why a
+suite can take exact samples instead of racing the live loop, and the `drones`, `topbar`,
+`focus_` and `expedition` sub-objects are there so a suite can assert against the same
+functions the interface calls rather than against rendered text.
 
 ## GitHub Pages
 

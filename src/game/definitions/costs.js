@@ -70,6 +70,17 @@
  *    build() and flat() refuse `ash` outright rather than leaving this to
  *    whoever reads the comment.
  *
+ *    THE ONE EXCEPTION, AND WHY IT IS NOT A HOLE IN THE RULE. An assay is not
+ *    MADE of anything — it is the hive learning to sort the pile, and what it
+ *    consumes is samples OF the pile. There the unsorted mass genuinely is the
+ *    right resource, and naming an element instead would be the lie: you cannot
+ *    pay for learning to recognise iron in iron you cannot yet recognise.
+ *
+ *    So `tech()` takes `{ sampling: true }`, which permits `ash` and nothing
+ *    else about it changes. It is an opt-in the author has to type, on the one
+ *    cost shape that can need it, rather than a quiet gap in the guard — and
+ *    `tech()` without it refuses `ash` exactly as `build()` does.
+ *
  * 6. WHEN A NUMBER REALLY IS BESPOKE, WRITE IT.
  *
  *    `build()` takes a raw number as well as a rung name. Use it for something
@@ -101,6 +112,13 @@ export const AMOUNT = {
   large: 500,
   heavy: 1000,
   massive: 2500,
+  // The top two exist for RESEARCH, which is the one thing in the game that
+  // consumes mass by the kilo rather than by the handful — a tech is a single
+  // irreversible purchase, so it can ask for more than any building ever does.
+  // Nothing else should reach this high; if a building wants `colossal`, the
+  // question to ask is whether its growth curve is wrong.
+  colossal: 5000,
+  titanic: 10_000,
 };
 
 /** The rungs in order, cheapest first. Handy for tools and for the tests. */
@@ -223,6 +241,99 @@ export function flat(parts) {
     out[resource] = amount(size);
   }
   return out;
+}
+
+/**
+ * THE INSIGHT LADDER — what a tech costs to work out.
+ *
+ * A separate table from AMOUNT, because insight is not mass and the two have no
+ * exchange rate: `medium` meaning 250 g and 250 insight at once would be a
+ * coincidence dressed up as a system. Same ×2.2 spacing and the same 1‑2.5‑5
+ * series, for the same reasons — see rules 1 and 2.
+ *
+ * Eight rungs span 50 to 12,500, which is the real range of a tech tree: from
+ * the first thing the hive notices to the last thing it ever understands.
+ *
+ * The names are a scale of UNDERSTANDING rather than of size, because that is
+ * what the number measures. A `glimmer` is noticing something; a `paradigm` is
+ * the hive rebuilding how it thinks.
+ *
+ * WHY THIS WAS THE LAST TABLE TO JOIN THE LADDER. Research carried fourteen
+ * hand-written costs — 50, 140, 260, 320, 480, 900, 1200, 1600, 1800, 2600,
+ * 3400, 4800, 6500, 9000 — all fourteen distinct, with step ratios wandering
+ * from ×1.13 to ×2.8. It is the exact drift described at the top of this file,
+ * surviving in the one file that never imported it. Two of those costs were
+ * also priced in `ash`, which rule 5 forbids and which `build()` would have
+ * thrown on — but research never called `build()`, so nothing ever checked.
+ */
+export const INSIGHT = {
+  glimmer: 50,
+  inkling: 125,
+  notion: 250,
+  concept: 500,
+  theory: 1250,
+  doctrine: 2500,
+  synthesis: 5000,
+  paradigm: 12_500,
+};
+
+export const INSIGHT_ORDER = Object.keys(INSIGHT);
+
+/** Resolve an insight rung — or a raw number, for the bespoke case. */
+export function insightAmount(size) {
+  if (typeof size === 'number') {
+    if (!Number.isFinite(size) || size < 0) throw new Error(`Bad insight amount: ${size}`);
+    return size;
+  }
+  const value = INSIGHT[size];
+  if (value === undefined) {
+    throw new Error(
+      `Unknown insight amount "${size}". Use one of: ${INSIGHT_ORDER.join(', ')} — or a raw number.`,
+    );
+  }
+  return value;
+}
+
+/**
+ * WHAT A TECH COSTS. The one way a research entry states its price.
+ *
+ *   cost: tech({ insight: 'theory', protein: 'massive' })
+ *   cost: tech({ insight: 'synthesis', ash: 'colossal' }, { sampling: true })
+ *
+ * Insight resolves against INSIGHT, everything else against AMOUNT, and the
+ * result is a plain cost object — research has no "how many do you already
+ * have", so there is no curve and no function to call, unlike `build()`.
+ *
+ * `sampling` is rule 5's one exception, for an assay learning to sort the pile
+ * out of samples of the pile. Without it `ash` throws, as everywhere else.
+ */
+export function tech(parts, { sampling = false } = {}) {
+  const out = {};
+  for (const [resource, size] of Object.entries(parts)) {
+    if (resource === 'insight') {
+      out.insight = insightAmount(size);
+      continue;
+    }
+    if (!(sampling && resource === 'ash')) refuseUnsorted(resource);
+    out[resource] = amount(size);
+  }
+  return out;
+}
+
+/**
+ * Nearest insight rung, for a balance pass reading the old numbers.
+ */
+export function nearestInsight(value) {
+  let best = INSIGHT_ORDER[0];
+  let bestError = Infinity;
+  for (const name of INSIGHT_ORDER) {
+    const error = Math.abs(Math.log(INSIGHT[name] / value));
+    if (error < bestError) {
+      bestError = error;
+      best = name;
+    }
+  }
+  return best;
 }
 
 /**

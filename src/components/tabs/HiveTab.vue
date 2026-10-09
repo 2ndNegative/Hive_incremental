@@ -24,6 +24,35 @@ import CostList from '../CostList.vue';
 
 const BUY_OPTIONS = [1, 5, 25, 'max'];
 
+/**
+ * WHAT A BUILDING DOES, WORKED OUT ONCE PER BUILDING AND NEVER AGAIN.
+ *
+ * `effectLines` reads nothing but `STRUCTURES[id]`, which is frozen at module
+ * load — so its answer for a given id is the same answer for the whole life of
+ * the page. It was being recomputed for all sixteen cards on every render,
+ * which the 100 ms tick makes ten times a second: a dozen Object.entries walks
+ * and ten or so formatted strings per card, to arrive at exactly the text that
+ * was already on screen.
+ *
+ * Filled lazily rather than eagerly at load, because the cards a hive can see
+ * are a small and growing subset of the table — a hive that has never unlocked
+ * a Hivecore should not pay to describe one.
+ *
+ * `cycleOf` on the same line looks like it belongs here and does NOT: it reads
+ * `derived.brood` and `derived.molding` and its countdown has to move with the
+ * tick. Caching it would freeze every chamber bar on the page.
+ */
+const EFFECTS = new Map();
+
+function effectsFor(id) {
+  let lines = EFFECTS.get(id);
+  if (lines === undefined) {
+    lines = effectLines(STRUCTURES[id]);
+    EFFECTS.set(id, lines);
+  }
+  return lines;
+}
+
 function effectLines(def) {
   const lines = [];
   if (def.caps?.drones) lines.push(`+${def.caps.drones} drone capacity`);
@@ -130,7 +159,7 @@ const cards = computed(() =>
       // MOVES — a brood hatching shortens every figure on the page — which is
       // the whole point of pace-seconds. See definitions/times.js rule 4.
       grow: formatEta(buildSecondsFor(state, id, derived.value.buildPace)),
-      effects: effectLines(def),
+      effects: effectsFor(id),
       cycle: cycleOf(id),
     };
   }),
@@ -293,8 +322,6 @@ const paceNote = computed(() => {
 /** Buildings whose category is missing or unknown — a rebuild tripwire. */
 const unfiled = computed(() => cards.value.filter((c) => !BUILDING_CATEGORIES[c.def.category]));
 
-const nothingBuildable = computed(() => cards.value.length === 0);
-
 const starving = computed(() => derived.value.energy.ratio < 0.999);
 const throttled = computed(() => derived.value.energy.throughputRatio < 0.999);
 
@@ -345,13 +372,7 @@ const overCapacity = computed(() =>
       Nothing in the Storage band is big enough for it yet.
     </div>
 
-    <div v-if="nothingBuildable" class="notice">
-      <strong>Nothing can be built.</strong>
-      The building and drone systems are being rebuilt, so every structure and every caste is
-      parked. The bands below are where the new ones will appear.
-    </div>
-
-    <div v-else class="field-row">
+    <div class="field-row">
       <span class="field-label" title="How many a press lines up in the queue">
         Line up
       </span>
@@ -374,7 +395,7 @@ const overCapacity = computed(() =>
          letting cheaper things behind it jump the line, so this reads top to
          bottom as a plan. One job at a time, which is what makes the order
          mean anything. -->
-    <div v-if="!nothingBuildable" class="queue-strip">
+    <div class="queue-strip">
       <div class="queue-head">
         <span class="queue-title">Construction</span>
         <span class="num queue-cap" :class="{ warn: queueFree === 0 }">
@@ -492,7 +513,11 @@ const overCapacity = computed(() =>
               <span
                 v-if="card.ailing"
                 class="action-power"
-                :class="card.power.direction === 'failing' ? 'bad' : 'warn'"
+                :class="{
+                  bad: card.power.direction === 'failing',
+                  warn: card.power.direction === 'holding',
+                  good: card.power.direction === 'recovering',
+                }"
               >
                 <span class="power-bar" :class="card.power.direction">
                   <span :style="{ width: `${card.power.charge * 100}%` }" />
@@ -561,9 +586,9 @@ const overCapacity = computed(() =>
                 <button class="btn switch-btn" :disabled="card.running <= 0"
                         @click="setActive(card.id, 'none')" title="Idle all of them">0</button>
                 <button class="btn switch-btn" :disabled="card.running <= 0"
-                        @click="adjustActive(card.id, -1)">−</button>
+                        @click="adjustActive(card.id, -1)" title="Idle one of them">−</button>
                 <button class="btn switch-btn" :disabled="card.running >= card.owned"
-                        @click="adjustActive(card.id, 1)">+</button>
+                        @click="adjustActive(card.id, 1)" title="Run one more">+</button>
                 <button class="btn switch-btn" :disabled="card.running >= card.owned"
                         @click="setActive(card.id, 'all')" title="Run all of them">All</button>
               </template>

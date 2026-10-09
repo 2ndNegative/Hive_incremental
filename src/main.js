@@ -18,7 +18,6 @@ import {
   FUEL_SWITCH_SECONDS,
   fuelLockFor,
   clickMultiplier,
-  MANUAL_COMBO_MAX,
   larvaPace,
   cogitFocus,
   cogitFocusFrom,
@@ -61,10 +60,14 @@ import { FORAGE, poolFor } from './game/definitions/forage.js';
 import {
   AMOUNT, AMOUNT_ORDER, GROWTH, GROWTH_ORDER, amount, growthOf, nearestAmount,
   build as buildCost, flat as flatCost,
+  INSIGHT, INSIGHT_ORDER, insightAmount, nearestInsight, tech as techCost,
 } from './game/definitions/costs.js';
 import {
   TIME, TIME_ORDER, BUILD_COUNT_EXPONENT, duration, nearestTime, buildWork,
 } from './game/definitions/times.js';
+import {
+  CHANNELS, CHANNEL_ORDER, channelsRead, unreadChannels,
+} from './game/definitions/modifiers.js';
 import {
   FOCUS_SHARE, focusStrength, isStarrable, isStarred, starsFor, setStar, toggleStar,
   clearStars, focusedOdds,
@@ -293,6 +296,13 @@ window.hive = {
     nearest: nearestAmount,
     build: buildCost,
     flat: flatCost,
+    // Research's own ladder. Separate table, same spacing — insight is not
+    // mass and the two have no exchange rate.
+    insight: INSIGHT,
+    insightOrder: INSIGHT_ORDER,
+    insightAmount,
+    nearestInsight,
+    tech: techCost,
   },
   structureCost: (id, n = 1) => structureCost(state, id, n),
   build: (id, n) => buildStructure(id, n),
@@ -313,6 +323,18 @@ window.hive = {
     // Straight past the queue and the clock. For setting a hive up, not for
     // playing one — see raiseStructure.
     raise: (id, n) => raiseStructure(state, id, n),
+  },
+  // What can be made better or worse, and whether anything is listening. The
+  // channel list is the seam genetics contributes through — see
+  // definitions/modifiers.js.
+  mods: {
+    channels: CHANNELS,
+    order: CHANNEL_ORDER,
+    // The live totals: what every source has contributed, this derive.
+    now: () => computeDerived(state).mod,
+    read: () => [...channelsRead()],
+    // Should be empty. Anything here is a bonus that goes nowhere.
+    unread: () => unreadChannels(),
   },
   buildTime: {
     rungs: TIME,

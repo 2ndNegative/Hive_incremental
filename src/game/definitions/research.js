@@ -17,7 +17,14 @@
 //   and until the hive can cleave the bonds, none of it is fuel.
 //
 // A `queue` field widens the build queue by that many slots — see engine.js
-// buildQueueCap. The hive starts able to hold two jobs in mind at once.
+// buildQueueCap, where BUILD_QUEUE_BASE says how many the hive starts with.
+//
+// COSTS ARE NAMED RUNGS, through tech() — insight against the INSIGHT ladder in
+// costs.js, mass against AMOUNT. Research was the last table in the game still
+// carrying hand-written numbers, and the two priced in `ash` were breaking a
+// rule the rest of the codebase throws on. See the INSIGHT block in costs.js.
+
+import { tech } from './costs.js';
 
 export const RESEARCH = {
   glycolysis: {
@@ -25,7 +32,7 @@ export const RESEARCH = {
     name: 'Glycolysis',
     desc: 'Refine the sugar-splitting pathway. A quarter of every gram was going out as heat; most of that is recoverable.',
     requires: [],
-    cost: { insight: 50 },
+    cost: tech({ insight: 'glimmer' }),
     // The efficiency a tech REACHES, not a bonus it adds — see computeEfficiency.
     // Sugar starts at 0.60, so this is a quarter more energy out of the same mass.
     efficiency: { carb: 0.75 },
@@ -36,7 +43,7 @@ export const RESEARCH = {
     name: 'Lipolysis',
     desc: 'Mobilise stored lipid properly instead of letting it sit inert. Most of what the hive was wasting on fat, it stops wasting.',
     requires: ['glycolysis'],
-    cost: { insight: 140 },
+    cost: tech({ insight: 'inkling' }),
     // Fat starts at 0.70. A quarter more out of the same gram.
     efficiency: { fat: 0.875 },
     unlocks: ['Fat burns at 87.5% rather than 70%'],
@@ -46,7 +53,7 @@ export const RESEARCH = {
     name: 'Bulk Mineral Assay',
     desc: 'Separate the mineral fraction into its elements. Everything eaten so far is still in there.',
     requires: ['glycolysis'],
-    cost: { insight: 320 },
+    cost: tech({ insight: 'notion' }),
     unlocks: ['Reveals sodium, potassium, calcium, magnesium, phosphorus, chloride, sulfur', 'Mineral Vault'],
   },
   stigmergy: {
@@ -54,7 +61,7 @@ export const RESEARCH = {
     name: 'Stigmergy',
     desc: 'Let the work carry its own instructions. A half-finished chamber tells the next drone what to do with it, so nothing has to be told twice.',
     requires: ['glycolysis'],
-    cost: { insight: 260 },
+    cost: tech({ insight: 'notion' }),
     queue: 2,
     unlocks: ['+2 build queue slots'],
   },
@@ -63,7 +70,7 @@ export const RESEARCH = {
     name: 'Scavenging',
     desc: 'Tolerate the bacterial load in tissue that has already died. Opens a whole food web nobody is guarding.',
     requires: ['lipolysis'],
-    cost: { insight: 480 },
+    cost: tech({ insight: 'concept' }),
     unlocks: ['Scavenger caste'],
   },
   cellulolysis: {
@@ -71,7 +78,7 @@ export const RESEARCH = {
     name: 'Cellulolysis',
     desc: 'Cleave the β-1,4 bond. Every plant on this world stops being ballast and becomes fuel.',
     requires: ['scavenging'],
-    cost: { insight: 900, protein: 2000 },
+    cost: tech({ insight: 'theory', protein: 'massive' }),
     unlocks: ['Fibre becomes a usable energy source (8 kJ/g)'],
   },
   traceMetalAssay: {
@@ -79,7 +86,7 @@ export const RESEARCH = {
     name: 'Trace Metal Assay',
     desc: 'Resolve the transition metals out of the mineral fraction.',
     requires: ['bulkMineralAssay'],
-    cost: { insight: 1200 },
+    cost: tech({ insight: 'theory' }),
     unlocks: ['Reveals iron, zinc, copper, manganese'],
   },
   nestPlanning: {
@@ -87,7 +94,7 @@ export const RESEARCH = {
     name: 'Nest Planning',
     desc: 'Hold the whole shape of the nest at once rather than the next chamber of it. The hive stops building what is in front of it and starts building what it will need.',
     requires: ['stigmergy', 'bulkMineralAssay'],
-    cost: { insight: 1600 },
+    cost: tech({ insight: 'theory' }),
     queue: 4,
     unlocks: ['+4 build queue slots'],
   },
@@ -98,7 +105,7 @@ export const RESEARCH = {
     name: 'Lithovory',
     desc: 'Process inorganic substrate directly. No energy in stone — but the elements are not going anywhere.',
     requires: ['traceMetalAssay'],
-    cost: { insight: 1800, ash: 1500 },
+    cost: tech({ insight: 'doctrine', ash: 'heavy' }, { sampling: true }),
     unlocks: ['Excavator caste', 'Bore Shaft'],
   },
   // PARKED — not in RESEARCH_ORDER. Everything it unlocks (the Hunter caste and the Ambush Burrow)
@@ -108,7 +115,7 @@ export const RESEARCH = {
     name: 'Predation',
     desc: 'Take prey while it is still moving. An order of magnitude more energy per gram than anything that grows.',
     requires: ['cellulolysis'],
-    cost: { insight: 2600, protein: 4000, fat: 2000 },
+    cost: tech({ insight: 'doctrine', protein: 'colossal', fat: 'massive' }),
     unlocks: ['Hunter caste', 'Ambush Burrow'],
   },
   lipidAssay: {
@@ -116,7 +123,7 @@ export const RESEARCH = {
     name: 'Lipid-Phase Assay',
     desc: 'Isolate what dissolves in the fat fraction. Liver turns out to have been carrying a great deal of it.',
     requires: ['traceMetalAssay'],
-    cost: { insight: 3400 },
+    cost: tech({ insight: 'doctrine' }),
     unlocks: ['Reveals vitamins A, D, E and K', 'Vitamin Lattice'],
   },
   aqueousAssay: {
@@ -124,7 +131,7 @@ export const RESEARCH = {
     name: 'Aqueous-Phase Assay',
     desc: 'Isolate what dissolves in water. Thirteen more compounds the hive has been discarding since the beginning.',
     requires: ['lipidAssay'],
-    cost: { insight: 4800 },
+    cost: tech({ insight: 'synthesis' }),
     unlocks: ['Reveals vitamin C and the full B complex'],
   },
   rareElementAssay: {
@@ -132,7 +139,7 @@ export const RESEARCH = {
     name: 'Rare Element Assay',
     desc: 'Detect elements present at parts per million. One nut and one seaweed turn out to be extraordinary.',
     requires: ['aqueousAssay'],
-    cost: { insight: 6500, ash: 4000 },
+    cost: tech({ insight: 'synthesis', ash: 'colossal' }, { sampling: true }),
     unlocks: ['Reveals selenium, iodine, chromium, molybdenum'],
   },
   ketogenesis: {
@@ -146,7 +153,7 @@ export const RESEARCH = {
     // a job worth reaching: it is the only thing in the game that takes a fuel
     // all the way to the limit.
     requires: ['lipolysis', 'lipidAssay'],
-    cost: { insight: 9000, fat: 6000 },
+    cost: tech({ insight: 'paradigm', fat: 'colossal' }),
     // THE CEILING. Fat is burned perfectly — nothing can go higher, because a
     // gram of fat is 37 kJ and that is all it is.
     efficiency: { fat: 1, protein: 0.84 },

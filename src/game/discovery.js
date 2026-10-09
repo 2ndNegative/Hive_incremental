@@ -144,27 +144,7 @@ export function rateLabel(state, biomeId, key, chance) {
   return labelForConfidence(rateConfidence(state, biomeId, key), chance);
 }
 
-/** The same, for a rate mixed across every biome that could produce it. */
-export function blendedRateLabel(state, biomeIds, key, chance) {
-  return labelForConfidence(blendedConfidence(state, biomeIds, key), chance);
-}
-
 /** What to call something the hive may not have met yet. */
 export function nameLabel(state, key, realName) {
   return isNamed(state, key) ? realName : '???';
-}
-
-/** Totals for the interface: how much of the ground has been worked out. */
-export function discoverySummary(state) {
-  const named = new Set();
-  let observations = 0;
-  let biomes = 0;
-  for (const biome of Object.values(state.found || {})) {
-    biomes += 1;
-    for (const [key, count] of Object.entries(biome)) {
-      if (count > 0) named.add(key);
-      observations += count;
-    }
-  }
-  return { named: named.size, observations, biomes };
 }

@@ -27,7 +27,7 @@
 
 import { ITEMS, ITEM_IDS, itemJoulesPerGram } from '../src/game/definitions/items/index.js';
 import { ORGANISMS, ORGANISM_IDS } from '../src/game/definitions/organisms.js';
-import { NUTRIENTS, MACROS, MICROS, parentsOf } from '../src/game/definitions/nutrients.js';
+import { MACROS, MICROS, parentsOf } from '../src/game/definitions/nutrients.js';
 import { FORAGE, hasDirectRoute, poolFor } from '../src/game/definitions/forage.js';
 import { BIOMES, BIOME_IDS } from '../src/game/definitions/biomes.js';
 import { formatEnergy } from '../src/game/units.js';
@@ -120,9 +120,11 @@ for (const id of ITEM_IDS) {
 /* 2b. energy regression against published figures.
    Reference kcal per 100 g for a spread of items, from the same tables the
    compositions came from. If a macro split drifts, the energy drifts with it
-   and this catches it. Tolerance is 8%, which absorbs the rounding in the
-   source rows and the fact that published kcal often use item-specific Atwater
-   factors rather than the general ones the hive uses. */
+   and this catches it. Tolerance is 12% RELATIVE *and* 5 kcal absolute — BOTH
+   have to be exceeded before it complains, so a 3 kcal item is not flagged for
+   being 50% out. Over 4% warns without failing. The latitude absorbs rounding
+   in the source rows and the fact that published kcal often use item-specific
+   Atwater factors rather than the general ones the hive uses. */
 const PUBLISHED_KCAL = {
   beef_ground_80: 254,
   chicken_breast: 110,

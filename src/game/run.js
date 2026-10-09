@@ -180,8 +180,3 @@ export function chooseOrigin(id) {
   pushLog('Consume anything. Work out what it was made of afterwards.', 'info');
   return true;
 }
-
-/** The site this run started at, for display. */
-export function currentOrigin() {
-  return state.origin ? ORIGINS[state.origin] : null;
-}

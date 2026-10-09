@@ -10,8 +10,12 @@
     "preview": "vite preview",
     "play": "vite preview --open --port 4173",
     "single": "node tools/build-single.mjs",
+    "lint": "eslint src tools tests eslint.config.js vite.config.js",
+    "lint:fix": "eslint src tools tests eslint.config.js vite.config.js --fix",
     "validate": "node tools/validate-items.mjs",
-    "balance": "node tools/balance-sim.mjs"
+    "balance": "node tools/balance-sim.mjs",
+    "test": "node tests/run-all.mjs",
+    "check": "npm run lint && npm run validate && npm test"
   },
   "dependencies": {
     "bulma": "^1.0.4",
@@ -19,6 +23,11 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.1",
+    "eslint": "^9.39.5",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "eslint-plugin-vue": "^10.11.1",
+    "globals": "^16.5.0",
+    "playwright": "^1.63.0",
     "sass": "^1.105.1",
     "vite": "^7.1.12"
   }

@@ -27,9 +27,6 @@ const MIN_STEP_SECONDS = 1;
 const MAX_STEP_SECONDS = 3600;
 const TICKS_PER_CHUNK = 400;
 
-/** Absences shorter than this are just applied silently. */
-export const MODAL_THRESHOLD_SECONDS = 60;
-
 export const offline = reactive({
   active: false,
   total: 0, // seconds to simulate

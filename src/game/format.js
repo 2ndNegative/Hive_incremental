@@ -59,12 +59,6 @@ export function formatNumber(value, opts = {}) {
   return `${sign}${n.toFixed(digits)}${SUFFIXES[tier]}`;
 }
 
-/** Format a per-second rate, always signed. */
-export function formatRate(value, opts = {}) {
-  const sign = value > 0 ? '+' : value < 0 ? '-' : '';
-  return `${sign}${formatNumber(Math.abs(value), { decimals: 2, ...opts })}/s`;
-}
-
 /** Seconds -> "1d 04:12:31" */
 export function formatDuration(seconds) {
   const s = Math.max(0, Math.floor(seconds));

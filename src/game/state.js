@@ -303,6 +303,71 @@ export function createInitialState() {
   };
 }
 
+/**
+ * MAPS WHOSE KEYS THE PLAYER INVENTS, by dotted path from the root of the state.
+ *
+ * Everything else is CLOSED: when a save is loaded, only the keys this file
+ * declares survive, so a field dropped from the game disappears from old saves
+ * instead of haunting them. A map listed here is merged instead — what the save
+ * holds wins, and anything new in the default is added alongside it.
+ *
+ * The test for membership is "could createInitialState possibly know the key".
+ * `energy.overrides` is keyed "structure:<id>" / "caste:<id>" for whichever
+ * generator or caste the player has touched; `focus` is keyed by gather type
+ * and biome; `found` by biome and item. None of those are schema keys.
+ *
+ * WHY THIS LIST EXISTS RATHER THAN A HEURISTIC. save.js used to infer openness
+ * from the default being empty. That held until v21 gave `energy.overrides` a
+ * default entry for the drone ration — at which point the map read as closed
+ * and every fuel choice the player had made was silently erased on their next
+ * reload. Openness is a fact about what a map is FOR. It gets written down.
+ *
+ * A map that is empty by default does not strictly need to be here, since the
+ * old heuristic still covers it, but listing it says the quiet part out loud
+ * and makes it safe to give that map a default later.
+ */
+export const OPEN_MAPS = new Set([
+  'energy.overrides', // "structure:<id>" | "caste:<id>" | "drones"
+  'fuelLock', // the same keys, with what each one is actually burning
+  'items', // item ids, as the hive finds them
+  'spilledItems',
+  'found', // biome id → item id → times seen
+  'focus', // gather type → biome id → item key
+  'general', // nutrient ids currently sitting in the shared pool
+  'generalBans',
+  'territory', // biome ids the hive holds
+  'unclaimed', // biome ids it has found but not taken
+  'forage', // caste/drone id → what it is working on
+  'expedition',
+  'brood', // structure id → cycle progress
+  'molding',
+  'patches',
+  'power', // structure id → charge
+  'active', // structure id → how many are switched on
+  'droneMolding', // drone type id → { on, target }
+  'cognition.reservations',
+  'ui.buildBands', // band id → folded
+  'ui.droneBands',
+]);
+
+// Every path in OPEN_MAPS has to name a real object in the state, or it is a
+// typo quietly doing nothing — which is the exact failure the list exists to
+// prevent. Checked once, at module load, in the style of the structure and cost
+// tables. Cheap: one walk of a fresh state per page load.
+{
+  const fresh = createInitialState();
+  for (const path of OPEN_MAPS) {
+    let node = fresh;
+    for (const key of path.split('.')) node = node?.[key];
+    if (!node || typeof node !== 'object' || Array.isArray(node)) {
+      throw new Error(
+        `OPEN_MAPS names "${path}", which is not an object in createInitialState(). `
+        + 'Fix the path, or drop it from the list — see the note above OPEN_MAPS.',
+      );
+    }
+  }
+}
+
 export const state = reactive(createInitialState());
 
 export function replaceState(next) {

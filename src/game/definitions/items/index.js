@@ -35,4 +35,4 @@ export const ITEMS_BY_CATEGORY = Object.keys(CATEGORIES)
   .filter((group) => group.items.length > 0);
 
 export { CATEGORIES };
-export { yieldOf, itemJoulesPerGram } from './normalize.js';
+export { itemJoulesPerGram } from './normalize.js';
