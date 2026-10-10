@@ -339,14 +339,28 @@ const out = await p.evaluate(() => {
   return {
     found: Boolean(panel),
     stats: panel ? [...panel.querySelectorAll('.land-stat-label')].map((n) => n.innerText) : [],
-    // One group header per biome worked, each with a colour dot.
-    groups: panel ? [...panel.querySelectorAll('.offer-head')].length : 0,
-    dots: panel ? [...panel.querySelectorAll('.offer-head .terr-key-dot')].length : 0,
-    // One crew line per (type × biome), each stating how hard that ground is
-    // being leaned on. The efficiency belongs to the CREW, so it is said once
-    // per crew and not once per find.
+    // One band per biome worked, each with a colour dot.
+    groups: panel ? [...panel.querySelectorAll('.out-ground-row')].length : 0,
+    dots: panel ? [...panel.querySelectorAll('.out-ground .terr-key-dot')].length : 0,
+    // One crew summary per (type × biome), each stating how hard that ground
+    // is being leaned on. The efficiency belongs to the CREW, so it is said
+    // once in the biome's band and not once per find.
     crews: panel ? [...panel.querySelectorAll('.crew-line')].map((n) => n.innerText.trim()) : [],
-    rows: panel ? [...panel.querySelectorAll('.field-row')].length : 0,
+    rows: panel ? [...panel.querySelectorAll('.out-find-row')].length : 0,
+    // Every find is ONE LINE. It used to be two — the find, and under it a
+    // help line repeating the crew and the drone count and ending with a
+    // forage cycle that is the same on every row in the panel.
+    //
+    // Measured in pixels against the row's own line-height rather than by
+    // counting newlines in innerText: the cells hold flex boxes, which innerText
+    // breaks at whether or not anything wrapped.
+    tall: panel
+      ? [...panel.querySelectorAll('.out-find-row')].filter((n) => {
+        const line = parseFloat(getComputedStyle(n).lineHeight) || 16;
+        return n.getBoundingClientRect().height > line * 2;
+      }).length
+      : 0,
+    cycles: (text.match(/rolls again within/g) ?? []).length,
     saysOut: /drones out/i.test(text),
   };
 });
@@ -360,10 +374,10 @@ check('each crew states its own room once, not once per find',
   out.crews.length > 0 && out.crews.every((c) => /% each/.test(c))
   && out.crews.length < out.rows,
   `${out.crews.length} crew lines across ${out.rows} rows`);
-check('and a find is one row however many drones are on it',
-  out.rows > 0 && /×\d+/.test(
-    [...(out.crews || [])].join(' ') || 'x1',
-  ), `${out.rows} rows`);
+check('a find is one line however many drones are on it',
+  out.rows > 0 && out.tall === 0, `${out.tall} of ${out.rows} rows run to two lines`);
+check('and the forage cycle is stated once for the panel, not once per find',
+  out.cycles === 1, `${out.cycles} times across ${out.rows} rows`);
 
 /* ===================== 5. assignment, and what a claim is worth */
 
@@ -390,23 +404,36 @@ await p.waitForTimeout(250);
 const assign = await p.evaluate(() => {
   const who = [...document.querySelectorAll('.panel-box')]
     .find((b) => /^who works what/i.test(b.innerText));
-  const rows = [...(who?.querySelectorAll('.assign-row') ?? [])];
+  const cells = [...(who?.querySelectorAll('.assign-grid tbody .assign-cell') ?? [])];
   // Set a target through the interface, which is the whole point of the panel.
-  rows[0]?.querySelector('.assign-input')?.focus();
+  cells[0]?.querySelector('.assign-input')?.focus();
   return {
     found: Boolean(who),
-    rows: rows.length,
-    saysRoom: /Room for/.test(who?.innerText ?? ''),
+    // A matrix now: a row per biome held, a cell per (biome × type).
+    bodyRows: who?.querySelectorAll('.assign-grid tbody tr').length ?? 0,
+    cells: cells.length,
+    cols: who?.querySelectorAll('.assign-grid thead .assign-col').length ?? 0,
+    // The capacity figure doubles as the fill button, so it is also the label
+    // that tells the player how much room the pairing has.
+    caps: [...(who?.querySelectorAll('.assign-cap') ?? [])].map((n) => n.innerText.trim()),
     // Live occupancy beside the target, so the gap between plan and reality is
     // visible while the hive is still molding into it.
     now: [...(who?.querySelectorAll('.assign-now') ?? [])].map((n) => n.innerText),
   };
 });
-check('the assignment panel gives every type a row on every biome', assign.rows === 2,
-  `${assign.rows} rows`);
-check('and says how much room each has', assign.saysRoom);
+check('the assignment panel gives every biome a row and every type a cell in it',
+  assign.bodyRows === 1 && assign.cols > 1 && assign.cells === assign.bodyRows * assign.cols,
+  `${assign.bodyRows} rows × ${assign.cols} types = ${assign.cells} cells`);
+check('and says how much room each has, 120 m² at 4 m² a forager',
+  assign.caps[0] === '/30', assign.caps.join(' '));
+// Ten foragers and four scavengers are standing on the forest with no target
+// set, so those two cells speak up and the types with neither drones nor a
+// target stay blank — a column of figures matching the ones beside them is a
+// column of noise.
 check('with who is standing there right now beside the target',
-  assign.now.length === 2 && assign.now.some((n) => Number(n) > 0), assign.now.join(' / '));
+  assign.now.length === assign.cols
+  && assign.now.filter((n) => Number(n) > 0).length === 2,
+  assign.now.map((n) => n || '·').join(' / '));
 
 /*
  * A NUMBER FIELD YOU CAN ACTUALLY TYPE IN.
@@ -423,8 +450,11 @@ check('with who is standing there right now beside the target',
 const row = async (n) => p.evaluate((i) => {
   const who = [...document.querySelectorAll('.panel-box')]
     .find((b) => /^who works what/i.test(b.innerText));
-  const r = who.querySelectorAll('.assign-row')[0];
-  r.querySelectorAll('.btn-mini')[i].click();
+  const cell = who.querySelectorAll('.assign-grid tbody .assign-cell')[0];
+  // −, + and then the capacity figure, which IS the fill control: a fourth
+  // button per cell would be four buttons across five types and twenty-six
+  // biomes, so the number you fill TO is the thing you click.
+  (i < 2 ? cell.querySelectorAll('.btn-mini')[i] : cell.querySelector('.assign-cap')).click();
 }, n);
 const readField = () => p.evaluate(() => ({
   field: document.querySelector('.assign-input').value,

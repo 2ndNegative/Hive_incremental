@@ -379,6 +379,101 @@ const ground = computed(
 const totalRate = computed(() => outNow.value.reduce((a, g) => a + g.rate, 0));
 const anyPatches = computed(() => outNow.value.length > 0);
 
+/*
+ * THE TAIL OF THE HAUL.
+ *
+ * The panel lists one line per FIND, and a temperate forest pool holds
+ * twenty-nine of them. A hive working four biomes therefore produces eighty-odd
+ * lines, of which the bottom sixty are a tenth of a gram apiece — and those
+ * lines are not information about the haul, they are the shape of the pool,
+ * which "what the ground offers" already draws in full.
+ *
+ * So anything under a hundredth of the hive's intake folds into one line per
+ * biome. The top few are always shown, so a biome never collapses to nothing
+ * but its own tail, and a drone that found NOTHING is never folded: an empty
+ * roll is a wasted drone, which is the one zero in here worth reading.
+ */
+const TAIL_SHARE = 0.01;
+const KEEP_AT_LEAST = 3;
+/*
+ * And a hard cap per biome on top of the share rule, because the share rule
+ * alone does not bound anything: twenty finds at 3% each are all above the
+ * threshold and all of them are the twentieth-biggest thing the hive eats.
+ * Five is what fits beside a biome heading without the heading being lost.
+ */
+const MOST_ROWS = 5;
+
+/** Expanded tails, remembered across sessions like the grid's small-ground fold. */
+const showAllFinds = computed({
+  get: () => state.ui.terrAllFinds === true,
+  set: (v) => { state.ui.terrAllFinds = v; },
+});
+
+/**
+ * One row per find, flattened across the crews on a biome.
+ *
+ * Crews stop being headings and become a COLUMN. A biome with foragers and
+ * scavengers on it used to print two sub-headings and then repeat the crew name
+ * and the drone count on every row underneath them, in a help line that also
+ * carried the forage cycle — the same twelve seconds, on every row in the
+ * panel. The cycle is stated once in the panel's own header; the crew is a
+ * word in its own column; and the rows sort by what they bring in, across both
+ * crews, because "what is actually feeding the hive" does not care which kind
+ * of drone fetched it.
+ */
+const outGroups = computed(() => {
+  const total = totalRate.value;
+  // The bar is drawn against the BIGGEST find in the hive, not against the
+  // whole haul. Against the haul every bar is a stub — forty finds share one
+  // hundred per cent between them — and a chart where nothing reaches a tenth
+  // of its track is a chart of nothing. The percentage printed beside it is
+  // still the true share, so the absolute figure is not lost.
+  const peak = outNow.value.reduce((best, b) => b.crews.reduce(
+    (m, c) => c.rows.reduce((n, r) => Math.max(n, r.rate), m), best,
+  ), 0);
+
+  return outNow.value.map((g) => {
+    const rows = [];
+    for (const c of g.crews) {
+      for (const r of c.rows) rows.push({ ...r, crewName: c.name, crew: c });
+    }
+    rows.sort((a, b) => b.rate - a.rate);
+
+    const shown = [];
+    const folded = [];
+    rows.forEach((r, i) => {
+      const big = i < KEEP_AT_LEAST || !r.itemId
+        || (i < MOST_ROWS && (total <= 0 || r.rate / total >= TAIL_SHARE));
+      (showAllFinds.value || big ? shown : folded).push(r);
+    });
+
+    return {
+      ...g,
+      // Share of the WHOLE hive's intake, not of this biome's — so the figures
+      // are comparable down the panel, which is the only reason to print them.
+      shown: shown.map((r) => ({
+        ...r,
+        share: total > 0 ? r.rate / total : 0,
+        bar: peak > 0 ? r.rate / peak : 0,
+      })),
+      tail: folded.length ? {
+        count: folded.length,
+        drones: folded.reduce((a, r) => a + r.drones, 0),
+        rate: folded.reduce((a, r) => a + r.rate, 0),
+        // The folded rows carry their share too. A long flat tail can be half
+        // the biome's haul, and a fold that hides how much it hides is a lie
+        // about where the food is coming from.
+        share: total > 0 ? folded.reduce((a, r) => a + r.rate, 0) / total : 0,
+      } : null,
+    };
+  });
+});
+
+/** Rows folded away across the whole panel, for the expand control's label. */
+const foldedFinds = computed(
+  () => outGroups.value.reduce((a, g) => a + (g.tail?.count ?? 0), 0),
+);
+
 /* --------------------------------------------------------------- assignment */
 
 /**
@@ -391,55 +486,102 @@ const anyPatches = computed(() => outNow.value.length > 0);
  * so a wetland laid out for four hunters reads as full before the first hunter
  * exists.
  */
-const plan = computed(() =>
-  (derived.value.land?.biomes ?? []).map((biome) => {
+const plan = computed(() => {
+  const rates = {};
+  for (const c of derived.value.crews ?? []) rates[`${c.biomeId}:${c.droneId}`] = c.rate;
+
+  return (derived.value.land?.biomes ?? []).map((biome) => {
     const rows = FORAGE_TYPES.map((typeId) => {
       const def = DRONE_TYPES[typeId];
       // Straight off the engine's own figures where the crew exists, so the
       // panel and the simulation cannot disagree about who has how much room.
       // A type with nothing here yet gets the empty case worked out the same
       // way: what is left of the biome once the rest of the plan has taken its
-      // share. THAT is the number the player is acting on, and it was wrong —
-      // every type used to be told it had the whole biome.
+      // share. THAT is the number the player is acting on.
       const crew = biome.crews.find((c) => c.droneId === typeId);
       const otherClaim = biome.crews
         .filter((c) => c.droneId !== typeId)
         .reduce((a, c) => a + c.target * c.range, 0);
       const free = crew ? crew.free : Math.max(0, biome.area - otherClaim);
       const room = Math.floor(free / def.range);
+      const alone = crew?.alone ?? Math.floor(biome.area / def.range);
+      const planned = crew?.planned ?? 0;
+      const offers = offersAnything(def.gather, biome.biomeId);
       return {
         droneId: typeId,
         name: def.name,
         range: def.range,
-        crowding: def.crowding ?? 1,
         target: crew?.target ?? 0,
         drones: crew?.drones ?? 0,
+        rate: rates[`${biome.biomeId}:${typeId}`] ?? 0,
         free,
         room,
         // What it would carry with the ground to itself, so a contested biome
-        // can say both: "room for 1 more — 29 if the scavengers were not here".
-        alone: crew?.alone ?? Math.floor(biome.area / def.range),
-        contested: room < (crew?.alone ?? Math.floor(biome.area / def.range)),
+        // can say both: "room for 1 — 29 if the scavengers were not here".
+        alone,
+        contested: room < alone,
         // Square metres to the next whole one, against the ground left over.
         toNext: (room + 1) * def.range - free,
         efficiency: crew?.efficiency ?? 0,
-        planned: crew?.planned ?? 0,
+        planned,
         // Ground that offers this route nothing at all. A crew sent here comes
-        // back empty every single time, which the panel has to say before the
+        // back empty every single time, which the grid has to say before the
         // player spends an hour finding out.
-        offers: offersAnything(def.gather, biome.biomeId),
-        held: state.droneTypes?.[typeId] || 0,
+        offers,
+        // One word for the cell's colour, so the template does not carry the
+        // thresholds: they are a reading of the crowding curve and belong with
+        // the figure they describe.
+        tone: !offers ? 'bad' : planned === 0 ? 'muted'
+          : planned > 0.85 ? 'good' : planned > 0.4 ? 'warn' : 'bad',
         // The share of its ration this crew would still owe the stores. A
         // drone grazes in proportion to what it finds, so crowding raises the
         // food bill at the same time as it lowers the haul — see SNACK_SHARE.
-        keep: 1 - SNACK_SHARE * (offersAnything(def.gather, biome.biomeId)
-          ? (crew?.planned ?? crew?.efficiency ?? 0)
-          : 0),
+        keep: 1 - SNACK_SHARE * (offers ? (planned || crew?.efficiency || 0) : 0),
       };
     });
-    return { ...biome, rows };
-  }),
-);
+
+    return {
+      ...biome,
+      rows,
+      rate: rows.reduce((a, r) => a + r.rate, 0),
+      // GROUND NOTHING CAN WORK. A 0.7 m² sliver of desert holds no drone of
+      // any type and never will until it grows — but it used to take exactly
+      // as much of the screen as 156 m² of forest, which is how fourteen
+      // biomes became seventeen hundred pixels. Folded away by default,
+      // unless the player has deliberately put something on it.
+      tiny: rows.every((r) => r.room < 1 && r.target === 0 && r.drones === 0),
+    };
+  });
+});
+
+/** Fold away ground too small to carry anything. Remembered across sessions. */
+const hideSmall = computed({
+  get: () => state.ui.terrHideSmall !== false,
+  set: (v) => { state.ui.terrHideSmall = v; },
+});
+const tinyRows = computed(() => plan.value.filter((b) => b.tiny));
+/*
+ * BIGGEST GROUND FIRST, not declared order.
+ *
+ * The list is sorted by area because the grid exists to be compared down a
+ * column, and the thing that decides whether a biome is worth a column's
+ * attention is how much of it there is. Declared order put 6.5 m² of temperate
+ * rainforest above 47 m² of taiga, which is an arbitrary ranking presented as
+ * if it meant something.
+ */
+const shownPlan = computed(() =>
+  (hideSmall.value ? plan.value.filter((b) => !b.tiny) : [...plan.value])
+    .slice()
+    .sort((a, b) => b.area - a.area));
+
+/** The foot of the grid: what the hive is holding against what it has placed. */
+const placed = computed(() => FORAGE_TYPES.map((typeId) => {
+  let sent = 0;
+  for (const b of plan.value) {
+    sent += b.rows.find((r) => r.droneId === typeId)?.drones ?? 0;
+  }
+  return { droneId: typeId, sent, held: state.droneTypes?.[typeId] || 0 };
+}));
 
 /** Forage types that exist as drones, for the assignment grid's columns. */
 const FORAGE_TYPES = foragingTypes();
@@ -475,10 +617,17 @@ function fill(biomeId, typeId) {
   fillLandTarget(biomeId, typeId);
   target.clear(key(biomeId, typeId));
 }
-function clearPlan(biomeId) {
-  clearLandTargets(biomeId);
-  for (const r of plan.value.find((b) => b.biomeId === biomeId)?.rows ?? []) {
-    target.clear(key(biomeId, r.droneId));
+/**
+ * Wipe the whole plan.
+ *
+ * One control rather than a `clear` on every biome: with the grid, a single
+ * biome is cleared by zeroing its cells, and fourteen clear links were
+ * fourteen more things in the way of the numbers.
+ */
+function clearPlan() {
+  clearLandTargets();
+  for (const b of plan.value) {
+    for (const r of b.rows) target.clear(key(b.biomeId, r.droneId));
   }
 }
 
@@ -827,6 +976,20 @@ const claimValue = computed(() => {
     </div>
 
     <!-- --------------------------------------------------- who works what ground -->
+    <!--
+      ONE GRID, NOT FOURTEEN FORMS.
+      ======================================================================
+      This was a stack of per-biome mini-forms, each row carrying six facts as
+      a sentence: room, room-if-alone, metres to the next, planned rate, N of M
+      there, keep. All true, none of it scannable — and at fourteen biomes it
+      was seventeen hundred pixels of it.
+
+      The decision the panel exists for is "where should THIS drone type go",
+      which is a comparison down a column, and a column is the one thing a list
+      of sentences cannot give you. So: biomes are rows, drone types are
+      columns, and the prose moved into the cell's tooltip where it is still a
+      hover away but is no longer in front of the numbers.
+    -->
     <div v-if="plan.length" class="panel-box" style="margin-bottom: 0.75rem">
       <div class="panel-head">
         <span>Who works what</span>
@@ -834,117 +997,239 @@ const claimValue = computed(() => {
       </div>
 
       <div class="panel-body">
-        <p class="muted" style="font-size: 0.78rem; margin: 0 0 0.5rem">
-          A drone works one biome and finds only what is on it. How many fit is the biome's
-          area over that type's <strong>range</strong> — and past that they start treading on
-          each other, gently or badly depending on the animal. Set a target and the hive sends
-          them; set one higher than the hive owns and the ground waits for the drones to exist.
-        </p>
-        <p v-if="ground.idle > 0" class="warn" style="font-size: 0.78rem; margin: 0 0 0.5rem">
+        <div class="assign-bar">
+          <span class="muted" style="font-size: 0.78rem">
+            A drone works one biome and finds only what is on it. Columns are the drone, rows
+            are the ground — set a target and the hive sends them.
+          </span>
+          <span class="assign-bar-end">
+            <label v-if="tinyRows.length" class="assign-toggle">
+              <input v-model="hideSmall" type="checkbox" />
+              Hide ground too small to work
+              <span class="muted">({{ tinyRows.length }})</span>
+            </label>
+            <button class="focus-clear" @click="clearPlan">clear the plan</button>
+          </span>
+        </div>
+        <p v-if="ground.idle > 0" class="warn" style="font-size: 0.78rem; margin: 0.4rem 0 0">
           <strong class="bad">{{ ground.idle }} standing idle.</strong>
           Every target is filled and these had nowhere left to go — raise one, or take ground.
         </p>
       </div>
 
-      <div v-for="b in plan" :key="b.biomeId" class="panel-body tight">
-        <div class="offer-head">
-          <span>
-            <span class="terr-key-dot" :style="{ background: b.def.colour }"></span>
-            {{ b.def.name }}
-            <span class="muted">· {{ formatArea(b.area) }} m²</span>
-          </span>
-          <span class="offer-head-right">
-            <!-- Over-subscribed ground is legal and sometimes correct, but
-                 everyone standing on it pays for it: the types share the area
-                 in proportion to what they asked for, and each one's crowding
-                 exponent turns that share into a rate. -->
-            <span
-              v-if="b.claimed > 1"
-              class="focus-note bad"
-            >{{ (b.claimed * 100).toFixed(0) }}% committed · everyone gets
-              {{ (b.planSqueeze * 100).toFixed(0) }}% of the room they asked for</span>
-            <button class="focus-clear" @click="clearPlan(b.biomeId)">clear</button>
-          </span>
-        </div>
+      <div class="panel-body tight assign-scroll">
+        <table class="assign-grid">
+          <thead>
+            <tr>
+              <th scope="col">Ground</th>
+              <th scope="col" class="num">Area</th>
+              <th v-for="t in FORAGE_TYPES" :key="t" scope="col" class="assign-col">
+                {{ DRONE_TYPES[t].name }}
+                <span class="muted">{{ DRONE_TYPES[t].range }} m²</span>
+              </th>
+              <th scope="col" class="assign-fill-col">Committed</th>
+              <th scope="col" class="num">Bringing in</th>
+            </tr>
+          </thead>
 
-        <div v-for="r in b.rows" :key="r.droneId" class="field-row stacked-help assign-row">
-          <span class="field-label">
-            {{ r.name }}
-            <span v-if="!r.offers" class="bad">· nothing here for them</span>
-            <span class="field-help">
-              <template v-if="r.offers">
-                <!-- A TOTAL, not an increment: how many of this type the
-                     ground carries at full rate once everything else the plan
-                     puts here has taken its share. Asking for more than this
-                     is allowed and is what the efficiency figure is about. -->
-                Room for <strong>{{ r.room }}</strong> at {{ r.range }} m² each<template
-                  v-if="r.contested"
-                >, once the rest of the plan has its share — <span class="muted">{{ r.alone }}
-                  with the ground to itself</span></template>.
-                <template v-if="r.room < 1">
-                  <span class="bad">{{ formatArea(r.toNext) }} m² short of even one.</span>
-                </template>
-                <template v-else>
-                  {{ formatArea(r.toNext) }} m² more would carry another.
-                </template>
-                <template v-if="r.target > 0">
-                  Planned at <strong :class="r.planned > 0.85 ? 'good' : r.planned > 0.4
-                    ? 'warn' : 'bad'">{{ (r.planned * 100).toFixed(0) }}%</strong> each<template
-                      v-if="r.drones !== r.target"
-                    >, <span class="warn">{{ r.drones }} of {{ r.target }} there so far</span>
-                    </template>.
-                  <!-- Crowding costs twice: less comes in, and more goes out,
-                       because a drone that finds less snacks less. Said here
-                       because here is where the decision is made. -->
-                  Eating <strong :class="r.keep > 0.75 ? 'bad' : 'muted'">{{
-                    (r.keep * 100).toFixed(0) }}%</strong> of their keep from the stores.
-                </template>
-                <template v-else-if="r.drones > 0">
-                  <strong>{{ r.drones }} there now</strong>, spread automatically because
-                  nothing else has claimed them — set a target to pin them here.
-                </template>
-              </template>
-              <template v-else>
-                This ground offers the {{ r.name.toLowerCase() }} route nothing at all. A drone
-                sent here walks out, finds nothing and walks back, every single trip.
-              </template>
-            </span>
-          </span>
+          <tbody>
+            <tr v-for="b in shownPlan" :key="b.biomeId">
+              <th scope="row" class="assign-ground">
+                <span class="terr-key-dot" :style="{ background: b.def.colour }"></span>
+                {{ b.def.name }}
+              </th>
+              <td class="num muted">{{ formatArea(b.area) }}</td>
 
-          <span class="assign-controls">
-            <!-- What is actually standing there, beside what was asked for. The
-                 two differ while the hive is still molding into a plan, and
-                 that gap is the thing targets exist to make visible. -->
-            <span
-              class="assign-now num"
-              :class="r.drones > 0 ? '' : 'muted'"
-              :title="`${r.drones} ${r.name.toLowerCase()}${r.drones === 1 ? '' : 's'} here now`"
-            >{{ r.drones }}</span>
-            <button class="btn-mini" :disabled="r.target <= 0" @click="bump(b.biomeId, r.droneId, -1)">−</button>
-            <input
-              class="assign-input num"
-              type="number"
-              min="0"
-              placeholder="0"
-              :value="target.value(key(b.biomeId, r.droneId), r.target || '')"
-              :aria-label="`${r.name} on ${b.def.name}`"
-              @input="target.input(key(b.biomeId, r.droneId), $event)"
-              @change="target.input(key(b.biomeId, r.droneId), $event)"
-              @blur="target.commit(key(b.biomeId, r.droneId))"
-            />
-            <button class="btn-mini" @click="bump(b.biomeId, r.droneId, 1)">+</button>
-            <button
-              class="btn-mini is-wide"
-              :disabled="!r.offers || r.room < 1"
-              title="Fill this ground to the last drone it carries at full rate"
-              @click="fill(b.biomeId, r.droneId)"
-            >fill</button>
-          </span>
-        </div>
+              <td v-for="r in b.rows" :key="r.droneId" class="assign-cell">
+                <span class="assign-controls">
+                  <!-- WHO IS ACTUALLY THERE, when it differs from the plan.
+                       Silent when the two agree, which is most cells most of
+                       the time — a column of numbers that match the ones
+                       beside them is a column of noise. It speaks up for the
+                       gap while the hive molds into a target, and for drones
+                       spread onto ground nobody has claimed. -->
+                  <span
+                    class="assign-now num"
+                    :class="r.target > 0 ? 'warn' : 'muted'"
+                    :title="r.drones !== r.target
+                      ? `${r.drones} standing here now, against a target of ${r.target}`
+                      : null"
+                  >{{ r.drones === r.target ? '' : r.drones }}</span>
+                  <button
+                    class="btn-mini"
+                    :disabled="r.target <= 0"
+                    :aria-label="`Fewer ${r.name} on ${b.def.name}`"
+                    @click="bump(b.biomeId, r.droneId, -1)"
+                  >−</button>
+                  <input
+                    class="assign-input num"
+                    :class="r.target > 0 ? r.tone : ''"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    :value="target.value(key(b.biomeId, r.droneId), r.target || '')"
+                    :aria-label="`${r.name} on ${b.def.name}`"
+                    @input="target.input(key(b.biomeId, r.droneId), $event)"
+                    @change="target.input(key(b.biomeId, r.droneId), $event)"
+                    @blur="target.commit(key(b.biomeId, r.droneId))"
+                  />
+                  <button
+                    class="btn-mini"
+                    :aria-label="`More ${r.name} on ${b.def.name}`"
+                    @click="bump(b.biomeId, r.droneId, 1)"
+                  >+</button>
+
+                  <!-- THE CAPACITY FIGURE IS THE FILL BUTTON. A fourth button
+                       per cell would be four buttons × five types × twenty-six
+                       biomes; the number you are filling TO is already there,
+                       so clicking it is both the control and its own label. -->
+                  <button
+                    class="assign-cap tip"
+                    :class="r.tone"
+                    :disabled="!r.offers || r.room < 1"
+                    :aria-label="`Fill ${b.def.name} with ${r.room} ${r.name.toLowerCase()}s`"
+                    @click="fill(b.biomeId, r.droneId)"
+                  >/{{ r.room }}<span class="tip-body tip-cell">
+                    <span class="tip-title">{{ r.name }} · {{ b.def.name }}</span>
+                    <template v-if="r.offers">
+                      <span class="tip-row">
+                        <span>Room at full rate</span>
+                        <span>{{ r.room }}<template v-if="r.contested">
+                          <span class="muted"> of {{ r.alone }} alone</span></template></span>
+                      </span>
+                      <span class="tip-row">
+                        <span>{{ r.room < 1 ? 'Short of even one by' : 'Another would want' }}</span>
+                        <span>{{ formatArea(r.toNext) }} m²</span>
+                      </span>
+                      <span v-if="r.target > 0" class="tip-row">
+                        <span>Each one works at</span>
+                        <span :class="r.tone">{{ (r.planned * 100).toFixed(0) }}%</span>
+                      </span>
+                      <span v-if="r.target > 0 && r.drones !== r.target" class="tip-row">
+                        <span class="warn">Molded so far</span>
+                        <span class="warn">{{ r.drones }} of {{ r.target }}</span>
+                      </span>
+                      <span v-if="r.target > 0" class="tip-row">
+                        <span>Eats from the stores</span>
+                        <span :class="r.keep > 0.75 ? 'bad' : ''">
+                          {{ (r.keep * 100).toFixed(0) }}%
+                        </span>
+                      </span>
+                      <span v-else-if="r.drones > 0" class="tip-row">
+                        <span>Here without a target</span>
+                        <span>{{ r.drones }} spread by area</span>
+                      </span>
+                      <span v-if="r.rate > 0" class="tip-row">
+                        <span>Bringing in</span>
+                        <span class="good">{{ formatMassFlow(r.rate) }}</span>
+                      </span>
+                      <span class="muted" style="display: block; margin-top: 0.3rem">
+                        Click to fill this ground to {{ r.room }}.
+                      </span>
+                    </template>
+                    <span v-else class="bad" style="display: block">
+                      This ground offers the {{ r.name.toLowerCase() }} route nothing at all. A
+                      drone sent here walks out, finds nothing and walks back, every trip.
+                    </span>
+                  </span></button>
+                </span>
+              </td>
+
+              <td class="assign-fill-col">
+                <span class="assign-meter tip" :class="{ 'is-pinned': false }">
+                  <span class="assign-meter-track">
+                    <span
+                      class="assign-meter-fill"
+                      :class="b.claimed > 1 ? 'is-over' : ''"
+                      :style="{ width: `${Math.min(100, b.claimed * 100)}%` }"
+                    ></span>
+                  </span>
+                  <span class="num" :class="b.claimed > 1 ? 'bad' : 'muted'">
+                    {{ b.claimed > 0 ? `${(b.claimed * 100).toFixed(0)}%` : '—' }}
+                  </span>
+                  <span class="tip-body tip-cell">
+                    <span class="tip-title">{{ b.def.name }} · {{ formatArea(b.area) }} m²</span>
+                    <span v-if="b.claimed > 1" class="tip-row">
+                      <span class="bad">Promised to more than it carries</span>
+                      <span class="bad">{{ (b.claimed * 100).toFixed(0) }}%</span>
+                    </span>
+                    <span v-if="b.claimed > 1" class="tip-row">
+                      <span>So everyone gets</span>
+                      <span>{{ (b.planSqueeze * 100).toFixed(0) }}% of the room they asked for</span>
+                    </span>
+                    <span v-else class="tip-row">
+                      <span>Ground the plan has spoken for</span>
+                      <span>{{ (b.claimed * 100).toFixed(0) }}%</span>
+                    </span>
+                    <span class="tip-row">
+                      <span>Drones standing on it</span><span>{{ b.drones }}</span>
+                    </span>
+                  </span>
+                </span>
+              </td>
+
+              <td class="num" :class="b.rate > 0 ? 'good' : 'muted'">
+                {{ b.rate > 0 ? formatMassFlow(b.rate) : '—' }}
+              </td>
+            </tr>
+
+            <tr v-if="hideSmall && tinyRows.length" class="assign-tiny">
+              <th scope="row" class="assign-ground muted">
+                {{ tinyRows.length }} biome{{ tinyRows.length === 1 ? '' : 's' }}
+                too small for anything
+              </th>
+              <td class="num muted">
+                {{ formatArea(tinyRows.reduce((a, b) => a + b.area, 0)) }}
+              </td>
+              <td :colspan="FORAGE_TYPES.length" class="assign-tiny-list muted">
+                {{ tinyRows.map((b) => b.def.name.toLowerCase()).slice(0, 5).join(' · ')
+                }}<template v-if="tinyRows.length > 5"> …</template>
+              </td>
+              <td class="assign-fill-col">
+                <button class="focus-clear" @click="hideSmall = false">show</button>
+              </td>
+              <td class="num muted">—</td>
+            </tr>
+          </tbody>
+
+          <tfoot>
+            <tr>
+              <th scope="row" class="assign-ground">Total</th>
+              <td class="num">{{ formatArea(area) }}</td>
+              <td v-for="t in placed" :key="t.droneId" class="assign-cell num">
+                {{ t.sent }} <span class="muted">of {{ t.held }}</span>
+              </td>
+              <td class="assign-fill-col muted">
+                {{ ground.idle > 0 ? `${ground.idle} idle` : 'nothing idle' }}
+              </td>
+              <td class="num good">{{ formatMassFlow(totalRate) }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="panel-body assign-legend muted">
+        <span><span class="good">green</span> room to spare</span>
+        <span><span class="warn">amber</span> crowded, still worth it</span>
+        <span><span class="bad">red</span> over its range — intake falls</span>
+        <span class="assign-legend-end">hover a figure for the whole story</span>
       </div>
     </div>
 
-    <!-- ------------------------------------------------------- who is on what -->
+    <!--
+      ================================================= WHAT IS COMING IN, AND FROM WHERE
+
+      Was: a biome heading, a crew heading, and then two lines per find — the
+      find on one, and underneath it a help line repeating the crew name and the
+      drone count and finishing "rolling again within 12s", which is the same
+      twelve seconds on every row in the panel. Three facts, two lines, and a
+      constant presented as if it varied.
+
+      Now: one line per find, crews as a column, and a bar for the share each
+      find is of the whole haul — because the question this panel answers is
+      which of these is actually feeding the hive, and that is a comparison no
+      column of absolute rates makes for you.
+    -->
     <div v-if="anyPatches" class="panel-box" style="margin-bottom: 0.75rem">
       <div class="panel-head">
         <span>Out now</span>
@@ -968,55 +1253,132 @@ const claimValue = computed(() => {
             <span class="land-stat-label">m² held</span>
           </span>
         </div>
+        <!-- THE CYCLE, ONCE. It used to end every row in the panel. -->
+        <div class="out-note muted">
+          <span>Every drone works its own ground and rolls again within
+            {{ FORAGE_CYCLE }}s. Bars measure each find against the biggest;
+            the figure beside one is its share of the whole haul.</span>
+          <button
+            v-if="foldedFinds > 0 || showAllFinds"
+            class="focus-clear"
+            @click="showAllFinds = !showAllFinds"
+          >{{ showAllFinds ? 'fold the small finds away'
+            : `show ${foldedFinds} smaller find${foldedFinds === 1 ? '' : 's'}` }}</button>
+        </div>
       </div>
 
-      <!-- Grouped by ground, then by crew, then by find. One line per FIND
-           rather than per drone: eight foragers on acorns is one row that says
-           eight, which keeps reading at sixty drones as well as at six. -->
-      <div v-for="g in outNow" :key="g.biomeId" class="panel-body tight">
-        <div class="offer-head">
-          <span>
-            <span class="terr-key-dot" :style="{ background: g.def.colour }"></span>
-            {{ g.def.name }}
-            <span class="muted">· {{ g.drones }} drone{{ g.drones === 1 ? '' : 's' }}</span>
-          </span>
-          <span class="num" :class="g.rate > 0 ? 'good' : 'muted'">
-            {{ formatMassFlow(g.rate) }}
-          </span>
-        </div>
+      <div class="panel-body tight assign-scroll">
+        <table class="out-grid">
+          <thead>
+            <tr>
+              <th scope="col">Find</th>
+              <th scope="col">Crew</th>
+              <th scope="col" class="num">On it</th>
+              <th scope="col" class="num">Each trip</th>
+              <th scope="col" class="out-share-col">Share of the haul</th>
+              <th scope="col" class="num">Brings in</th>
+            </tr>
+          </thead>
 
-        <template v-for="c in g.crews" :key="c.droneId">
-          <div class="crew-line">
-            {{ c.name }} ×{{ c.drones }}
-            <span
-              :class="c.efficiency > 0.85 ? 'muted' : c.efficiency > 0.4 ? 'warn' : 'bad'"
-            >· {{ (c.efficiency * 100).toFixed(0) }}% each</span>
-            <span v-if="c.slots < c.drones" class="muted">
-              · room for {{ Math.floor(c.slots) }}
-            </span>
-          </div>
+          <tbody>
+            <template v-for="g in outGroups" :key="g.biomeId">
+              <!-- THE GROUND, AND THE CREWS ON IT, AS A BAND ACROSS THE WHOLE
+                   TABLE. The crew headings carried ×count, the rate each one
+                   works at and the room it has; all three are properties of
+                   the crew, not of any find, so they belong here rather than
+                   above a block of rows that then repeat them.
 
-          <div v-for="r in c.rows" :key="r.id" class="field-row stacked-help">
-            <span class="field-label">
-              <template v-if="r.itemId">
-                <button class="codex-link" @click="showInCodex(r.itemId)">
-                  {{ r.found.label.toLowerCase() }}
-                </button>
-              </template>
-              <span v-else class="warn">nothing found</span>
-              <span class="muted">×{{ r.drones }}</span>
-              <span class="field-help">
-                {{ c.name }}<span class="sep">·</span>{{ r.drones }}
-                drone{{ r.drones === 1 ? '' : 's' }}<template v-if="r.each">,
-                  {{ formatMass(r.each) }} each per trip, rolling again within
-                  {{ FORAGE_CYCLE }}s</template>.
-              </span>
-            </span>
-            <span class="num" :class="r.rate > 0 ? 'good' : 'bad'">
-              {{ formatMassFlow(r.rate) }}
-            </span>
-          </div>
-        </template>
+                   It spans every column on purpose. Laid out in the columns
+                   instead, the crew summary — the longest string in the panel —
+                   set the width of a column holding the word "Forager", and
+                   opened a hand's width of nothing between "on it" and "each
+                   trip" on all forty find rows below it. -->
+              <tr class="out-ground-row">
+                <th scope="rowgroup" colspan="6" class="out-ground">
+                  <!-- The flex row is INSIDE the cell. Putting `display: flex`
+                       on the cell itself takes it out of the table's layout,
+                       which quietly cancels the colspan and leaves the band
+                       half the width of the grid it is meant to head. -->
+                  <span class="out-ground-inner">
+                    <span class="out-ground-name">
+                      <span class="terr-key-dot" :style="{ background: g.def.colour }"></span>
+                      {{ g.def.name }}
+                      <span class="muted num">{{ formatArea(g.area) }} m² ·
+                        {{ g.drones }} drone{{ g.drones === 1 ? '' : 's' }}</span>
+                    </span>
+                    <span class="out-crews">
+                      <span v-for="c in g.crews" :key="c.droneId" class="crew-line">
+                        {{ c.name }} ×{{ c.drones }}
+                        <span
+                          :class="c.efficiency > 0.85 ? 'muted'
+                            : c.efficiency > 0.4 ? 'warn' : 'bad'"
+                        >· {{ (c.efficiency * 100).toFixed(0) }}% each</span>
+                        <span v-if="c.slots < c.drones" class="muted">
+                          · room for {{ Math.floor(c.slots) }}
+                        </span>
+                      </span>
+                    </span>
+                    <span class="num" :class="g.rate > 0 ? 'good' : 'muted'">
+                      {{ formatMassFlow(g.rate) }}
+                    </span>
+                  </span>
+                </th>
+              </tr>
+
+              <tr v-for="r in g.shown" :key="r.id" class="out-find-row">
+                <td class="out-find">
+                  <button
+                    v-if="r.itemId"
+                    class="codex-link"
+                    @click="showInCodex(r.itemId)"
+                  >{{ r.found.label.toLowerCase() }}</button>
+                  <span v-else class="warn tip">nothing found<span class="tip-body tip-cell">
+                    <span class="tip-title">An empty trip</span>
+                    These {{ r.drones }} went out, rolled, and came back with
+                    nothing. Either the ground offers this route too little to
+                    be worth standing on, or there are more drones here than it
+                    has finds to go round.
+                  </span></span>
+                </td>
+                <td class="out-crew muted">{{ r.crewName }}</td>
+                <td class="num">{{ r.drones }}</td>
+                <td class="num muted">{{ r.each ? formatMass(r.each) : '—' }}</td>
+                <td class="out-share-col">
+                  <span class="out-share">
+                    <span class="out-share-track">
+                      <span
+                        class="out-share-fill"
+                        :style="{ width: `${Math.min(100, r.bar * 100)}%` }"
+                      ></span>
+                    </span>
+                    <span class="num muted">{{ (r.share * 100).toFixed(0) }}%</span>
+                  </span>
+                </td>
+                <td class="num" :class="r.rate > 0 ? 'good' : 'bad'">
+                  {{ formatMassFlow(r.rate) }}
+                </td>
+              </tr>
+
+              <tr v-if="g.tail" class="out-tail-row">
+                <td class="out-find muted">
+                  <button class="focus-clear" @click="showAllFinds = true">
+                    and {{ g.tail.count }} smaller find{{ g.tail.count === 1 ? '' : 's' }}
+                  </button>
+                </td>
+                <td class="out-crew muted">—</td>
+                <td class="num muted">{{ g.tail.drones }}</td>
+                <td class="num muted">—</td>
+                <!-- The share, but no track. An empty track beside "38%" reads
+                     as a bar at zero, and a FULL one would draw thirteen finds
+                     as though they were one big one. -->
+                <td class="out-share-col num muted">
+                  {{ (g.tail.share * 100).toFixed(0) }}%
+                </td>
+                <td class="num muted">{{ formatMassFlow(g.tail.rate) }}</td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
       </div>
     </div>
 

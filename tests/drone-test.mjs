@@ -261,16 +261,19 @@ const terr = await p.evaluate(() => {
     .find((b) => /^out now/i.test(b.innerText));
   return {
     crew: [...(box?.querySelectorAll('.crew-line') ?? [])].map((n) => n.innerText).join(' | '),
-    rows: [...(box?.querySelectorAll('.field-row') ?? [])].map((n) => n.innerText).join(' | '),
+    // The trip weight is a COLUMN now, not a clause in a help line under every
+    // find — "each trip", fourth across.
+    trips: [...(box?.querySelectorAll('.out-find-row') ?? [])]
+      .map((n) => n.children[3]?.innerText.trim() ?? '').join(' | '),
   };
 });
 check('Territory shows the Foragers out on the land', /Forager\s*×4/.test(terr.crew), terr.crew);
-// The crew line carries the headcount and how hard the ground is being leaned
-// on; the rows underneath carry the trips. Both used to be stamped on every
-// patch row, alongside a drones-per-patch figure identical on all of them.
+// The crew summary carries the headcount and how hard the ground is being
+// leaned on; the rows underneath carry the trips. Both used to be stamped on
+// every patch row, alongside a drones-per-patch figure identical on all of them.
 check('and how much room they have', /%\s*each/.test(terr.crew), terr.crew);
-check('and what a trip is worth', /g each per trip/.test(terr.rows),
-  terr.rows.slice(0, 120));
+check('and what a trip is worth', /\d\s*g$/m.test(terr.trips),
+  terr.trips.slice(0, 120));
 
 /* ===================================================== 7. a save round-trips */
 

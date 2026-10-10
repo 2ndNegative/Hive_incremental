@@ -435,7 +435,19 @@ const terr = await p.evaluate(() => {
       .map((n) => n.innerText.replace(/\s+/g, ' ').trim()),
     crew: [...(out?.querySelectorAll('.crew-line') ?? [])]
       .map((n) => n.innerText.replace(/\s+/g, ' ').trim()).join(' | '),
-    assignRows: who?.querySelectorAll('.assign-row').length ?? 0,
+    // Out now is a grid too: a band per biome worked, a single line per find.
+    outGround: out?.querySelectorAll('.out-ground-row').length ?? 0,
+    outFinds: out?.querySelectorAll('.out-find-row').length ?? 0,
+    // The forage cycle is a constant, so it is stated once in the panel's
+    // header rather than at the end of a help line under every single find.
+    cycles: (out?.innerText.match(/rolls again within/g) ?? []).length,
+    // ONE ROW PER BIOME, ONE CELL PER TYPE. The panel used to be a stack of
+    // per-biome mini-forms, one row per (biome × type); it is now a matrix, so
+    // the row count is the ground held and the cell count is the pairings.
+    bodyRows: who?.querySelectorAll('.assign-grid tbody tr').length ?? 0,
+    cells: who?.querySelectorAll('.assign-grid tbody .assign-cell').length ?? 0,
+    cols: who?.querySelectorAll('.assign-grid thead .assign-col').length ?? 0,
+    caps: [...(who?.querySelectorAll('.assign-cap') ?? [])].map((n) => n.innerText.trim()),
     inputs: [...(who?.querySelectorAll('.assign-input') ?? [])].map((n) => n.value),
     who: who?.innerText.replace(/\s+/g, ' ').trim() ?? '',
   };
@@ -444,15 +456,23 @@ check('Out now leads with the drones that are out', /6\s*\/\s*6/.test(terr.stats
   terr.stats.join(' | '));
 check('and names the crew with the room it has',
   /Forager ×6/.test(terr.crew) && /%\s*each/.test(terr.crew), terr.crew);
-check('Who works what gives every type a row on every biome held',
-  terr.assignRows === 2, `${terr.assignRows} rows`);
-check('and the room each one has', /Room for 100/.test(terr.who), terr.who.slice(0, 110));
+check('it heads the one biome being worked and lists its finds one line each',
+  terr.outGround === 1 && terr.outFinds > 0 && terr.outFinds <= 6,
+  `${terr.outGround} ground, ${terr.outFinds} finds from 6 drones`);
+check('and says the forage cycle once, not once per find', terr.cycles === 1,
+  `${terr.cycles} times`);
+check('Who works what gives the one biome held a row, and every type a cell in it',
+  terr.bodyRows === 1 && terr.cols > 1 && terr.cells === terr.bodyRows * terr.cols,
+  `${terr.bodyRows} rows × ${terr.cols} types = ${terr.cells} cells`);
+check('and the room each one has, 400 m² at 4 m² a forager',
+  terr.caps[0] === '/100', terr.caps.join(' '));
 
 // Setting a target through the interface, which is the whole point of it.
 await p.evaluate(() => {
   const who = [...document.querySelectorAll('.panel-box')]
     .find((b) => /who works what/i.test(b.querySelector('.panel-head')?.innerText ?? ''));
-  const plus = who.querySelectorAll('.assign-row')[0].querySelectorAll('.btn-mini')[1];
+  const cell = who.querySelectorAll('.assign-grid tbody .assign-cell')[0];
+  const plus = cell.querySelectorAll('.btn-mini')[1];
   for (let i = 0; i < 3; i += 1) plus.click();
 });
 await p.waitForTimeout(250);

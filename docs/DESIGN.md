@@ -699,6 +699,62 @@ rather than being read a second time from the modifier layer. See the modifier l
 two `factor()` calls on one channel are two readers that have to be kept in step by hand,
 which is precisely the bug the brood rate had.
 
+### Who works what is a matrix, not a stack of forms
+
+The panel started as one mini-form per biome: a heading, a line of prose, and a row per type
+inside it. Correct, and 1,726 pixels tall at fourteen biomes — which is to say unreadable,
+because the question it exists to answer is *comparative* ("where should these ten foragers
+go") and the answer was spread down a page you had to scroll to hold two candidates in your
+head at once.
+
+It is now a single table: **a row per biome, a column per forage type**, sorted by area
+descending. 510 pixels. Three decisions in it are worth keeping:
+
+- **The capacity figure is the fill button.** Each cell carries `− [target] +` and then
+  `/{room}`. A fourth control per cell would be four buttons across five types and twenty-six
+  biomes; the number you are filling *to* is already printed, so clicking it is both the
+  control and its own label.
+- **The live count speaks only when it disagrees.** `.assign-now` is blank whenever the drones
+  standing there match the target, which is most cells most of the time. It appears for the
+  gap while the hive molds into a plan, and for leftovers spread onto ground nobody claimed.
+  A column of figures matching the ones beside them is a column of noise.
+- **Ground too small to carry anything folds away.** A 0.7 m² sliver of desert holds no drone
+  of any type and took exactly as much of the screen as 156 m² of forest. The fold is
+  remembered in `state.ui.terrHideSmall`, and a biome the player has deliberately put
+  something on is never folded.
+
+The prose that used to sit beside each figure moved into the cell's tooltip, where it is a
+hover away rather than in front of the numbers. Sorting by **area** rather than declared order
+is deliberate: the grid is read down a column, and what decides whether a biome deserves a
+column's attention is how much of it there is.
+
+### Out now is a grid as well
+
+Same disease, same cure. The panel printed a biome heading, a crew heading, and then **two
+lines per find**: the find on one, and under it a help line carrying the crew name, the drone
+count, the trip weight and "rolling again within 12s" — three facts in two lines, two of them
+already printed on the line above, and a constant presented as if it varied. 2,632 pixels. It
+is now 533.
+
+- **The crew is a column**, not a heading. Which kind of drone fetched a thing is one word; it
+  does not need a block of its own, and the rows now sort by what they bring in *across* both
+  crews, because "what is actually feeding the hive" does not care who fetched it.
+- **The ground is a band spanning every column**, carrying the biome, the area, and each crew
+  with its headcount, its rate and its room. Those are properties of the crew, not of any
+  find. The band spans on purpose: laid out in the columns, the crew summary — the longest
+  string in the panel — would set the width of a column holding the word "Forager".
+- **The forage cycle is stated once**, in the panel's header.
+- **A bar for each find**, measured against the biggest find in the hive rather than against
+  the whole haul: forty finds share one hundred per cent between them, so a bar scaled to the
+  total never reaches a tenth of its track. The percentage beside it is the true share.
+- **The tail folds.** Anything past the fifth find on a biome, or under a hundredth of the
+  haul, collapses into one line that states how many finds, how many drones and *what share* —
+  a fold that hides how much it hides would be a lie about where the food comes from. Empty
+  rolls are never folded: a drone that found nothing is the one zero in there worth reading.
+
+One implementation note worth keeping: `display: flex` on a `<th>` takes the cell out of the
+table's layout and cancels its `colspan` with it. The band's flex row is a child of the cell.
+
 ### Changing it
 
 - *"Land doesn't matter"* → lower the ranges, or check whether cognition is the real wall.

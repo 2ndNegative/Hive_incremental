@@ -1754,36 +1754,193 @@ textarea.save-box {
 }
 
 /*
- * Assigning drones to ground.
+ * ASSIGNING DRONES TO GROUND: one grid, biomes down, drone types across.
  *
- * A stepper plus a number plus a fill, on every (biome × type) pairing. Small
- * controls on purpose: there is one row per pairing and the grid gets tall, so
- * the row has to stay the height of its text.
+ * It was a stack of per-biome mini-forms with a paragraph on every row, and at
+ * fourteen biomes that ran to seventeen hundred pixels. The decision it exists
+ * for — "where should this type go" — is a comparison down a column, which a
+ * list of sentences cannot give you however well the sentences are written.
  */
+.assign-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.assign-bar-end {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  flex: 0 0 auto;
+}
+
+.assign-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.76rem;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Five gather routes will not fit a narrow window. Scrolling the GRID beats
+   wrapping it: a wrapped column is a column you can no longer read down, which
+   is the only thing this layout is for. */
+.assign-scroll {
+  overflow-x: auto;
+}
+
+.assign-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.assign-grid th,
+.assign-grid td {
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+  font-weight: inherit;
+}
+
+.assign-grid thead th {
+  padding-top: 0.1rem;
+  padding-bottom: 0.3rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.assign-grid thead th .muted {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.assign-grid tbody tr {
+  border-top: 1px solid var(--rule);
+}
+
+.assign-grid tfoot tr {
+  border-top: 1px solid var(--border-bright);
+}
+
+.assign-grid tfoot td,
+.assign-grid tfoot th {
+  padding-top: 0.4rem;
+  padding-bottom: 0.2rem;
+  color: var(--text-strong);
+}
+
+.assign-grid .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.assign-ground {
+  color: var(--text-strong);
+  white-space: nowrap;
+  padding-left: 0.1rem !important;
+}
+
+.assign-ground .terr-key-dot {
+  display: inline-block;
+  margin-right: 0.4rem;
+  vertical-align: baseline;
+}
+
+.assign-col,
+.assign-cell {
+  text-align: center !important;
+}
+
+.assign-cell .assign-controls {
+  justify-content: center;
+}
+
+.assign-fill-col {
+  width: 11rem;
+}
+
+.assign-tiny td,
+.assign-tiny th {
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+.assign-tiny-list {
+  text-align: center !important;
+  font-size: 0.74rem;
+}
+
+/* How much of a biome the plan has promised away. Over 1 is legal and
+   sometimes right, so it is coloured rather than blocked. */
+.assign-meter {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  position: relative;
+}
+
+.assign-meter-track {
+  flex: 1 1 auto;
+  height: 7px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  display: block;
+}
+
+.assign-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--good);
+  opacity: 0.8;
+}
+
+.assign-meter-fill.is-over {
+  background: var(--bad);
+}
+
+/* Who is standing there now, when it is not who was asked for — silent when
+   the two agree, which is most cells most of the time.
+   The slot is ALWAYS there, empty or not: a cell that grows one would
+   otherwise shove its stepper sideways and break the straight line the whole
+   grid is read down. */
+.assign-now {
+  flex: 0 0 1.5rem;
+  text-align: right;
+  font-size: 0.68rem;
+  white-space: nowrap;
+  padding-right: 0.1rem;
+}
+
+/* The stepper itself: small, because there is one in every cell of the grid
+   and the row has to stay the height of its text. */
 .assign-controls {
   display: flex;
   align-items: center;
-  gap: 0.2rem;
+  gap: 0.15rem;
   flex: 0 0 auto;
 }
 
 .btn-mini {
-  min-width: 1.5rem;
-  height: 1.5rem;
-  padding: 0 0.35rem;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.3rem;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   line-height: 1;
   color: var(--text-strong);
-  background: var(--bg-raised);
+  background: var(--bg-raised, var(--panel-alt));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
-}
-
-.btn-mini.is-wide {
-  min-width: 2.4rem;
-  font-size: 0.7rem;
 }
 
 .btn-mini:hover:not(:disabled) {
@@ -1796,18 +1953,25 @@ textarea.save-box {
   cursor: default;
 }
 
+/* The target. Tinted by how well the plan would run: green with room to
+   spare, amber crowded, red past the point where the total falls. */
 .assign-input {
-  width: 3rem;
-  height: 1.5rem;
+  width: 2.8rem;
+  height: 1.4rem;
   padding: 0 0.3rem;
   text-align: right;
   font: inherit;
-  font-size: 0.8rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
   color: var(--text-strong);
   background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+
+.assign-input.good { border-color: color-mix(in srgb, var(--good) 55%, var(--border)); }
+.assign-input.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.assign-input.bad { border-color: color-mix(in srgb, var(--bad) 60%, var(--border)); }
 
 /* The spinner arrows are a second, worse stepper beside the one above. */
 .assign-input::-webkit-inner-spin-button,
@@ -1821,22 +1985,229 @@ textarea.save-box {
   appearance: textfield;
 }
 
-/* Who is standing there now, left of the target stepper. Dimmer than the
-   target: it is a reading, not a control. */
-.assign-now {
-  min-width: 1.6rem;
-  text-align: right;
-  font-size: 0.78rem;
-  color: var(--text-strong);
-  padding-right: 0.25rem;
+/*
+ * THE CAPACITY FIGURE IS ALSO THE FILL BUTTON.
+ *
+ * A separate `fill` would be a fourth control in every cell — four buttons by
+ * five routes by twenty-six biomes. The number being filled TO is already in
+ * the cell, so clicking it is the control and its own label at once.
+ */
+.assign-cap {
+  min-width: 2.1rem;
+  padding: 0 0.15rem;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  background: none;
+  border: none;
+  border-bottom: 1px dotted transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
 }
 
-/* One crew's heading inside a biome group — smaller than the biome, bigger
-   than the finds underneath it. */
-.crew-line {
-  padding: 0.3rem 0.6rem 0.1rem;
+.assign-cap:hover:not(:disabled) {
+  border-bottom-color: currentcolor;
+}
+
+.assign-cap:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* A tooltip opening out of a table cell. Wider than the cell on purpose — it
+   carries the prose that used to be printed on every row — and right-aligned
+   on the trailing columns so it cannot run off the panel. */
+.tip-body.tip-cell {
+  min-width: 17rem;
+  white-space: normal;
+  text-align: left;
   font-size: 0.74rem;
+}
+
+.assign-grid td:nth-last-child(-n + 2) .tip-body.tip-cell {
+  left: auto;
+  right: 0;
+}
+
+.assign-legend {
+  display: flex;
+  gap: 1.2rem;
+  font-size: 0.72rem;
+  border-top: 1px solid var(--rule);
+}
+
+.assign-legend-end {
+  margin-left: auto;
+  color: var(--border-bright);
+}
+
+/*
+ * WHAT IS COMING IN: one grid, finds down, crews as a column.
+ *
+ * The old panel printed a help line under every find — the crew, the drone
+ * count, the trip weight and "rolling again within 12s" — which is two lines
+ * for three facts, with the crew and the count already printed on the line
+ * above and the twelve seconds identical on every row in the panel. At forty
+ * drones across seven biomes that came to 2,632 pixels.
+ *
+ * The facts are columns now, the cycle is stated once in the panel's header,
+ * and the one thing the old layout could not say at all — how big a find is
+ * against the rest of the haul — is a bar.
+ */
+.out-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.out-grid th,
+.out-grid td {
+  padding: 0.22rem 0.5rem;
+  text-align: left;
+  font-weight: inherit;
+}
+
+.out-grid thead th {
+  padding-top: 0.1rem;
+  padding-bottom: 0.3rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.out-grid .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* The ground is a BAND ACROSS EVERY COLUMN, not a row laid out in them: it
+   carries the crew summary, which is the longest string in the panel, and in a
+   column that string would set the width of the column holding the word
+   "Forager". A rule above it and a touch of weight is enough to find where one
+   biome ends, without indenting every find underneath. */
+.out-grid .out-ground-row {
+  border-top: 1px solid var(--border-bright);
+}
+
+.out-ground {
+  padding-top: 0.45rem !important;
+  padding-bottom: 0.2rem !important;
+  padding-left: 0.1rem !important;
   color: var(--text-strong);
+}
+
+/* Name left, crews in the middle, what the ground brings in hard right. The
+   flex row is a child of the cell, never the cell: `display: flex` on a table
+   cell takes it out of the table's layout and cancels the colspan with it. */
+.out-ground-inner {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.out-ground .terr-key-dot {
+  display: inline-block;
+  margin-right: 0.4rem;
+  vertical-align: baseline;
+}
+
+.out-ground-name {
+  white-space: nowrap;
+}
+
+.out-ground-name .muted {
+  margin-left: 0.35rem;
+}
+
+.out-crews {
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 0 0.1rem;
+  font-size: 0.74rem;
+  min-width: 0;
+}
+
+.out-find-row {
+  border-top: 1px solid var(--rule);
+}
+
+.out-find {
+  padding-left: 0.1rem !important;
+}
+
+/* Long enough for "escargot (land snail)" without wrapping the grid. */
+.out-find,
+.out-crew {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.out-crew {
+  font-size: 0.74rem;
+}
+
+/* The bars take the slack rather than the find names, which would otherwise
+   absorb it and leave a hand's width of nothing between a find and its crew.
+   A longer track is also a finer one: at 9rem the difference between a 3% find
+   and a 5% one is two pixels. */
+.out-share-col {
+  width: 30%;
+}
+
+.out-share {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.out-share-track {
+  flex: 1 1 auto;
+  height: 6px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  display: block;
+}
+
+.out-share-fill {
+  display: block;
+  height: 100%;
+  background: var(--good);
+  opacity: 0.75;
+}
+
+.out-tail-row {
+  border-top: 1px dashed var(--rule);
+  font-size: 0.74rem;
+}
+
+/* The cycle and the fold control, on one line under the three big figures. */
+.out-note {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.4rem;
+  font-size: 0.74rem;
+}
+
+/* One crew's figures. It was a heading over a block of finds and is now one of
+   several spans in the ground's own row, so it sits inline and brings its own
+   separator rather than relying on being on a line of its own. */
+.crew-line {
+  color: var(--text-strong);
+}
+
+.out-crews .crew-line + .crew-line::before {
+  content: '·';
+  color: var(--border-bright);
+  margin: 0 0.3rem 0 0.15rem;
 }
 
 .offer-empty {
