@@ -248,6 +248,45 @@ export function nextMoldable(state, free = Infinity) {
   return null;
 }
 
+/**
+ * HOW LONG THE HIVE TAKES TO LET ONE GO.
+ *
+ * A target used to be a ceiling on molding and nothing else, so a hive that had
+ * pressed forty foragers kept forty foragers forever however low the number was
+ * set afterwards. There was no way to shrink a workforce at all — the only
+ * control ran one way.
+ *
+ * Twenty seconds a drone, flat. NOT scaled by brood pace or vigour the way
+ * molding is: pressing a drone is work the chambers do and a full brood does it
+ * faster, whereas letting one go is not work and a thriving hive should not be
+ * quicker at it. The delay exists so that nudging a target down by one and
+ * straight back up again costs nothing, which it would not if the first drone
+ * died on the same tick as the click.
+ */
+export const CULL_SECONDS = 20;
+
+/**
+ * Types the hive is holding more of than it was told to, worst overage first.
+ *
+ * A type with no target has no ceiling and is never on this list — `null` means
+ * "as many as you like", the same as it does to `nextMoldable`, and reading it
+ * as zero would quietly kill the whole workforce of anyone who never set one.
+ */
+export function overTarget(state) {
+  const out = [];
+  for (const id of DRONE_TYPE_ORDER) {
+    const target = state.droneMolding?.[id]?.target;
+    if (target === null || target === undefined || target === '') continue;
+    const over = (state.droneTypes?.[id] || 0) - Math.max(0, Math.floor(target));
+    if (over > 0) out.push({ id, over, target: Math.max(0, Math.floor(target)) });
+  }
+  // Biggest overage first, declared order as the tiebreak — the same rule the
+  // chambers use to decide what to press, read backwards.
+  return out.sort(
+    (a, b) => b.over - a.over || DRONE_TYPE_ORDER.indexOf(a.id) - DRONE_TYPE_ORDER.indexOf(b.id),
+  );
+}
+
 /** Why a type is not being made, for the row to say so. */
 export function moldStatus(state, id, free = Infinity) {
   const def = DRONE_TYPES[id];
@@ -256,7 +295,9 @@ export function moldStatus(state, id, free = Infinity) {
   if (!want?.on) return 'off';
   const target = want.target;
   if (target !== null && target !== undefined && (state.droneTypes?.[id] || 0) >= target) {
-    return 'at target';
+    // Over is a different sentence from at: one is a chamber resting, the other
+    // is a queue of drones about to be let go, and the row has to say which.
+    return (state.droneTypes?.[id] || 0) > target ? 'over target' : 'at target';
   }
   if ((def.cogitDraw || 0) > free + 1e-9) return 'no bandwidth';
   if (nextMoldable(state, free) !== id) return 'queued';

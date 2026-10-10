@@ -1,7 +1,7 @@
 <script setup>
 import { derived } from '../../game/useGame.js';
 import { computed } from 'vue';
-import { formatPower } from '../../game/units.js';
+import { formatPower, formatEnergy } from '../../game/units.js';
 
 const starving = computed(() => derived.value.energy.ratio < 0.999);
 </script>
@@ -27,8 +27,20 @@ const starving = computed(() => derived.value.energy.ratio < 0.999);
               <span class="warn">From the reserve</span>
               <span class="warn">{{ formatPower(derived.energy.fromPool) }}</span>
             </span>
-            <span class="tip-row" v-else-if="derived.energy.fromPool < -1">
-              <span>Into the reserve</span><span>{{ formatPower(-derived.energy.fromPool) }}</span>
+            <!-- A SURPLUS IS NOT BANKED. The reserve is what the hive arrived
+                 with and nothing refills it, so power made and not spent goes
+                 nowhere. Shown rather than silently dropped: a hive throwing
+                 away two thirds of its output should be able to see that it
+                 is, since the fix is to spend it rather than to make less. -->
+            <span class="tip-row" v-else-if="derived.energy.wasted > 1">
+              <span class="muted">Made, not used</span>
+              <span class="muted">{{ formatPower(derived.energy.wasted) }}</span>
+            </span>
+            <span class="tip-row" v-if="derived.energy.pool > 1">
+              <span>Reserve left</span>
+              <span :class="derived.energy.fromPool > 1 ? 'warn' : ''">
+                {{ formatEnergy(derived.energy.pool) }}
+              </span>
             </span>
           </span>
   </span>

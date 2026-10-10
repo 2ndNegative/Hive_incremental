@@ -130,6 +130,12 @@ export function createInitialState() {
     // to be the same from one frame to the next.
     forage: {},
 
+    // Seconds since the hive last let a drone go, for the cull timer. A target
+    // below the standing count trims one every CULL_SECONDS — see tick(). It
+    // resets whenever nobody is over, so nudging a target down and back up
+    // costs nothing.
+    cull: 0,
+
     // What each CREW is working, keyed "<droneType>:<biomeId>": an array of
     // { elapsed, itemId, grams }, one entry per drone standing on that ground.
     // A patch is one drone's ground now — see land.js — so the length of this

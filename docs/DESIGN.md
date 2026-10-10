@@ -537,6 +537,54 @@ questions:
 pencilled in for scavengers would over-commit it the instant it was clicked, which is a
 one-click button whose one click is wrong.
 
+### A target cuts both ways
+
+A molding target used to be a ceiling and nothing else, so a hive that had pressed forty
+foragers kept forty forever however low the number went afterwards. The only control over a
+workforce ran one way, and the way it ran was up.
+
+A standing count above its target now loses one drone every `CULL_SECONDS` (20 s), worst
+overage first, re-read between each one so two types brought down together are trimmed
+alternately rather than one being emptied before the other is touched. Flat seconds, **not**
+scaled by brood pace or vigour: pressing a drone is work the chambers do and a full brood
+does it faster, whereas letting one go is not work and a thriving hive should not be quicker
+at it.
+
+The clock resets whenever nobody is over. Without that, a hive sitting at its target for an
+hour banks an hour of cull time and kills the first drone the instant a target is nudged
+down — and nudging one down and back up is something a player does while thinking.
+
+A type with **no** target is never culled. `null` means "as many as you like", the same as it
+does to `nextMoldable`, and reading it as zero would quietly kill the whole workforce of
+anyone who had never set one.
+
+Nothing is reclaimed. The matter in a culled drone is simply gone, which is a placeholder
+and not a design — a way to get it back is wanted and not yet built.
+
+### The reserve is a grant, not a battery
+
+Surplus energy used to be banked: anything the generators made over demand went into
+`state.energyPool`, so a hive with spare capacity quietly accumulated a buffer it had never
+built anything to hold.
+
+The energy a run starts with is what the hive **arrived** with. It only goes down, and
+nothing refills it. Power made and not spent goes nowhere, because nothing in the game stores
+electricity yet.
+
+```js
+const poolAfter = Math.min(banked, availableJoules - drawnJoules);
+```
+
+That clamp is the whole of it: a step that generates more than it spends leaves the reserve
+exactly where it was, and a step that generates less draws the difference out of it. When an
+energy storage building lands, this is the line it changes — the clamp becomes the capacity
+that building provides rather than the reserve's own current level.
+
+`derived.energy.fromPool` is therefore never negative any more, and `wasted` is the new
+figure beside it: generated, not needed, nowhere to put it. The draw chip and the Metabolism
+tab both show it, because a hive throwing away two thirds of its output should be able to see
+that it is — the fix is to spend it, not to make less.
+
 ### Snacking: crowding costs twice
 
 A drone out on ground it can work is standing in the middle of its own dinner. It eats some

@@ -33,6 +33,7 @@ const STATUS = {
   molding: { text: 'molding', tone: 'good' },
   queued: { text: 'waiting its turn', tone: 'muted' },
   'at target': { text: 'at target', tone: 'muted' },
+  'over target': { text: 'letting them go', tone: 'warn' },
   'no larvae': { text: 'no larvae', tone: 'bad' },
   'no bandwidth': { text: 'no bandwidth', tone: 'bad' },
   off: { text: 'off', tone: 'muted' },
@@ -122,6 +123,8 @@ const unfiled = computed(() => unfiledTypes());
 const total = computed(() => bands.value.reduce((sum, b) => sum + b.held, 0));
 const cogits = computed(() => bands.value.reduce((sum, b) => sum + b.cogits, 0));
 const idle = computed(() => bands.value.reduce((sum, b) => sum + b.idle, 0));
+/** Drones the hive is holding above what it was told to, and the next to go. */
+const culling = computed(() => derived.value.culling ?? { over: [], next: 0, seconds: 20 });
 const land = computed(() => derived.value.land ?? { area: 0, patches: 0, working: 0 });
 const hauling = computed(() => bands.value.reduce((sum, b) => sum + b.rate, 0));
 const cognition = computed(() => derived.value.cognition);
@@ -187,6 +190,17 @@ const target = useDrafts(setMoldTarget);
         Bringing in {{ formatMassFlow(hauling) }}, with {{ land.working }} of them
         out on the ground.
       </template>
+    </div>
+
+    <!-- A target below the standing count trims the workforce, one drone at a
+         time. Said out loud with a countdown, because a number quietly going
+         down on its own is the single most alarming thing an idle game can do
+         without explaining itself. -->
+    <div v-if="culling.over.length" class="notice is-warn">
+      <strong class="warn">Letting drones go.</strong>
+      {{ culling.over.map((o) => `${o.over} ${DRONE_TYPES[o.id].name}`).join(', ') }}
+      more than the targets allow — one every {{ culling.seconds }}s, next in
+      <strong>{{ Math.ceil(culling.next) }}s</strong>. Nothing is reclaimed from them.
     </div>
 
     <div v-if="idle > 0" class="notice is-warn">

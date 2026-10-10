@@ -1318,6 +1318,18 @@ textarea.save-box {
      right-hand column bleeds past its edge. */
   min-width: max(100%, 220px);
   max-width: min(420px, 90vw);
+  /* And never taller than the window. A resource with a dozen sources listed
+     builds an 800px tooltip, which no amount of sliding will fit on a 700px
+     screen — it simply hangs off the bottom and the rows below the fold cannot
+     be read at all. Capped here so tips.js can always place it.
+     NOT applied to a PINNED tooltip: `overflow` clips on both axes, and a
+     pinned body is the one case with its own nested tooltips opening beside
+     it — see .tip-body .tip below, and the same trap documented on .terr-map.
+     A pinned tooltip is deliberate, so it may hang and be scrolled to. */
+  /* 48px of sticky topbar plus a gutter at each end — see TOP_GUTTER in
+     game/tips.js, which slides tooltips against the same two numbers. */
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
   box-sizing: border-box;
   background: var(--bg-deep);
   border: 1px solid var(--border-bright);
@@ -1355,6 +1367,12 @@ textarea.save-box {
 .tip.tip-side > .tip-body {
   left: calc(100% + 10px);
   top: 0;
+  /* Belt and braces against the stretch bug: `.tip-above` sets `bottom`, and a
+     box with both `top` and `bottom` set and `height: auto` is stretched
+     between them rather than sized by its content. tips.js no longer puts both
+     classes on the same tooltip; this makes it harmless if anything ever does
+     again. */
+  bottom: auto;
   min-width: 240px;
 }
 
@@ -1395,6 +1413,10 @@ textarea.save-box {
   pointer-events: auto;
   border-color: var(--accent, var(--border-bright));
   z-index: 80;
+  /* See the cap on .tip > .tip-body: a pinned body must not clip, because its
+     nested tooltips open outside it. */
+  max-height: none;
+  overflow: visible;
   /* Pinned tooltips are read, not glanced at, and they have a nested panel
      opening beside them — give the rows room so nothing has to be guessed. */
   min-width: 300px;
@@ -1590,11 +1612,20 @@ textarea.save-box {
      small ones more than the large ones. */
   border: 1px solid var(--bg-deep);
   border-radius: 2px;
-  /* A holding a millionth the size of the biggest one is laid out at its true
-     (sub-pixel) size. This keeps it visible and hoverable without the layout
-     lying about its share. */
-  min-width: 3px;
-  min-height: 3px;
+  /* The 3px floor that keeps a sub-pixel holding visible and hoverable lives
+     in the inline style, NOT in a `min-height` here. It has to be clamped into the frame at the
+     same time it is applied — a `min-height` on a tile positioned by `top`
+     grows the bottom row downwards out of the map — and only the element that
+     knows its own position can do both. See `tiles` in TerritoryTab.vue. */
+}
+
+/* A tile too small for any label is too small for the padding that would hold
+   one. Padding is never shrunk by `box-sizing: border-box` — it is subtracted
+   from the content box, which simply bottoms out at zero — so 6px of vertical
+   padding is a hard 14px floor on the tile's height, five times the floor the
+   layout intends and enough to hang the bottom row below the map. */
+.terr-tile.is-sliver {
+  padding: 0;
 }
 
 .terr-tile:hover {

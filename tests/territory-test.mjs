@@ -512,6 +512,54 @@ check('the treemap draws one tile per holding', tab.tiles.length === tab.rows.le
 check('the tiles fill the frame, so no area is unaccounted for',
   Math.abs(tab.tileAreaSum - 1) < 0.04, `${(tab.tileAreaSum * 100).toFixed(1)}% of the frame covered`);
 check('shares add up to the whole', Math.abs(tab.shareSum - 100) <= 1, `${tab.shareSum}%`);
+
+/*
+ * AND NO TILE HANGS OUT OF THE MAP.
+ *
+ * A sliver lays out a fraction of a pixel and is given a floor so it stays
+ * visible and hoverable — but a floor applied to a tile positioned by `top`
+ * grows the bottom row DOWNWARDS, out of the frame and below the panel. It
+ * happened twice over: once from a `min-height` in the stylesheet, and once
+ * from the tile's own 6px of padding, which `box-sizing: border-box` never
+ * shrinks and which is therefore a hard 14px floor of its own.
+ *
+ * Driven at a brutal distribution — holdings four orders of magnitude apart —
+ * because at ordinary sizes every tile is comfortably above both floors and
+ * nothing is being tested.
+ */
+const bounds = await p.evaluate(async () => {
+  hive.state.territory = {
+    temperateForest: 5000, farmland: 4000, temperateGrassland: 3000, taiga: 2000,
+    wetland: 1000, industrial: 500, tropicalSavanna: 250, lightUrban: 100,
+    tropicalRainforest: 20, temperateRainforest: 10, denseUrban: 5, tundra: 2,
+    alpine: 1, desert: 0.3,
+  };
+  await new Promise((r) => { setTimeout(r, 300); });
+  const map = document.querySelector('.terr-map').getBoundingClientRect();
+  const tiles = [...document.querySelectorAll('.terr-tile')].map((el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      below: r.bottom - map.bottom,
+      right: r.right - map.right,
+      above: map.top - r.top,
+      left: map.left - r.left,
+      h: r.height,
+      w: r.width,
+    };
+  });
+  return {
+    count: tiles.length,
+    escaped: tiles.filter((t) => t.below > 0.5 || t.right > 0.5 || t.above > 0.5 || t.left > 0.5),
+    invisible: tiles.filter((t) => t.h < 2.5 || t.w < 2.5),
+    smallest: tiles.reduce((m, t) => Math.min(m, t.h, t.w), Infinity),
+  };
+});
+check('a brutal spread still draws every holding', bounds.count >= 12, `${bounds.count} tiles`);
+check('and not one of them escapes the map',
+  bounds.escaped.length === 0,
+  bounds.escaped.map((t) => `${t.below.toFixed(1)}px below`).join(', ') || 'all inside');
+check('while the smallest is still big enough to see and hover',
+  bounds.invisible.length === 0, `smallest side ${bounds.smallest.toFixed(1)}px`);
 checkOrPark('castes', 'it shows what each caste is out on', tab.outNow && tab.working > 0,
   `${tab.working} caste rows`);
 check('it shows what the ground offers', tab.offers > 10, `${tab.offers} entries listed`);

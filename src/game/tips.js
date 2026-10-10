@@ -97,15 +97,55 @@ export function pinHandlers(key) {
  * `mouseover` rather than `mouseenter`: mouseenter does not bubble, so it
  * cannot be delegated at all.
  */
+/**
+ * Room to leave above a tooltip that has been slid upwards.
+ *
+ * The topbar is sticky at 48px and sits in a HIGHER stacking context than the
+ * sidebar (30 against 20), so anything slid under it is painted over rather
+ * than merely close to it — and what gets hidden is the tooltip's own title,
+ * which is the one line naming the thing being described. Eight more for the
+ * usual breathing room.
+ */
+const TOP_GUTTER = 56;
+
 function flipIfClipped(el) {
   const body = el.querySelector(':scope > .tip-body');
   if (!body) return;
-  // Measure with the class off, so a tooltip that has already been flipped is
-  // re-judged from its natural position rather than from where the last
-  // decision put it.
+  // Measure with the class off and the slide cleared, so a tooltip that has
+  // already been moved is re-judged from its natural position rather than from
+  // where the last decision put it.
   el.classList.remove('tip-above');
+  body.style.removeProperty('top');
   const anchor = el.getBoundingClientRect();
   const height = body.offsetHeight;
+
+  /*
+   * A SIDE TOOLTIP SLIDES. IT DOES NOT FLIP.
+   *
+   * The sidebar's tooltips open BESIDE their row rather than below it, so there
+   * is no "other way" to flip to — and flipping them anyway was actively
+   * destructive. `.tip-above` sets `bottom`, `.tip-side` sets `top: 0`, they
+   * have identical specificity and `.tip-side` comes later in the stylesheet,
+   * so BOTH ended up applied: an absolutely positioned box with `top` and
+   * `bottom` both set and `height: auto` is stretched between them. Measured on
+   * the Magnesium row: a 16px-tall box holding 651px of content, which spilled
+   * out over the whole page with no background behind it and read exactly like
+   * the renderer had given up.
+   *
+   * So a side tooltip that would hang off the bottom is pulled UP by however
+   * much hangs off, and no further than the top of the window. It stays beside
+   * its row, which is the entire point of opening to the side.
+   */
+  if (el.classList.contains('tip-side')) {
+    const overflow = anchor.top + height + 8 - window.innerHeight;
+    if (overflow > 0) {
+      // Negative `top` lifts it. The clamp stops a tooltip taller than the
+      // window from being dragged up past its own heading.
+      body.style.top = `${Math.max(-overflow, TOP_GUTTER - anchor.top)}px`;
+    }
+    return;
+  }
+
   const roomBelow = window.innerHeight - anchor.bottom;
   // Only flip when there is genuinely more room the other way. A tooltip taller
   // than the whole window fits nowhere, and flipping it would move the part the

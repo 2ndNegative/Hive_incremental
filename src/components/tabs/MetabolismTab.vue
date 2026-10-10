@@ -150,16 +150,33 @@ function formatReserve(seconds) {
           <template v-if="derived.energy.fromPool > 1">
             {{ formatPower(derived.energy.fromPool) }} more is coming out of the reserve
           </template>
-          <template v-else-if="derived.energy.fromPool < -1">
-            banking {{ formatPower(-derived.energy.fromPool) }}
+          <template v-else-if="derived.energy.wasted > 1">
+            {{ formatPower(derived.energy.wasted) }} of it going nowhere
           </template>
           <template v-else>what the generators are making</template>
         </div>
       </div>
       <div class="stat-tile">
-        <div class="label">Reserve</div>
+        <div class="label">Fuel left</div>
         <div class="value">{{ formatReserve(reserveSeconds) }}</div>
         <div class="muted" style="font-size: 0.72rem">until the generators run dry</div>
+      </div>
+      <!-- THE RESERVE IS A GRANT, NOT A BATTERY. It is what the hive arrived
+           with, it only goes down, and nothing in the game refills it — power
+           made and not spent is lost. Worth a tile of its own precisely
+           because it is finite: a player watching it fall is watching a
+           one-time resource go. -->
+      <div class="stat-tile">
+        <div class="label">Reserve</div>
+        <div class="value" :class="derived.energy.fromPool > 1 ? 'warn' : ''">
+          {{ formatEnergy(derived.energy.pool) }}
+        </div>
+        <div class="muted" style="font-size: 0.72rem">
+          <template v-if="derived.energy.fromPool > 1">
+            draining at {{ formatPower(derived.energy.fromPool) }} — nothing refills it
+          </template>
+          <template v-else>what the hive landed with; spent is spent</template>
+        </div>
       </div>
     </div>
 

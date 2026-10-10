@@ -55,7 +55,13 @@ const tips = await p.evaluate(async () => {
     const r = body.getBoundingClientRect();
     out.push({
       name: el.innerText.split('\n')[0].slice(0, 18),
+      // Two ways a clipped tooltip is dealt with, and which one applies depends
+      // on where it opens. One below its row FLIPS above it; one beside its row
+      // has nowhere to flip to and is SLID up instead — see tips.js. Asserting
+      // the flip alone asserted the bug, because the sidebar's tooltips are all
+      // side ones and flipping them tore them open.
       flipped: el.classList.contains('tip-above'),
+      slid: parseFloat(body.style.top || '0') < -1,
       // 2px of slack for sub-pixel layout.
       onScreen: r.bottom <= window.innerHeight + 2 && r.top >= -2,
       taller: r.height > window.innerHeight,
@@ -71,9 +77,10 @@ const fits = tips.filter((t) => !t.taller);
 check('no tooltip opens off the edge of a short window',
   fits.every((t) => t.onScreen),
   fits.filter((t) => !t.onScreen).map((t) => t.name).join(', ') || `${fits.length} checked`);
-check('and the ones near the bottom are the ones that flipped',
-  tips.some((t) => t.flipped),
-  `${tips.filter((t) => t.flipped).length} of ${tips.length} flipped`);
+check('and the ones that would not have fitted were moved to make them fit',
+  tips.some((t) => t.flipped || t.slid),
+  `${tips.filter((t) => t.flipped).length} flipped, ${tips.filter((t) => t.slid).length} slid,`
+  + ` of ${tips.length}`);
 
 /* ============================ 2. the energy figures add up, and say so */
 
@@ -100,7 +107,7 @@ const energy = await p.evaluate(() => {
 check('delivered never exceeds demand', energy.delivered <= energy.demand + 1e-6,
   `${Math.round(energy.delivered)} vs ${Math.round(energy.demand)} W`);
 check('fromPool is exactly the gap between delivered and generated',
-  Math.abs(energy.fromPool - (energy.delivered - energy.generated)) < 1e-6,
+  Math.abs(energy.fromPool - Math.max(0, energy.delivered - energy.generated)) < 1e-6,
   `${Math.round(energy.fromPool)} W out of the reserve`);
 check('the figure that was mislabelled "Ceiling" is gone from derived',
   energy.hasFakeCeiling === false,
@@ -181,6 +188,132 @@ const survives = await p.evaluate(() => {
 });
 check('the queue round-trips through a save',
   Array.isArray(survives) && survives.length === 1, JSON.stringify(survives));
+
+/* ============ 1b. a SIDE tooltip slides; it must never be flipped */
+
+/*
+ * THE WORST OF THE THREE, and the one that looked like the renderer giving up.
+ *
+ * The sidebar's tooltips open BESIDE their row, so there is no "other way" to
+ * flip to — but the flip was applied anyway. `.tip-above` sets `bottom`,
+ * `.tip-side` sets `top: 0`, they have identical specificity and `.tip-side`
+ * comes later in the stylesheet, so BOTH won: an absolutely positioned box with
+ * `top` and `bottom` set and `height: auto` is stretched between them. Measured
+ * on the Magnesium row: a 16px-tall box holding 651px of content, which spilled
+ * across the whole page with no background behind it.
+ *
+ * Checked at a SHORT window, because at 1000px every sidebar tooltip fits below
+ * its row and none of this is exercised.
+ */
+await p.setViewportSize({ width: 1340, height: 700 });
+await p.evaluate(() => {
+  const s = hive.state;
+  // A hive with a lot coming in, so the "where it comes from" lists are long
+  // enough to overflow the window — which is the whole precondition.
+  s.territory = { temperateForest: 400, farmland: 200, wetland: 100 };
+  s.droneTypes = { forager: 30, scavenger: 10 };
+  s.tech = { glycolysis: true, lipolysis: true, bulkMineralAssay: true, traceMetalAssay: true };
+  s.structures = { hivecore: 1, caecum: 2, metabolicGenerator: 3 };
+  s.active = { ...s.structures };
+  s.power = Object.fromEntries(Object.keys(s.structures).map((k) => [k, 1]));
+  for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 3000;
+  for (let i = 0; i < 40; i += 1) hive.tick(1);
+});
+await p.waitForTimeout(250);
+
+const sideTips = [];
+const sideRows = await p.$$('.res-row.tip');
+for (let i = 0; i < sideRows.length; i += 1) {
+  await sideRows[i].hover();
+  await p.waitForTimeout(40);
+  sideTips.push(await p.evaluate((idx) => {
+    const el = document.querySelectorAll('.res-row.tip')[idx];
+    const body = el.querySelector(':scope > .tip-body');
+    const r = body.getBoundingClientRect();
+    return {
+      name: el.innerText.split('\n')[0].slice(0, 14),
+      side: el.classList.contains('tip-side'),
+      above: el.classList.contains('tip-above'),
+      // Stretched between `top` and `bottom`: the box is far shorter than what
+      // it holds, and the remainder is painted outside it.
+      stretched: body.scrollHeight > body.clientHeight + 2 && body.clientHeight < 60,
+      below: r.bottom - window.innerHeight,
+      // 48px of sticky topbar paints OVER a tooltip slid under it, taking the
+      // title with it — see TOP_GUTTER in tips.js.
+      underTopbar: 48 - r.top,
+    };
+  }, i));
+}
+
+const side = sideTips.filter((t) => t.side);
+check('the sidebar opens its tooltips to the side', side.length > 6,
+  `${side.length} of ${sideTips.length} rows`);
+check('and never flips one, because there is nothing to flip to',
+  side.every((t) => !t.above), side.filter((t) => t.above).map((t) => t.name).join(', '));
+check('so none of them is stretched into a strip with its content outside it',
+  side.every((t) => !t.stretched), side.filter((t) => t.stretched).map((t) => t.name).join(', '));
+check('a tall one is slid up to fit rather than hanging off the bottom',
+  side.every((t) => t.below <= 1),
+  side.filter((t) => t.below > 1).map((t) => `${t.name} ${t.below.toFixed(0)}px`).join(', '));
+check('and not so far up that the topbar eats its title',
+  side.every((t) => t.underTopbar <= 1),
+  side.filter((t) => t.underTopbar > 1).map((t) => t.name).join(', '));
+
+await p.setViewportSize({ width: 1340, height: 560 });
+await p.waitForTimeout(200);
+
+/* ===================== 3b. the reserve drains and never fills */
+
+/*
+ * It used to be a two-way bank: anything the generators made over demand was
+ * quietly banked, so a hive with spare capacity accumulated a buffer it had
+ * never built anything to hold. The energy a run starts with is a grant, and
+ * until an energy storage building exists, surplus goes nowhere.
+ */
+const reserve = await p.evaluate(() => {
+  const s = hive.state;
+  s.tech = { glycolysis: true, lipolysis: true };
+  s.structures = { metabolicGenerator: 4 }; // makers, almost nothing to pay
+  s.active = { ...s.structures };
+  s.power = Object.fromEntries(Object.keys(s.structures).map((k) => [k, 1]));
+  s.droneTypes = {};
+  s.larvae = 0;
+  for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 100_000;
+  s.energyPool = 500_000;
+  const surplus = hive.derived().energy;
+  const start = s.energyPool;
+  for (let i = 0; i < 60; i += 1) hive.tick(1);
+  const afterSurplus = s.energyPool;
+
+  // Now make it spend more than it makes, and watch the grant go.
+  s.structures.hivecore = 4;
+  s.active = { ...s.structures };
+  s.power = Object.fromEntries(Object.keys(s.structures).map((k) => [k, 1]));
+  const drawing = hive.derived().energy;
+  for (let i = 0; i < 30; i += 1) hive.tick(1);
+  return {
+    generated: surplus.generated,
+    demand: surplus.demand,
+    wasted: surplus.wasted,
+    start,
+    afterSurplus,
+    fromPool: drawing.fromPool,
+    afterDraw: s.energyPool,
+  };
+});
+
+check('a hive generating more than it spends banks none of it',
+  reserve.generated > reserve.demand && reserve.afterSurplus === reserve.start,
+  `${Math.round(reserve.generated)} W made against ${Math.round(reserve.demand)} W demand,`
+  + ` reserve still ${Math.round(reserve.afterSurplus)} J`);
+check('and the surplus is reported as thrown away rather than silently dropped',
+  Math.abs(reserve.wasted - (reserve.generated - reserve.demand)) < 1e-6,
+  `${Math.round(reserve.wasted)} W going nowhere`);
+check('while a hive spending more than it makes drains the grant',
+  reserve.fromPool > 0 && reserve.afterDraw < reserve.afterSurplus,
+  `${Math.round(reserve.afterSurplus)} → ${Math.round(reserve.afterDraw)} J`);
+check('and fromPool is never negative, because there is no banking to report',
+  reserve.fromPool >= 0 && reserve.wasted >= 0);
 
 /* ============================ 4. the "Out now" panel says one thing once */
 

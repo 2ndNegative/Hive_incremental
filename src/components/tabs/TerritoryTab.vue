@@ -106,6 +106,12 @@ const tiles = computed(() =>
       finds: topFinds(biomeId),
       roomForName,
       roomForFigure,
+      // Too small for any label at all — and therefore too small for the
+      // padding that holds one. `box-sizing: border-box` shrinks the CONTENT
+      // box, never the padding, so a tile with 6px of vertical padding has a
+      // floor of 14px however small the layout says it is. That floor, not the
+      // 3px one, is what pushed the bottom row out of the map.
+      sliver: !roomForName && !roomForFigure,
       // A tooltip on a tile at the right-hand edge of the map opens off the
       // side of the window — and the tiles at that edge are the smallest ones,
       // which are exactly the ones a player needs the tooltip to read. So the
@@ -113,11 +119,24 @@ const tiles = computed(() =>
       tipRight: t.x + t.w > FRAME.w * 0.5,
       ink: needsLightText(def.colour) ? '#eef1f5' : '#0f1113',
       inkDim: needsLightText(def.colour) ? 'rgba(238,241,245,0.78)' : 'rgba(15,17,19,0.74)',
+      // THE MINIMUM SIZE IS CLAMPED INTO THE FRAME, not just applied.
+      //
+      // A sliver — 0.7 m² of desert against 464 m² of everything else — lays
+      // out a fraction of a pixel tall, and a floor of 3px is what keeps it
+      // visible and hoverable. But the floor used to be a `min-height` in the
+      // stylesheet applied to a tile positioned by `top`, so the last tile in
+      // the bottom row grew DOWNWARDS out of the map and hung below the panel.
+      //
+      // Done here in `min()`/`max()` rather than in the stylesheet because the
+      // clamp needs both numbers at once: the floor is in pixels, the position
+      // is a percentage, and only the browser knows how many pixels a percent
+      // is. `overflow: hidden` is not the fix — see the note on .terr-map;
+      // it would take the tooltips with it.
       style: {
-        left: `${(t.x / FRAME.w) * 100}%`,
-        top: `${(t.y / FRAME.h) * 100}%`,
-        width: `${(t.w / FRAME.w) * 100}%`,
-        height: `${(t.h / FRAME.h) * 100}%`,
+        left: `min(${(t.x / FRAME.w) * 100}%, calc(100% - max(3px, ${(t.w / FRAME.w) * 100}%)))`,
+        top: `min(${(t.y / FRAME.h) * 100}%, calc(100% - max(3px, ${(t.h / FRAME.h) * 100}%)))`,
+        width: `max(3px, ${(t.w / FRAME.w) * 100}%)`,
+        height: `max(3px, ${(t.h / FRAME.h) * 100}%)`,
         // `backgroundColor`, never the `background` shorthand: the shorthand
         // resets `background-image`, and an inline style beats the stylesheet,
         // so it would silently wipe the hatching off every unclaimed tile.
@@ -532,6 +551,7 @@ const claimValue = computed(() => {
               'is-unclaimed': t.unclaimed,
               'is-blocked': Boolean(t.blocked),
               'is-dangerous': t.dangerous,
+              'is-sliver': t.sliver,
             }"
             :style="t.style"
             :role="t.unclaimed ? 'button' : null"

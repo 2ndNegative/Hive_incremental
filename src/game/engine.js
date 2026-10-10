@@ -87,6 +87,8 @@ import {
   DRONE_TYPES,
   DRONE_TYPE_ORDER,
   nextMoldable,
+  overTarget,
+  CULL_SECONDS,
   foragingTypes,
   exploringTypes,
 } from './definitions/drones.js';
@@ -1252,7 +1254,27 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   const wantedJoules = totalDemand * dt;
   const drawnJoules = Math.min(wantedJoules, availableJoules);
   const deliveredWatts = dt > EPSILON ? drawnJoules / dt : 0;
-  const poolAfter = availableJoules - drawnJoules;
+
+  // THE RESERVE ONLY EVER GOES DOWN.
+  //
+  // It used to be a two-way bank: anything the generators made over and above
+  // demand was banked, so a hive with spare capacity quietly accumulated a
+  // buffer it had never built anything to hold. The energy a run starts with is
+  // a GRANT — what the hive arrived with — and once it is spent it is spent.
+  // Nothing in the game stores electricity yet, and until something does, power
+  // the hive makes and does not use goes nowhere.
+  //
+  // `Math.min(banked, …)` is the whole of it: a step that generates more than
+  // it spends leaves the reserve exactly where it was, and a step that
+  // generates less draws the difference out of it.
+  //
+  // When an energy storage building lands, this is the line it changes: the
+  // clamp becomes the capacity that building provides rather than the reserve's
+  // own current level.
+  const poolAfter = Math.min(banked, availableJoules - drawnJoules);
+  // Generated, not needed, and nowhere to put it. Zero whenever the hive is
+  // drawing on the reserve.
+  const wastedWatts = dt > EPSILON ? Math.max(0, generatedWatts - deliveredWatts) : 0;
 
   // Consumers are fed in `demands` order out of what was drawn, so basal
   // metabolism is satisfied before the workforce — the hive keeps itself alive
@@ -1841,9 +1863,12 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
       // and looked like broken arithmetic. See `fromPool` below.
       generated: generatedWatts,
       massRate,
-      // Positive: this much of what was delivered came out of the bank rather
-      // than out of a generator. Negative: the bank is filling.
-      fromPool: deliveredWatts - generatedWatts,
+      // This much of what was delivered came out of the reserve rather than out
+      // of a generator. Never negative: a surplus is not banked, it is lost —
+      // see the clamp on `poolAfter`.
+      fromPool: Math.max(0, deliveredWatts - generatedWatts),
+      // And this much was made and thrown away, for want of anywhere to put it.
+      wasted: wastedWatts,
       throughputRatio,
       // Usable energy banked, after this step's generation and draw.
       pool: poolAfter,
@@ -1860,6 +1885,13 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
     brood,
     broodRate,
     molding,
+    // Who the hive is letting go, and when the next one goes. `over` is empty
+    // whenever every type is at or under its target, which is the normal case.
+    culling: {
+      over: overTarget(state),
+      seconds: CULL_SECONDS,
+      next: Math.max(0, CULL_SECONDS - (state.cull || 0)),
+    },
     moldRate,
     moldTarget,
     larvae: {
@@ -2373,6 +2405,53 @@ export function tick(state, dt) {
         free -= DRONE_TYPES[makes].cogitDraw || 0;
       }
       state.molding[m.id] = progress;
+    }
+  }
+
+  /* -- and the other direction: letting drones go ---------------------------- */
+
+  // A TARGET NOW CUTS BOTH WAYS. It used to be a ceiling on molding and nothing
+  // else, so a hive that had pressed forty foragers kept forty forever however
+  // low the number went afterwards — the only control over a workforce ran one
+  // way, and the way it ran was up.
+  //
+  // One drone every CULL_SECONDS, re-reading who is furthest over each time, so
+  // two types brought down together are trimmed alternately rather than one
+  // being emptied before the other is touched.
+  //
+  // THE CLOCK RESETS WHEN NOBODY IS OVER. Without that, a hive that had been
+  // sitting at its target for an hour would bank an hour of cull time and kill
+  // the first drone the instant a target was nudged down — and nudging one down
+  // and back up is something a player does while thinking.
+  state.cull ??= 0;
+  if (!overTarget(state).length) {
+    state.cull = 0;
+  } else {
+    state.cull += dt;
+    let due = Math.floor(state.cull / CULL_SECONDS);
+    if (due > 0) {
+      state.cull -= due * CULL_SECONDS;
+      // Capped at the overage so offline catch-up — which can hand this a tick
+      // of several hours — walks the list once rather than spinning through
+      // thousands of iterations that have nothing left to take.
+      due = Math.min(due, overTarget(state).reduce((a, x) => a + x.over, 0));
+      const gone = {};
+      while (due > 0) {
+        const [worst] = overTarget(state);
+        if (!worst) break;
+        state.droneTypes[worst.id] = Math.max(0, (state.droneTypes[worst.id] || 0) - 1);
+        state.stats.culled = (state.stats.culled || 0) + 1;
+        gone[worst.id] = (gone[worst.id] || 0) + 1;
+        due -= 1;
+      }
+      // One line per tick rather than one per drone: an offline catch-up that
+      // trims eighty of them should not push eighty lines and bury everything
+      // else that happened while the player was away.
+      for (const [id, n] of Object.entries(gone)) {
+        log(state, `Let ${n} ${DRONE_TYPES[id].name}${n === 1 ? '' : 's'} go.`, 'warn');
+      }
+      // Nothing is reclaimed. The matter in a drone is simply gone, which is a
+      // placeholder and not a design: see the note in DESIGN.md.
     }
   }
 

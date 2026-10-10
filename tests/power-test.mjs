@@ -140,6 +140,7 @@ check('the fade takes thirty seconds', BROWNOUT === 30, `${BROWNOUT}s`);
 const curve = await p.evaluate(() => {
   // Driven by hand with the loop stopped, so the sample points are exact:
   // seven and a half seconds of simulation is a quarter of the charge.
+  // Deliberately NOT refuelled — this one is the fade to dark.
   const out = [];
   for (let step = 0; step < 4; step += 1) {
     out.push(hive.derived().power.hivecore.charge);
@@ -196,23 +197,52 @@ check('and it metabolises at its full rate', scaled.massRate === 30, `${scaled.m
 
 /* ======================================================= 1b. recovery is linear */
 
+/*
+ * SELF-CONTAINED, deliberately. This used to inherit whatever the two sections
+ * above had left behind — emptied stores, `state.active` still reading
+ * `{ hivecore: 1 }` so the four hundred generators it set were never switched
+ * on, and no metabolism tech to open a store with. Generation was flatly zero,
+ * and what the check was actually watching climb was the old two-way energy
+ * bank feeding the core out of a surplus accumulated earlier in the run. The
+ * bank is gone — a reserve only ever drains now — and the fixture had nothing
+ * left to stand on.
+ */
 const back = await p.evaluate(() => {
   const s = hive.state;
-  // Enough generators to cover a megawatt several times over.
-  s.structures.metabolicGenerator = 400;
-  s.power.hivecore = 0;
+  s.tech = { ...s.tech, glycolysis: true, lipolysis: true };
+  // FOUR, not four hundred. A generator makes about 324 kW, so four cover the
+  // core's 50 kW several times over — and four hundred cannot be FED: they want
+  // twelve kilos of fuel a second out of a larder that caps around two, so
+  // generation collapses the moment the shelf is drained. That used not to
+  // matter, because the shortfall came out of the banked surplus. There is no
+  // bank any more, so the fixture has to be physically possible.
+  s.structures = { hivecore: 1, metabolicGenerator: 4 };
+  s.active = { ...s.structures };
+  s.power = { hivecore: 0, metabolicGenerator: 1 };
+  s.energyPool = 0; // nothing banked: every watt below is made this step
+  const fuel = () => { s.nutrients.carb = 5e5; s.nutrients.fat = 5e5; };
+
   const out = [];
   for (let step = 0; step < 4; step += 1) {
+    fuel();
     out.push(hive.derived().power.hivecore.charge);
     hive.tick(7.5);
   }
-  out.push(hive.derived().power.hivecore.charge);
+  fuel();
+  const d = hive.derived();
+  out.push(d.power.hivecore.charge);
   return {
     curve: out,
-    direction: hive.derived().power.hivecore.direction,
-    cogits: hive.derived().cognition.capacity,
+    direction: d.power.hivecore.direction,
+    cogits: d.cognition.capacity,
+    generated: d.energy.generated,
+    pool: s.energyPool,
   };
 });
+
+check('nothing is banked, so the recovery is paid for as it happens',
+  back.pool === 0 && back.generated > 0,
+  `${Math.round(back.generated)} W generated, ${Math.round(back.pool)} J in reserve`);
 check('power restored climbs back in a straight line',
   back.curve.every((c, i) => Math.abs(c - Math.min(1, i * 0.25)) < 1e-9),
   back.curve.map((c) => c.toFixed(2)).join(' → '));
