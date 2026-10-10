@@ -487,6 +487,104 @@ const filled = await readField();
 check('fill sets it to what the ground carries, overriding what was typed',
   filled.state === 30 && filled.field === '30', `${filled.state} on 120 m² at 4 m² each`);
 
+/*
+ * ================= 5b. THE GRID'S TOOLTIPS, which broke in three ways at once
+ *
+ * All three were invisible until the grid existed, and all three looked like
+ * something else:
+ *
+ *   — `overflow-x: auto` on the scroller drags `overflow-y` to `auto` with it,
+ *     so the panel clipped every tooltip in its lower rows AND grew a vertical
+ *     scrollbar out of the hidden ones parked below their rows.
+ *   — `opacity: 0.5` on a disabled fill button applied to the tooltip INSIDE
+ *     it and created a stacking context, so it came out half transparent with
+ *     the table painted over the top — which reads exactly like a z-index bug.
+ *   — a sentence in the figure half of a label-and-figure row wrapped against
+ *     a label that was also wrapping, and the two interleaved.
+ */
+
+// Ground promised to four times what it carries, which is the tooltip that
+// carries the sentence, and a type with no room, which is the disabled button.
+await p.evaluate(() => {
+  const s = hive.state;
+  s.territory = { temperateForest: 53.7, farmland: 4.5, taiga: 4.2 };
+  s.droneTypes = { forager: 20, scavenger: 0 };
+  s.assign = { temperateForest: { forager: 13 }, farmland: { forager: 4 } };
+});
+await p.waitForTimeout(260);
+
+const atRest = await p.evaluate(() => {
+  const sc = document.querySelector('.assign-scroll');
+  return { over: sc.scrollHeight - sc.clientHeight, wide: sc.scrollWidth - sc.clientWidth };
+});
+check('the grid does not scroll vertically on tooltips nobody is looking at',
+  atRest.over <= 0, `${atRest.over}px of phantom scroll height`);
+
+/** Hover a tip and report where its body actually landed. */
+const tipAt = async (handle) => {
+  await p.mouse.move(4, 4);
+  await handle.hover();
+  await p.waitForTimeout(220);
+  return p.evaluate(() => {
+    const el = document.querySelector('.assign-grid .tip:hover')
+      || [...document.querySelectorAll('.assign-grid .tip')].find(
+        (n) => getComputedStyle(n.querySelector(':scope > .tip-body')).visibility === 'visible',
+      );
+    const body = el.querySelector(':scope > .tip-body');
+    const b = body.getBoundingClientRect();
+    // Anything between the tooltip and the panel that fades it, and so takes
+    // it out of the panel's stacking order along the way.
+    let faded = null;
+    for (let n = body.parentElement; n && !n.classList.contains('panel-box'); n = n.parentElement) {
+      const o = Number(getComputedStyle(n).opacity);
+      if (o < 1) faded = `${n.className.toString().slice(0, 30)} @ ${o}`;
+    }
+    return {
+      position: getComputedStyle(body).position,
+      inWindow: b.top >= 0 && b.bottom <= window.innerHeight
+        && b.left >= 0 && b.right <= window.innerWidth,
+      faded,
+      // A figure that wraps is a figure sharing its lines with a label that is
+      // also wrapping. Prose belongs in .tip-note, on a line of its own.
+      wrappedFigures: [...body.querySelectorAll('.tip-row')].filter((row) => {
+        const fig = row.lastElementChild;
+        const line = parseFloat(getComputedStyle(row).lineHeight) || 16;
+        return fig && fig.getBoundingClientRect().height > line * 1.5;
+      }).length,
+      rows: body.querySelectorAll('.tip-row').length,
+    };
+  });
+};
+
+// A DISABLED cap: scavengers on 4.2 m² of taiga, which carries none of them.
+const dead = await p.$('.assign-grid tbody .assign-cap:disabled');
+const deadTip = await tipAt(dead);
+check('a tooltip in the grid is placed against the window, so the panel cannot clip it',
+  deadTip.position === 'fixed' && deadTip.inWindow, JSON.stringify(deadTip));
+check('and a disabled button does not fade the tooltip inside it',
+  deadTip.faded === null, `faded by ${deadTip.faded}`);
+
+// The over-committed meter, whose tooltip has to explain the squeeze in words.
+const meter = (await p.$$('.assign-grid .assign-meter'))[1];
+const meterTip = await tipAt(meter);
+check('the committed tooltip keeps its figures on one line each',
+  meterTip.rows > 0 && meterTip.wrappedFigures === 0,
+  `${meterTip.wrappedFigures} of ${meterTip.rows} figures wrapped`);
+check('and says the rest as a sentence of its own',
+  await p.evaluate(() => {
+    const n = [...document.querySelectorAll('.assign-grid .tip-note')]
+      .find((x) => /works .*% of the ground/.test(x.innerText));
+    return Boolean(n) && n.getBoundingClientRect().width > 200;
+  }));
+
+// Back to the single biome the rest of this section was written against.
+await p.evaluate(() => {
+  hive.state.territory = { temperateForest: 120 };
+  hive.state.droneTypes = { forager: 10, scavenger: 4 };
+});
+await p.mouse.move(4, 4);
+await p.waitForTimeout(260);
+
 
 
 // Back to nobody assigned, so the claim preview below is not reading a hive

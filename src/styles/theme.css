@@ -1395,9 +1395,43 @@ textarea.save-box {
 .tip-body .tip-row {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 1rem;
   font-family: var(--mono);
   font-size: 0.74rem;
+}
+
+/*
+ * A ROW IS A LABEL AND A FIGURE. The figure keeps the right-hand edge and the
+ * label gives way, because when BOTH halves wrap they interleave — the second
+ * line of the label sits beside the second line of the value — and the row
+ * stops being readable as either one. "So everyone gets / 28% of the room they
+ * asked for" was the case that showed it: a sentence in the figure's slot.
+ *
+ * Which is the real lesson. This keeps the damage contained, but prose belongs
+ * on a line of its own; that is what .tip-note is for.
+ */
+.tip-body .tip-row > :last-child {
+  flex: 0 1 auto;
+  text-align: right;
+}
+
+.tip-body .tip-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A sentence inside a tooltip, rather than a label-and-figure row: full width,
+   dimmer than the figures, and in the body font because it is to be read. */
+.tip-body .tip-note {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.tip-body .tip-note.bad {
+  color: var(--bad);
 }
 
 /* ------------------------------------------------------------ pinned tooltips */
@@ -1793,6 +1827,23 @@ textarea.save-box {
   overflow-x: auto;
 }
 
+/*
+ * ...BUT A SCROLLING PANEL CLIPS, and `overflow-x: auto` drags `overflow-y`
+ * to `auto` with it — the two axes cannot disagree about whether they scroll.
+ * So the rule above cost two bugs at once: tooltips in the grid's lower rows
+ * were cropped by the panel's bottom edge while sitting well clear of the
+ * window's, and the panel grew a vertical scrollbar out of two dozen HIDDEN
+ * tooltips parked below their rows, each one adding to its scroll height.
+ *
+ * Taking them out of the flow fixes both: a fixed box is laid out against the
+ * window, so nothing here can clip it and it adds nothing to anyone's
+ * scrollable area. The coordinates come from placeAgainstWindow in
+ * game/tips.js, since `top: 100%` now means the foot of the window.
+ */
+.assign-scroll .tip > .tip-body {
+  position: fixed;
+}
+
 .assign-grid {
   width: 100%;
   border-collapse: collapse;
@@ -2012,6 +2063,22 @@ textarea.save-box {
 
 .assign-cap:disabled {
   cursor: default;
+}
+
+/*
+ * THE DIMMING GOES ON THE FIGURE, NOT THE BUTTON.
+ *
+ * `opacity` below 1 does two things people forget: it applies to every
+ * descendant, and it creates a stacking context. On the button, that meant the
+ * TOOLTIP inside it came out half transparent with the table painted over the
+ * top of it — unreadable, and it looked for all the world like a z-index bug.
+ * A disabled cap is the commonest kind (every pairing with no room has one), so
+ * this was most of the tooltips in the grid.
+ *
+ * Opacity rather than a dimmer colour because the cap keeps its tone: ground
+ * that offers a route nothing stays red, just inert.
+ */
+.assign-cap:disabled .assign-cap-n {
   opacity: 0.5;
 }
 
@@ -2025,10 +2092,12 @@ textarea.save-box {
   font-size: 0.74rem;
 }
 
-.assign-grid td:nth-last-child(-n + 2) .tip-body.tip-cell {
-  left: auto;
-  right: 0;
-}
+/* The trailing columns used to need their own right-alignment so a tooltip
+   could not run off the panel. placeAgainstWindow clamps every tip in this
+   grid against the WINDOW now, which is right in the cases that rule got
+   wrong, and a stray `right` alongside the `left` it sets would over-constrain
+   the box and stretch it to the screen edge. So the rule is gone rather than
+   left to fight the JS. */
 
 .assign-legend {
   display: flex;

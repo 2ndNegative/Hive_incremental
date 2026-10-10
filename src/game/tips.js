@@ -108,6 +108,64 @@ export function pinHandlers(key) {
  */
 const TOP_GUTTER = 56;
 
+/** Clearance from the window's own edges, and from the thing being described. */
+const EDGE = 8;
+const GAP = 4;
+
+/*
+ * A TOOLTIP INSIDE A SCROLLING PANEL IS PLACED AGAINST THE WINDOW.
+ *
+ * `overflow-x: auto` computes `overflow-y` to `auto` as well — the two axes
+ * cannot disagree about whether they scroll — so the moment a panel is allowed
+ * to scroll sideways it also clips. That cost the assignment grid two bugs at
+ * once: every tooltip in its lower rows was cropped by the panel's bottom edge
+ * (fifty-five pixels of it, while sitting a hundred and ninety clear of the
+ * window), and the panel grew a vertical scrollbar nobody asked for, because
+ * two dozen hidden tooltips were parked below their rows adding to its scroll
+ * height.
+ *
+ * Fixed positioning answers both. A fixed box is laid out against the window,
+ * so no ancestor's overflow can clip it and it contributes nothing to anyone's
+ * scrollable area. The price is that the stylesheet can no longer place it —
+ * `top: 100%` means the bottom of the WINDOW once the containing block is the
+ * viewport — so the coordinates are worked out here instead. The stylesheet
+ * opts a panel in; see `.assign-scroll .tip > .tip-body`.
+ *
+ * `right` and `bottom` are cleared explicitly. The rules that set them are for
+ * absolute positioning and would otherwise survive alongside the `left` set
+ * here, which over-constrains the box and stretches it to the window's edge.
+ *
+ * A fixed tooltip does not follow its row if the page scrolls underneath it,
+ * so nothing opted in here offers pinning: an unpinned tooltip closes the
+ * moment the pointer leaves, which is long before that can be noticed.
+ */
+function placeAgainstWindow(body, anchor) {
+  body.style.right = 'auto';
+  body.style.bottom = 'auto';
+
+  const { offsetWidth: width, offsetHeight: height } = body;
+
+  // Below unless below does not fit and above does — the same judgement
+  // `.tip-above` encodes, made in numbers because the class cannot be.
+  const below = anchor.bottom + GAP;
+  const above = anchor.top - GAP - height;
+  const fitsBelow = below + height + EDGE <= window.innerHeight;
+  const top = !fitsBelow && above >= TOP_GUTTER
+    ? above
+    // Taller than the room either way: sit it as low as it can go and let the
+    // body's own `overflow-y` carry the rest, rather than hanging off an edge.
+    : Math.max(TOP_GUTTER, Math.min(below, window.innerHeight - EDGE - height));
+
+  // Left-aligned with what it describes, pulled back when that would run it off
+  // the right-hand edge — which is what the trailing columns used to need a
+  // rule of their own for, and this clamps against the window rather than the
+  // panel, so it is right in cases that rule got wrong.
+  const left = Math.max(EDGE, Math.min(anchor.left, window.innerWidth - EDGE - width));
+
+  body.style.left = `${left}px`;
+  body.style.top = `${top}px`;
+}
+
 function flipIfClipped(el) {
   const body = el.querySelector(':scope > .tip-body');
   if (!body) return;
@@ -117,6 +175,16 @@ function flipIfClipped(el) {
   el.classList.remove('tip-above');
   body.style.removeProperty('top');
   const anchor = el.getBoundingClientRect();
+
+  // A tooltip the stylesheet has taken out of the flow is placed from here
+  // instead — see placeAgainstWindow. Checked before anything else, because
+  // neither the flip nor the slide below means anything once the containing
+  // block is the window rather than the row.
+  if (getComputedStyle(body).position === 'fixed') {
+    placeAgainstWindow(body, anchor);
+    return;
+  }
+
   const height = body.offsetHeight;
 
   /*

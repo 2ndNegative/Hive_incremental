@@ -1089,7 +1089,7 @@ const claimValue = computed(() => {
                     :disabled="!r.offers || r.room < 1"
                     :aria-label="`Fill ${b.def.name} with ${r.room} ${r.name.toLowerCase()}s`"
                     @click="fill(b.biomeId, r.droneId)"
-                  >/{{ r.room }}<span class="tip-body tip-cell">
+                  ><span class="assign-cap-n">/{{ r.room }}</span><span class="tip-body tip-cell">
                     <span class="tip-title">{{ r.name }} · {{ b.def.name }}</span>
                     <template v-if="r.offers">
                       <span class="tip-row">
@@ -1116,18 +1116,22 @@ const claimValue = computed(() => {
                         </span>
                       </span>
                       <span v-else-if="r.drones > 0" class="tip-row">
-                        <span>Here without a target</span>
-                        <span>{{ r.drones }} spread by area</span>
+                        <span>Spread here by area, untargeted</span>
+                        <span>{{ r.drones }}</span>
                       </span>
                       <span v-if="r.rate > 0" class="tip-row">
                         <span>Bringing in</span>
                         <span class="good">{{ formatMassFlow(r.rate) }}</span>
                       </span>
-                      <span class="muted" style="display: block; margin-top: 0.3rem">
+                      <!-- Only where the button does something. "Click to fill
+                           this ground to 0" is an instruction to press a
+                           control that is disabled precisely because there is
+                           nothing to fill. -->
+                      <span v-if="r.room >= 1" class="tip-note">
                         Click to fill this ground to {{ r.room }}.
                       </span>
                     </template>
-                    <span v-else class="bad" style="display: block">
+                    <span v-else class="tip-note bad">
                       This ground offers the {{ r.name.toLowerCase() }} route nothing at all. A
                       drone sent here walks out, finds nothing and walks back, every trip.
                     </span>
@@ -1153,16 +1157,21 @@ const claimValue = computed(() => {
                       <span class="bad">Promised to more than it carries</span>
                       <span class="bad">{{ (b.claimed * 100).toFixed(0) }}%</span>
                     </span>
-                    <span v-if="b.claimed > 1" class="tip-row">
-                      <span>So everyone gets</span>
-                      <span>{{ (b.planSqueeze * 100).toFixed(0) }}% of the room they asked for</span>
-                    </span>
                     <span v-else class="tip-row">
                       <span>Ground the plan has spoken for</span>
                       <span>{{ (b.claimed * 100).toFixed(0) }}%</span>
                     </span>
                     <span class="tip-row">
                       <span>Drones standing on it</span><span>{{ b.drones }}</span>
+                    </span>
+                    <!-- A SENTENCE, SO A LINE OF ITS OWN. It was the value half
+                         of a label-and-figure row, where it wrapped against a
+                         label that was also wrapping and the two interleaved
+                         into something that read like a rendering fault. -->
+                    <span v-if="b.claimed > 1" class="tip-note">
+                      Everyone on it works
+                      {{ (b.planSqueeze * 100).toFixed(0) }}% of the ground they were
+                      promised.
                     </span>
                   </span>
                 </span>
