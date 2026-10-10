@@ -275,14 +275,71 @@ check('and says how much room each has', assign.saysRoom);
 check('with who is standing there right now beside the target',
   assign.now.length === 2 && assign.now.some((n) => Number(n) > 0), assign.now.join(' / '));
 
+/*
+ * A NUMBER FIELD YOU CAN ACTUALLY TYPE IN.
+ *
+ * Twice now: the Drones tab's molding target jittered, and the Territory tab's
+ * assignment target sat at zero however much was typed into it. Same cause —
+ * these tabs re-render ten times a second and Vue puts the bound value back
+ * between keystrokes — and the same fix, now shared as `useDrafts`.
+ *
+ * Driven through the real keyboard rather than by dispatching events, because
+ * the bug lives in the gap between what the DOM holds and what the render
+ * binds, and a synthetic `input` event does not reproduce it.
+ */
+const row = async (n) => p.evaluate((i) => {
+  const who = [...document.querySelectorAll('.panel-box')]
+    .find((b) => /^who works what/i.test(b.innerText));
+  const r = who.querySelectorAll('.assign-row')[0];
+  r.querySelectorAll('.btn-mini')[i].click();
+}, n);
+const readField = () => p.evaluate(() => ({
+  field: document.querySelector('.assign-input').value,
+  state: hive.state.assign?.temperateForest?.forager ?? 0,
+}));
+
+await (await p.$('.assign-input')).click();
+await p.keyboard.type('12', { delay: 60 });
+await p.waitForTimeout(200);
+const typed = await readField();
+check('a two-digit target can be typed without the field resetting',
+  typed.field === '12' && typed.state === 12, JSON.stringify(typed));
+
+await p.keyboard.press('Tab');
+await p.waitForTimeout(250);
+const blurred = await readField();
+check('and it survives losing focus', blurred.field === '12' && blurred.state === 12,
+  JSON.stringify(blurred));
+
+await row(1); await p.waitForTimeout(220);
+const up = await readField();
+await row(0); await p.waitForTimeout(220);
+const down = await readField();
+check('the stepper moves it by one in each direction, and the box follows',
+  up.state === 13 && up.field === '13' && down.state === 12 && down.field === '12',
+  `${typed.state} → ${up.state} → ${down.state}`);
+
+await row(2); await p.waitForTimeout(220);
+const filled = await readField();
+check('fill sets it to what the ground carries, overriding what was typed',
+  filled.state === 30 && filled.field === '30', `${filled.state} on 120 m² at 4 m² each`);
+
+
+
+// Back to nobody assigned, so the claim preview below is not reading a hive
+// that has just had thirty foragers pinned to one biome.
 await p.evaluate(() => {
   const who = [...document.querySelectorAll('.panel-box')]
     .find((b) => /^who works what/i.test(b.innerText));
-  who.querySelectorAll('.assign-row')[0].querySelectorAll('.btn-mini')[1].click();
+  who.querySelector('.focus-clear').click();
 });
-await p.waitForTimeout(250);
-const bumped = await p.evaluate(() => hive.state.assign?.temperateForest?.forager ?? 0);
-check('the stepper writes a target the hive honours', bumped === 1, `target ${bumped}`);
+await p.waitForTimeout(220);
+const clearedPlan = await p.evaluate(() => ({
+  field: document.querySelector('.assign-input').value,
+  state: hive.state.assign?.temperateForest?.forager ?? 0,
+}));
+check('and clear empties both the plan and the box',
+  clearedPlan.state === 0 && clearedPlan.field === '', JSON.stringify(clearedPlan));
 
 await p.click('.terr-tile.is-unclaimed');
 await p.waitForTimeout(300);

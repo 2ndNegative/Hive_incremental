@@ -12,7 +12,7 @@
  * the hive spends an hour discovering them.
  */
 import { computed, ref } from 'vue';
-import { state, derived, showInCodex } from '../../game/useGame.js';
+import { state, derived, showInCodex, useDrafts } from '../../game/useGame.js';
 import {
   BIOMES, CLIMATES, holdings, totalArea, biomeShares, needsLightText,
   isDangerous, colonisationBlock,
@@ -39,7 +39,6 @@ import {
   isNamed, rateLabel, rateConfidence, timesFound, preyKey, RANGE_AT, EXACT_AT,
 } from '../../game/discovery.js';
 import { claimPreview, offersAnything } from '../../game/landvalue.js';
-import { efficiencyOf } from '../../game/land.js';
 import { SNACK_SHARE } from '../../game/definitions/castes.js';
 
 const area = computed(() => totalArea(state));
@@ -377,36 +376,46 @@ const plan = computed(() =>
   (derived.value.land?.biomes ?? []).map((biome) => {
     const rows = FORAGE_TYPES.map((typeId) => {
       const def = DRONE_TYPES[typeId];
-      const slots = biome.area / def.range;
+      // Straight off the engine's own figures where the crew exists, so the
+      // panel and the simulation cannot disagree about who has how much room.
+      // A type with nothing here yet gets the empty case worked out the same
+      // way: what is left of the biome once the rest of the plan has taken its
+      // share. THAT is the number the player is acting on, and it was wrong —
+      // every type used to be told it had the whole biome.
       const crew = biome.crews.find((c) => c.droneId === typeId);
-      const target = crew?.target ?? 0;
-      const drones = crew?.drones ?? 0;
+      const otherClaim = biome.crews
+        .filter((c) => c.droneId !== typeId)
+        .reduce((a, c) => a + c.target * c.range, 0);
+      const free = crew ? crew.free : Math.max(0, biome.area - otherClaim);
+      const room = Math.floor(free / def.range);
       return {
         droneId: typeId,
         name: def.name,
         range: def.range,
         crowding: def.crowding ?? 1,
-        slots,
-        room: Math.floor(slots),
-        target,
-        drones,
-        // Square metres to the next whole one. The threshold figure — it is
-        // what turns "buy some wetland" into "buy fourteen more square metres
-        // of wetland and you can field your first hunter".
-        toNext: (Math.floor(slots) + 1) * def.range - biome.area,
-        efficiency: efficiencyOf(slots, drones, def.crowding ?? 1),
-        planned: efficiencyOf(slots, target, def.crowding ?? 1),
-        // The share of its ration this crew would still owe the stores. A
-        // drone grazes in proportion to what it finds, so crowding raises the
-        // food bill at the same time as it lowers the haul — see SNACK_SHARE.
-        keep: 1 - SNACK_SHARE * (offersAnything(def.gather, biome.biomeId)
-          ? efficiencyOf(slots, target || drones, def.crowding ?? 1)
-          : 0),
+        target: crew?.target ?? 0,
+        drones: crew?.drones ?? 0,
+        free,
+        room,
+        // What it would carry with the ground to itself, so a contested biome
+        // can say both: "room for 1 more — 29 if the scavengers were not here".
+        alone: crew?.alone ?? Math.floor(biome.area / def.range),
+        contested: room < (crew?.alone ?? Math.floor(biome.area / def.range)),
+        // Square metres to the next whole one, against the ground left over.
+        toNext: (room + 1) * def.range - free,
+        efficiency: crew?.efficiency ?? 0,
+        planned: crew?.planned ?? 0,
         // Ground that offers this route nothing at all. A crew sent here comes
         // back empty every single time, which the panel has to say before the
         // player spends an hour finding out.
         offers: offersAnything(def.gather, biome.biomeId),
         held: state.droneTypes?.[typeId] || 0,
+        // The share of its ration this crew would still owe the stores. A
+        // drone grazes in proportion to what it finds, so crowding raises the
+        // food bill at the same time as it lowers the haul — see SNACK_SHARE.
+        keep: 1 - SNACK_SHARE * (offersAnything(def.gather, biome.biomeId)
+          ? (crew?.planned ?? crew?.efficiency ?? 0)
+          : 0),
       };
     });
     return { ...biome, rows };
@@ -416,13 +425,42 @@ const plan = computed(() =>
 /** Forage types that exist as drones, for the assignment grid's columns. */
 const FORAGE_TYPES = foragingTypes();
 
-function setTarget(biomeId, typeId, n) {
-  setLandTarget(biomeId, typeId, n);
-}
+/**
+ * The target fields, one per (biome × type), keyed "<biome>:<type>".
+ *
+ * Through a draft, because this tab re-renders ten times a second and a bound
+ * `value` is otherwise put back between keystrokes — the field sat at zero
+ * however much was typed into it. See `useDrafts`, which the Drones tab's
+ * molding targets share.
+ */
+// A target of nobody shows as an EMPTY box with a 0 placeholder rather than a
+// literal 0. A box reading "0" means clicking into it and typing 12 gives you
+// 120, which is the kind of small cruelty nobody reports and everybody notices.
+const key = (biomeId, typeId) => `${biomeId}:${typeId}`;
+const target = useDrafts((k, raw) => {
+  const [biomeId, typeId] = k.split(':');
+  setLandTarget(biomeId, typeId, raw);
+});
+
+/**
+ * The stepper and `fill` write state by another route, so the draft has to go
+ * — otherwise the box keeps showing what was typed rather than what was set.
+ */
 function bump(biomeId, typeId, by) {
   const row = plan.value
     .find((b) => b.biomeId === biomeId)?.rows.find((r) => r.droneId === typeId);
   setLandTarget(biomeId, typeId, Math.max(0, (row?.target ?? 0) + by));
+  target.clear(key(biomeId, typeId));
+}
+function fill(biomeId, typeId) {
+  fillLandTarget(biomeId, typeId);
+  target.clear(key(biomeId, typeId));
+}
+function clearPlan(biomeId) {
+  clearLandTargets(biomeId);
+  for (const r of plan.value.find((b) => b.biomeId === biomeId)?.rows ?? []) {
+    target.clear(key(biomeId, r.droneId));
+  }
 }
 
 /* ----------------------------------------------- what a claim would be worth */
@@ -796,11 +834,16 @@ const claimValue = computed(() => {
             <span class="muted">· {{ formatArea(b.area) }} m²</span>
           </span>
           <span class="offer-head-right">
+            <!-- Over-subscribed ground is legal and sometimes correct, but
+                 everyone standing on it pays for it: the types share the area
+                 in proportion to what they asked for, and each one's crowding
+                 exponent turns that share into a rate. -->
             <span
               v-if="b.claimed > 1"
               class="focus-note bad"
-            >planned at {{ (b.claimed * 100).toFixed(0) }}% of what it carries</span>
-            <button class="focus-clear" @click="clearLandTargets(b.biomeId)">clear</button>
+            >{{ (b.claimed * 100).toFixed(0) }}% committed · everyone gets
+              {{ (b.planSqueeze * 100).toFixed(0) }}% of the room they asked for</span>
+            <button class="focus-clear" @click="clearPlan(b.biomeId)">clear</button>
           </span>
         </div>
 
@@ -810,12 +853,19 @@ const claimValue = computed(() => {
             <span v-if="!r.offers" class="bad">· nothing here for them</span>
             <span class="field-help">
               <template v-if="r.offers">
-                Room for <strong>{{ r.room }}</strong> at {{ r.range }} m² each.
+                <!-- A TOTAL, not an increment: how many of this type the
+                     ground carries at full rate once everything else the plan
+                     puts here has taken its share. Asking for more than this
+                     is allowed and is what the efficiency figure is about. -->
+                Room for <strong>{{ r.room }}</strong> at {{ r.range }} m² each<template
+                  v-if="r.contested"
+                >, once the rest of the plan has its share — <span class="muted">{{ r.alone }}
+                  with the ground to itself</span></template>.
                 <template v-if="r.room < 1">
-                  <span class="bad">{{ formatArea(r.toNext) }} m² short of the first one.</span>
+                  <span class="bad">{{ formatArea(r.toNext) }} m² short of even one.</span>
                 </template>
                 <template v-else>
-                  {{ formatArea(r.toNext) }} m² more buys the next.
+                  {{ formatArea(r.toNext) }} m² more would carry another.
                 </template>
                 <template v-if="r.target > 0">
                   Planned at <strong :class="r.planned > 0.85 ? 'good' : r.planned > 0.4
@@ -855,16 +905,19 @@ const claimValue = computed(() => {
               class="assign-input num"
               type="number"
               min="0"
-              :value="r.target"
+              placeholder="0"
+              :value="target.value(key(b.biomeId, r.droneId), r.target || '')"
               :aria-label="`${r.name} on ${b.def.name}`"
-              @change="setTarget(b.biomeId, r.droneId, $event.target.value)"
+              @input="target.input(key(b.biomeId, r.droneId), $event)"
+              @change="target.input(key(b.biomeId, r.droneId), $event)"
+              @blur="target.commit(key(b.biomeId, r.droneId))"
             />
             <button class="btn-mini" @click="bump(b.biomeId, r.droneId, 1)">+</button>
             <button
               class="btn-mini is-wide"
               :disabled="!r.offers || r.room < 1"
               title="Fill this ground to the last drone it carries at full rate"
-              @click="fillLandTarget(b.biomeId, r.droneId)"
+              @click="fill(b.biomeId, r.droneId)"
             >fill</button>
           </span>
         </div>

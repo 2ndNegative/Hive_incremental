@@ -745,14 +745,24 @@ export function clearLandTargets(biomeId = null) {
 /**
  * Fill this biome with as many of this type as it will carry at full rate.
  *
- * `floor(slots)`, so the target lands exactly on the last whole drone the ground
- * supports without crowding anyone. The one-click answer to "what is this ground
- * actually for".
+ * AGAINST WHAT IS LEFT, not against the whole biome. Types compete for the same
+ * square metres (see the squeeze in land.js), so filling with foragers on ground
+ * already pencilled in for scavengers would set a target that over-commits it
+ * the instant it is clicked — a one-click button whose one click is wrong.
+ *
+ * It lands exactly on the last whole drone the remaining ground supports, which
+ * is the one-click answer to "what is this ground still good for".
  */
 export function fillLandTarget(biomeId, typeId) {
   const range = DRONE_TYPES[typeId]?.range;
   if (!range || !BIOMES[biomeId]) return null;
-  return setLandTarget(biomeId, typeId, Math.floor((state.territory?.[biomeId] || 0) / range));
+  let taken = 0;
+  for (const [other, want] of Object.entries(state.assign?.[biomeId] || {})) {
+    if (other === typeId) continue;
+    taken += Math.max(0, Math.floor(want || 0)) * (DRONE_TYPES[other]?.range || 0);
+  }
+  const free = Math.max(0, (state.territory?.[biomeId] || 0) - taken);
+  return setLandTarget(biomeId, typeId, Math.floor(free / range));
 }
 
 /* -------------------------------------------------------------------- top bar */

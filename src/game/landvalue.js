@@ -118,15 +118,28 @@ export function expectedForage(state, territory, {
   let total = 0;
   let working = 0;
 
-  for (const typeId of foragingTypes()) {
-    const def = DRONE_TYPES[typeId];
-    room[typeId] = 0;
-    for (const biomeId of held) {
-      const slots = slotsOn(shim, biomeId, typeId);
-      room[typeId] += Math.floor(slots);
+  for (const typeId of foragingTypes()) room[typeId] = 0;
+
+  // BIOME OUTER, TYPE INNER, because the types compete for the same square
+  // metres and the squeeze cannot be worked out one type at a time. The first
+  // version looped the other way and gave every type the whole biome, which
+  // read as two full-rate crews on ground that could carry one — see landUse.
+  for (const biomeId of held) {
+    const area = territory?.[biomeId] || 0;
+    let wanted = 0;
+    for (const typeId of foragingTypes()) {
+      const here = assigned[typeId]?.[biomeId] || 0;
+      wanted += here * (DRONE_TYPES[typeId].range || 0);
+      room[typeId] += Math.floor(slotsOn({ territory }, biomeId, typeId));
+    }
+    const squeeze = wanted > area && wanted > 0 ? area / wanted : 1;
+
+    for (const typeId of foragingTypes()) {
+      const def = DRONE_TYPES[typeId];
       const here = assigned[typeId]?.[biomeId] || 0;
       if (here < 1) continue;
 
+      const slots = here * squeeze;
       const efficiency = efficiencyOf(slots, here, def.crowding ?? 1);
       const live = offersAnything(def.gather, biomeId);
       // No patch count in it: a patch IS a drone, so the crew's rate is simply
@@ -173,11 +186,23 @@ export function labelFor(state, key) {
  */
 export function nextWholeDrone(state, biomeId, territory = state.territory) {
   const area = territory?.[biomeId] || 0;
+  // Ground the plan has already spoken for, per type, so "room for one more"
+  // is room AFTER the rest of the plan rather than on an empty biome. A
+  // preview that ignores the twenty-nine foragers already pencilled in is
+  // telling the player about a field that does not exist.
+  const spoken = {};
+  let planned = 0;
+  for (const typeId of foragingTypes()) {
+    const target = Math.max(0, Math.floor(state.assign?.[biomeId]?.[typeId] || 0));
+    spoken[typeId] = target * (DRONE_TYPES[typeId].range || 0);
+    planned += spoken[typeId];
+  }
   const out = [];
   for (const typeId of foragingTypes()) {
     const def = DRONE_TYPES[typeId];
     if (!def.range) continue;
-    const slots = area / def.range;
+    const free = Math.max(0, area - (planned - spoken[typeId]));
+    const slots = free / def.range;
     const have = Math.floor(slots);
     out.push({
       droneId: typeId,
@@ -187,7 +212,7 @@ export function nextWholeDrone(state, biomeId, territory = state.territory) {
       // Square metres to the next whole one. Exactly `range` when the ground is
       // empty, which is the honest reading: the first of anything costs a full
       // range, there is no founder's discount.
-      needed: (have + 1) * def.range - area,
+      needed: (have + 1) * def.range - free,
       // True when this ground does not hold even one, which is the case the
       // player most needs flagged — a biome can be bought and still be useless
       // to the type they wanted it for.

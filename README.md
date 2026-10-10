@@ -14,24 +14,4 @@ good deal of the prose in it, was written by a large language model working from
 my direction — design decisions, mechanics, balance and review are mine; a lot of
 the typing is not.
 
-## Running it locally
-
-Needs Node 20 or newer.
-
-```bash
-npm install
-npm run dev        # dev server with hot reload, http://localhost:4400
-npm run build      # production bundle into dist/
-npm run check      # lint, item database, then all 32 browser suites
-```
-
-The suites drive a real Chromium, which Playwright fetches once with
-`npx playwright install chromium`. `npm test` builds and serves the game itself,
-so nothing needs to be running first.
-
-On Windows, `Play HiveIdle.bat` does the whole thing — Node check, install,
-rebuild if needed, serve, open a browser — and `Check HiveIdle.bat` runs
-`npm run check` with the first-run installs done for you. The launchers are
-local-only and are not in the repository.
-
-Design notes are in [docs/DESIGN.md](docs/DESIGN.md).
+Nutrient data from the USDA FoodData Central SR Legacy and Foundation Foods datasets, public domain.

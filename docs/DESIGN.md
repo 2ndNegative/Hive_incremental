@@ -499,6 +499,44 @@ down in `drones.js` so the whole table balances in one place. A Hunter in partic
 carcass-into-cuts path wired through the drone route first; today only the parked hunter
 *caste* rolls prey.
 
+### Types compete for the same square metres
+
+The first version of this counted room as `area / range` **per type**, which handed every
+type the whole biome independently. Twenty-nine foragers and eight scavengers on 117 m² both
+read 100% efficient while between them claiming 228 m². The panel's header said "195% of what
+it carries" and nothing anywhere enforced it — the hive was being paid in full for land that
+does not exist.
+
+They share it in proportion to what they asked for, which is the rule digestion already uses
+on the gut:
+
+```
+wanted  = Σ over types of (drones × range)
+squeeze = min(1, area / wanted)
+efficiency per drone = squeeze ** crowding
+```
+
+Everyone on an over-subscribed biome is squeezed by the **same** ratio, and what that costs
+them is their own exponent. At 51% of the room they asked for, the tolerant forager works at
+72% and the touchy scavenger at 37% — identical ground, very different bills. With one type
+present it reduces exactly to the single-type case, so nothing about a dedicated biome
+changed.
+
+Three figures follow from it, and the panel shows all three because they answer different
+questions:
+
+- **`room`** — how many of this type the ground carries at full rate *once the rest of the
+  plan has its share*. This is the number a player acts on, and it was the one that was
+  wrong.
+- **`alone`** — what it would carry with the biome to itself. Kept because "room for 1 here,
+  29 if the scavengers were not on it" is two facts and both matter.
+- **`squeeze`** — printed on the biome header as "195% committed · everyone gets 51% of the
+  room they asked for", so the cost of over-committing is a number rather than a warning.
+
+`fill` fills what is **left**, not the whole biome. Filling with foragers on ground already
+pencilled in for scavengers would over-commit it the instant it was clicked, which is a
+one-click button whose one click is wrong.
+
 ### Snacking: crowding costs twice
 
 A drone out on ground it can work is standing in the middle of its own dinner. It eats some

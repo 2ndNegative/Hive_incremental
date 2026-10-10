@@ -163,6 +163,69 @@ check('a sliver is worth something to a forager and nothing to a hunter',
   crowd.sliverTolerant > 0.5 && crowd.sliver < 0.01,
   `${(crowd.sliverTolerant * 100).toFixed(0)}% vs ${(crowd.sliver * 100).toFixed(3)}%`);
 
+/* ============== 3b. two types on one biome compete for the same metres */
+
+/*
+ * THE BUG THIS EXISTS FOR. Room was `area / range` PER TYPE, so a biome handed
+ * its whole area to every type independently: twenty-nine foragers and eight
+ * scavengers on 117 m² both read 100% efficient while between them claiming
+ * 228 m². The panel's header said "195% of what it carries" and nothing
+ * anywhere enforced it — the hive was being paid in full for land that does
+ * not exist.
+ */
+const shared = await p.evaluate(() => {
+  const s = hive.state;
+  s.territory = { temperateForest: 116.9 };
+  s.assign = {};
+  s.droneTypes = { forager: 29, scavenger: 8 };
+  const alone = hive.land.use()[0];
+
+  hive.land.setTarget('temperateForest', 'forager', 29);
+  hive.land.setTarget('temperateForest', 'scavenger', 8);
+  const both = hive.land.use()[0];
+  const get = (u, id) => u.crews.find((c) => c.droneId === id);
+  return {
+    squeeze: both.squeeze,
+    claimed: both.claimed,
+    forager: get(both, 'forager'),
+    scavenger: get(both, 'scavenger'),
+    soloForager: get(alone, 'forager')?.alone,
+  };
+});
+
+check('the ground reports how over-committed it is',
+  Math.abs(shared.claimed - 228 / 116.9) < 0.01,
+  `${(shared.claimed * 100).toFixed(0)}% committed`);
+check('and squeezes everyone by the same share of what they asked for',
+  Math.abs(shared.squeeze - 116.9 / 228) < 1e-9,
+  `${(shared.squeeze * 100).toFixed(0)}% each`);
+check('NEITHER type still reads as working at full rate',
+  shared.forager.efficiency < 1 && shared.scavenger.efficiency < 1,
+  `forager ${(shared.forager.efficiency * 100).toFixed(0)}%`
+  + `, scavenger ${(shared.scavenger.efficiency * 100).toFixed(0)}%`);
+check('the same squeeze costs the touchy type far more than the tolerant one',
+  shared.scavenger.efficiency < shared.forager.efficiency / 1.5,
+  `${(shared.forager.efficiency * 100).toFixed(0)}% vs `
+  + `${(shared.scavenger.efficiency * 100).toFixed(0)}% on identical ground`);
+check('room for a type is what is left after the rest of the plan',
+  shared.forager.room < shared.soloForager && shared.scavenger.room === 0,
+  `forager ${shared.forager.room} (${shared.soloForager} alone), `
+  + `scavenger ${shared.scavenger.room}`);
+
+const filled = await p.evaluate(() => {
+  const s = hive.state;
+  s.assign = {};
+  hive.land.setTarget('temperateForest', 'scavenger', 8); // 112 of 116.9 m²
+  hive.land.fillTarget('temperateForest', 'forager');
+  return {
+    forager: s.assign.temperateForest.forager ?? 0,
+    claimed: hive.land.use()[0].claimed,
+  };
+});
+check('and `fill` fills what is LEFT, not the whole biome',
+  filled.forager === 1 && filled.claimed <= 1.001,
+  `${filled.forager} foragers, ${(filled.claimed * 100).toFixed(0)}% committed after`);
+
 /* ===================================== 4. assignment: targets, then the rest */
 
 const spread = await p.evaluate(() => {

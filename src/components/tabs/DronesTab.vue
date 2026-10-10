@@ -12,8 +12,8 @@
 // rather than a grid of cards. A drone type is a line with a count and a
 // control on the end of it — the same thing the old caste rows were — and the
 // third column is left empty for the +/- that will go there.
-import { computed, reactive } from 'vue';
-import { state, derived } from '../../game/useGame.js';
+import { computed } from 'vue';
+import { state, derived, useDrafts } from '../../game/useGame.js';
 import {
   DRONE_CASTES,
   DRONE_CASTE_ORDER,
@@ -139,35 +139,13 @@ const rate = computed(() => derived.value.moldRate ?? 0);
 const starved = computed(() => chambers.value.some((m) => m.starved));
 
 /**
- * THE TARGET FIELD, AND WHY IT NEEDS A DRAFT.
- *
- * This tab re-renders ten times a second, because the numbers on it move ten
- * times a second. Vue patches a bound `value` by comparing it with what is in
- * the DOM — and while someone is typing, what is in the DOM is "12" and what is
- * bound is still the old target, so Vue puts the old target back. Every frame.
- * Typing was impossible and the spinner only "took" on the click that happened
- * to land between two renders, which is the jitter: up one, back, up one, back.
- *
- * So the field reads from a DRAFT while it is being edited, and the draft is
- * what gets bound. State is written on the way through — a spinner click or a
- * keystroke applies immediately — and the draft is dropped on blur, at which
- * point the field goes back to following the hive.
+ * The target field reads from a draft while it is being typed in, because this
+ * tab re-renders ten times a second and would otherwise put the old figure back
+ * between keystrokes. `useDrafts` has the long version — it is shared with the
+ * Territory tab's assignment fields, which had the same bug in its other form.
  */
-const drafts = reactive({});
+const target = useDrafts(setMoldTarget);
 
-function targetValue(t) {
-  return drafts[t.id] ?? (t.target ?? '');
-}
-
-function onTarget(id, event) {
-  drafts[id] = event.target.value;
-  setMoldTarget(id, event.target.value);
-}
-
-function commitTarget(id) {
-  setMoldTarget(id, drafts[id] ?? '');
-  delete drafts[id];
-}
 </script>
 
 <template>
@@ -283,11 +261,11 @@ function commitTarget(id) {
                     min="0"
                     step="1"
                     placeholder="∞"
-                    :value="targetValue(t)"
+                    :value="target.value(t.id, t.target)"
                     :aria-label="`Stop making ${t.def.name} at`"
-                    @input="onTarget(t.id, $event)"
-                    @change="onTarget(t.id, $event)"
-                    @blur="commitTarget(t.id)"
+                    @input="target.input(t.id, $event)"
+                    @change="target.input(t.id, $event)"
+                    @blur="target.commit(t.id)"
                   />
                 </label>
                 <span class="mold-status" :class="t.label.tone">{{ t.label.text }}</span>

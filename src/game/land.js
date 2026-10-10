@@ -91,12 +91,18 @@ export function heldBiomes(state) {
 }
 
 /**
- * How many drones of this type the biome has room for, fractionally.
+ * How many drones of this type the biome has room for, fractionally, WITH THE
+ * BIOME TO ITSELF.
+ *
+ * The caveat is the whole of it. Types compete for the same square metres —
+ * see the squeeze in `landUse` — so this is the ceiling a type would have if
+ * nothing else were sent here, not the room it actually gets. Use `landUse`
+ * for anything the player reads; this is for "what is this ground good for",
+ * which is a question about the ground and not about the plan.
  *
  * Deliberately NOT floored. A biome with two thirds of a hunter's range in it
- * has two thirds of a slot, and that is a meaningful number — it is what the
- * crowding curve is applied to, and it is what tells the player how much more
- * ground buys the first whole hunter.
+ * has two thirds of a slot, and that is a meaningful number — it is what tells
+ * the player how much more ground buys the first whole hunter.
  */
 export function slotsOn(state, biomeId, typeId) {
   const range = DRONE_TYPES[typeId]?.range;
@@ -244,15 +250,54 @@ export function landUse(state) {
   const biomes = [];
   for (const biomeId of held) {
     const area = state.territory?.[biomeId] || 0;
-    const crews = [];
-    let claimed = 0; // m² spoken for by targets, for the "how full is it" bar
+
+    // WHAT EVERY TYPE WANTS OF THIS GROUND, before anyone gets any.
+    //
+    // This is the step the first version simply did not have. Room was
+    // `area / range` PER TYPE, so a biome handed its whole area to each type
+    // independently: twenty-nine foragers and eight scavengers on 117 m² both
+    // read 100% efficient while between them claiming 228 m². The header said
+    // "195% of what it carries" and nothing anywhere enforced it — the hive was
+    // being paid in full for land that does not exist.
+    const claim = {};
+    const plan = {};
+    let wanted = 0;
+    let planned = 0;
     for (const typeId of types) {
       const def = DRONE_TYPES[typeId];
-      const slots = slotsOn(state, biomeId, typeId);
       const here = assigned[typeId]?.[biomeId] || 0;
       const target = Math.max(0, Math.floor(state.assign?.[biomeId]?.[typeId] || 0));
-      claimed += target * def.range;
+      claim[typeId] = here * def.range;
+      plan[typeId] = target * def.range;
+      wanted += claim[typeId];
+      planned += plan[typeId];
+    }
+
+    // THE SQUEEZE: the share of the ground it asked for that each type gets.
+    // Proportional to demand, which is the same rule digestion uses to share
+    // the gut out — nothing sits at the back of the queue starving while
+    // something else drains. Everyone on an over-subscribed biome is squeezed
+    // by the SAME ratio, and what that costs them is their own crowding
+    // exponent: at 51% of the room they wanted, a tolerant forager works at
+    // 72% and a touchy scavenger at 37%.
+    const squeeze = wanted > area && wanted > 0 ? area / wanted : 1;
+    const planSqueeze = planned > area && planned > 0 ? area / planned : 1;
+
+    const crews = [];
+    for (const typeId of types) {
+      const def = DRONE_TYPES[typeId];
+      const here = assigned[typeId]?.[biomeId] || 0;
+      const target = Math.max(0, Math.floor(state.assign?.[biomeId]?.[typeId] || 0));
       if (!here && !target) continue;
+
+      // Ground this type is actually standing on, as whole drones' worth.
+      const slots = here * squeeze;
+      // And what is left for it once the REST of the plan has taken its share
+      // — the figure the assignment panel needs. "Room for 8" on ground where
+      // the plan already spends every metre on foragers is a lie the player
+      // acts on.
+      const free = Math.max(0, area - (planned - plan[typeId]));
+
       crews.push({
         biomeId,
         droneId: typeId,
@@ -267,12 +312,21 @@ export function landUse(state) {
         // hive has molded it. Two figures because they answer two questions:
         // "is this working" and "will this work".
         efficiency: efficiencyOf(slots, here, def.crowding ?? 1),
-        planned: efficiencyOf(slots, target, def.crowding ?? 1),
-        // Whole drones of this type the biome would carry at full rate. The
-        // number the player is really shopping for.
-        room: Math.floor(slots),
+        planned: efficiencyOf(target * planSqueeze, target, def.crowding ?? 1),
+        // Whole drones of this type the ground will still carry at full rate,
+        // given everything else the plan puts here.
+        room: Math.floor(free / def.range),
+        free,
+        // Square metres to the next whole one of these, against that same
+        // remaining ground.
+        toNext: (Math.floor(free / def.range) + 1) * def.range - free,
+        // What this type would carry with the biome to itself. Kept because
+        // "you could have 29 foragers here, but only 4 while the scavengers
+        // have it" is two facts and the panel wants both.
+        alone: def.range > 0 ? Math.floor(area / def.range) : 0,
       });
     }
+
     biomes.push({
       biomeId,
       def: BIOMES[biomeId],
@@ -281,8 +335,12 @@ export function landUse(state) {
       drones: crews.reduce((a, c) => a + c.drones, 0),
       // Over 1 means the plan has promised the same ground to more drones than
       // it can carry — legal, and sometimes correct for a tolerant type, but
-      // the tab should say so.
-      claimed: area > 0 ? claimed / area : 0,
+      // everyone on it pays for it.
+      claimed: area > 0 ? planned / area : 0,
+      // The share of what they asked for that each type gets, now and under
+      // the plan. 1 means nobody is treading on anybody.
+      squeeze,
+      planSqueeze,
     });
   }
   return biomes;
