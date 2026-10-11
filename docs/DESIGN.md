@@ -260,7 +260,7 @@ src/
   App.vue                  shell — topbar, nutrient panel, tab host
   units.js                 SI formatting for joules, grams and watts
   game/
-    state.js               the reactive state object, and SAVE_VERSION (23)
+    state.js               the reactive state object, and SAVE_VERSION (24)
     engine.js              computeDerived(), tick(), metabolism  <- the heart
     actions.js             everything the player can do
     save.js                localStorage, versioned and forward-tolerant
@@ -269,6 +269,7 @@ src/
     forage.js              forage rolls — what one drone's ground yields
     land.js                room per biome per type, crowding, who stands where
     landvalue.js           what ground is worth, before it is paid for
+    genes.js               what is written into what, and what that does to it
     discovery.js           what the hive has found out about its own ground
     focus.js               telling a gathering route what to look for
     expedition.js          Explorers: they leave, and might not come back
@@ -278,6 +279,7 @@ src/
     definitions/
       nutrients.js         35 nutrients (7 macro, 28 micro), densities, assay gating
       modifiers.js         the modifier channels — see *The modifier layer*
+      genes.js             traits and genes — see *Genetics: a genome per kind of body*
       structures.js        hive structures: 16 live, 7 deprecated
       castes.js            the old caste layer; all of it bar `dormant` is parked
       drones.js            the worker caste and the types inside it, and what they cost
@@ -296,7 +298,7 @@ src/
 tests/
   run-all.mjs              the runner — see *The test suites*
   harness.mjs              the only three facts a suite needs from outside itself
-  *-test.mjs, smoke, verify  32 suites, each a standalone script
+  *-test.mjs, smoke, verify  36 suites, each a standalone script
 tools/
   balance-sim.mjs          headless progression simulator
   validate-items.mjs       database validator
@@ -764,6 +766,105 @@ table's layout and cancels its `colspan` with it. The band's flex row is a child
 - *"I have to micromanage"* → the spread rule is the defence. Check that leftovers still go
   somewhere sensible before adding more controls.
 
+## Genetics: a genome per kind of body
+
+A gene is written into a **subject** — one drone type today, a structure type later — and
+every body of that kind gets it. It is not something an individual drone carries. That is the
+single decision the whole system falls out of: it is why the left-hand column of the tab is a
+list of *types*, why molding another forager mints another copy of whatever the forager
+genome currently says, and why a save needs one array per type rather than per drone.
+
+### Why this is not the modifier layer
+
+The modifier layer already does "a named thing any number of sources make better or worse",
+and the honest answer to "why a second one" is **scope**. A channel is hive-wide: `harvest` is
+how much *any* gathering drone brings back. "Foragers eat less" is not a fact about the hive,
+and a global `appetite` would be wrong for every other type the moment a second one existed.
+
+So `definitions/genes.js` is a parallel layer with a deliberately **identical grammar** —
+bonuses add, the result multiplies, a trait named for a cost means more cost, one reader per
+trait — and a different scope. The two stack: `rationCost` (the hive is hungrier) and
+`appetite` (this body is thrifty) both apply to the same bill.
+
+The one thing it has that the modifier layer refuses to have is `better: 'up' | 'down'`. The
+engine does not need it and modifiers.js is right to argue that a flag is a thing you can
+forget to read — it gets the sign from the name. The **interface** does need it: a screen
+whose entire job is to show what a gene would change has to know whether to paint +15% green
+or red, and deriving that from a substring of the trait's name would be a guess.
+
+### The traits, and where they land
+
+| Trait | Direction | Read by |
+| --- | --- | --- |
+| `pace` | up is better | `forage.js cycleFor`, `expedition.js expeditionSeconds` |
+| `appetite` | down is better | `engine.js computeRation`, the per-type bill |
+
+`pace` **divides**, in both readers: a drone at +20% is twelve seconds over 1.2, not twelve
+plus a bit. It carries a `floor` well clear of zero because a pace of nothing is not a drone
+standing still, it is a cycle length of infinity and a NaN in every rate on the screen. It
+lands in two places because a forager's work cycle is a trip and an explorer's is an
+expedition — same trait, same arithmetic, two different clocks.
+
+`FORAGE_CYCLE` stopped being imported directly and became `cycleFor(state, typeId)`. The
+constant was imported in three files and divided by in two of them, which is exactly the shape
+that leaves one site un-updated and a *displayed* rate disagreeing with the matter actually
+arriving.
+
+The ration bill was a headcount times a constant; it is now summed per type, because appetite
+belongs to one kind of body. With no genes written anywhere the two are identical arithmetic —
+which is why landing genetics moved no number in any of the other thirty-five suites.
+
+### The preview is the real function
+
+`traitsOf(state, key, override)` takes a genome to use *instead of* the stored one. That is
+the whole of the tab's preview. A preview that recomputed the numbers by a parallel route
+would be a second implementation of the thing it is previewing, and the two would agree right
+up until one of them was edited; here the figure on the screen is produced by the function the
+engine calls.
+
+### The tab: three columns, and a staging model
+
+Bodies on the left, what it does in the middle, genes on the right — the screen is a sentence
+read left to right, and the middle is the only column that moves.
+
+Clicking a gene does **not** write it. It joins a *proposed* genome, and the middle column
+shows what that genome would do against what the current one does. Clicking a gene already
+written in stages its removal the same way. Nothing reaches the hive until the commit button.
+That buys three things: several changes can be lined up and judged together, adding and
+removing are one gesture rather than two sets of controls, and the proposal is exactly what
+gets committed.
+
+Two smaller rules the tab keeps:
+
+- **Every gene is listed, always**, including ones that cannot go into the selected body, with
+  the reason printed in the row. A gene that does not fit is still a fact about the game, and
+  a list that silently shortened itself as you clicked around the left column would make the
+  system look smaller than it is. `blocks(subject)` returns a *reason*, not a boolean, for
+  exactly this — a locked door with no sign on it is the worst thing an interface can do.
+- **A multiplier is not an effect.** "×1.15 pace" is arithmetic; "a trip every 10.4s, was
+  12.0s" is what happens. Every trait renders a concrete figure in the units the rest of the
+  game quotes, computed per subject — which is how the same trait reads as seconds-per-trip
+  for a forager and seconds-per-expedition for an explorer.
+
+### What is deliberately missing
+
+Genes cost nothing, take effect instantly, and nothing has to be unlocked to use one. All
+three are placeholders, flagged as such on the tab, and none is a design decision — the shape
+of the screen was what needed settling, and a cost model would have settled the wrong thing
+first. Whatever genes end up costing gets charged in `writeGenome` and nowhere else.
+
+The `structure` subject kind is declared and empty. The tab renders a kind with nothing in it
+rather than hiding it, so "buildings, not yet" is a true thing the screen says and the second
+kind arriving is a change to one list.
+
+### Changing it
+
+- *"A gene does nothing"* → `tests/genes-test.mjs` measures the engine before and after
+  writing one. If the trait is declared and unread, the unread check catches it.
+- *"Add a trait"* → declare it in `TRAITS` with its `floor`, `better` and `applied`, give it a
+  reader, and add a `concrete()` case in the tab or it shows a multiplier and nothing else.
+- *"Add a subject kind"* → `SUBJECT_KINDS` and `geneSubjects`. The tab needs nothing.
+
 ## Storage, and the wall underneath it
 
 A building you cannot save up for is a building you can never build. If the cost of the next
@@ -1201,13 +1302,13 @@ One run is one sample. Before reading any of this as a result, sweep a few seeds
 
 ## The test suites
 
-35 of them in `tests/`, each a standalone script that opens a real browser, drives the real
+36 of them in `tests/`, each a standalone script that opens a real browser, drives the real
 game and prints `PASS`/`FAIL` lines. There is no shared framework on purpose: a suite that
 goes red can be run on its own with `node tests/<name>.mjs` and read top to bottom with no
 indirection, which is how most of them got written.
 
 ```bash
-npm test                  # build, serve, run all 35
+npm test                  # build, serve, run all 36
 npm test -- queue water   # just those two, by name
 npm test -- --bail        # stop at the first red suite
 npm test -- --no-build    # against whatever dist/ already holds
@@ -1250,9 +1351,10 @@ as well as `dist/` — otherwise it would be testing a version of the game nobod
   scavenger and explorer; the old Hunter caste is parked with the rest of the caste layer,
   so nothing in a live hive ever takes that branch. Also missing: prey populations that
   regenerate and deplete, choosing a target species, and the risk that a hunt costs drones.
-- **Genetics.** The tab is a reserved empty slot, so the navigation settles into its final
-  shape before there is anything to put in it. The seam it will contribute through is
-  already built — see *The modifier layer*.
+- **Genetics**, past the first pass. The layer, the tab and two genes are in — see *Genetics:
+  a genome per kind of body*. What is missing is everything that makes it a decision: genes
+  cost nothing, nothing has to be unlocked to use one, there is no way to discover a new one,
+  and buildings are a declared-but-empty subject kind.
 - A prestige layer, and achievements.
 
 ## Developer mode

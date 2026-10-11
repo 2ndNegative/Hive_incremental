@@ -47,7 +47,7 @@ import { ORGANISMS } from './definitions/organisms.js';
 import { ITEMS } from './definitions/items/index.js';
 import { focusedOdds } from './focus.js';
 import { isNamed } from './discovery.js';
-import { FORAGE_CYCLE } from './forage.js';
+import { cycleFor } from './forage.js';
 import {
   assignmentOf, slotsOn, efficiencyOf, heldBiomes, routePool, offersAnything,
 } from './land.js';
@@ -145,7 +145,7 @@ export function expectedForage(state, territory, {
       // No patch count in it: a patch IS a drone, so the crew's rate is simply
       // its headcount times what one of them manages.
       const rate = live
-        ? (here * efficiency * meanLoad(typeId) * vigour * harvest) / FORAGE_CYCLE
+        ? (here * efficiency * meanLoad(typeId) * vigour * harvest) / cycleFor(state, typeId)
         : 0;
 
       crews.push({

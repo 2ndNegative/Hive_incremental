@@ -65,12 +65,17 @@ const genetics = await p.evaluate(() => {
     painted: main.innerText.trim().length,
     text: main.innerText.replace(/\s+/g, ' ').slice(0, 160),
     cards: main.querySelectorAll('.action-card').length,
+    cols: main.querySelectorAll('.gene-cols > .panel-box').length,
   };
 });
 check('it renders rather than blanking the page', genetics.painted > 40);
-check('it is empty on purpose, and says so',
-  /nothing here yet/i.test(genetics.text) && genetics.cards === 0,
-  genetics.text.slice(0, 80));
+// It used to be empty on purpose, and this checked that it SAID so. The tab
+// has content now, so the assertion is inverted rather than deleted: the thing
+// worth guarding either way is that the reserved slot is not a blank page.
+// What is actually in it is tests/genes-test.mjs's business.
+check('and it is no longer the reserved stub',
+  !/nothing here yet/i.test(genetics.text) && genetics.cols === 3,
+  `${genetics.cols} columns`);
 
 /* ===================================================== 2. Molding Chamber */
 

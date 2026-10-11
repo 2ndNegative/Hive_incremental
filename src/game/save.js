@@ -491,6 +491,14 @@ function migrate(raw) {
     }
   }
 
+  // v24 opens the genome. Nothing is written into anything, which is exactly
+  // what a save from before genetics means — and because an empty genome leaves
+  // every trait at 1, a returning hive forages and eats at precisely the rates
+  // it left at.
+  if ((raw.version ?? 0) < 24) {
+    raw.genes ??= {};
+  }
+
   raw.version = SAVE_VERSION;
   return raw;
 }

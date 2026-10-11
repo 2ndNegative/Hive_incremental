@@ -16,7 +16,7 @@ import { RESEARCH_ORDER } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
-export const SAVE_VERSION = 23;
+export const SAVE_VERSION = 24;
 export const LOG_LIMIT = 60;
 
 export function createInitialState() {
@@ -147,6 +147,13 @@ export function createInitialState() {
     // which is the point — a wetland can be laid out for four hunters and then
     // the hunters molded into it. land.js resolves it against the headcount.
     assign: {},
+
+    // What the hive has written into each kind of body, keyed
+    // "<kind>:<id>" → an array of gene ids. Sparse: no entry means a plain
+    // genome, which is what every subject starts with. See genes.js — a gene
+    // belongs to a TYPE, so molding another forager mints another copy of
+    // whatever the forager genome currently says.
+    genes: {},
 
     // Ground an Explorer has MAPPED but the hive has not paid for, in square
     // metres by biome. It shows on the territory map marked unclaimed and does
@@ -362,6 +369,7 @@ export const OPEN_MAPS = new Set([
   'molding',
   'crews', // "<droneType>:<biomeId>" → the patches that crew is working
   'assign', // biome id → drone type id → how many the player wants there
+  'genes', // "<kind>:<id>" → gene ids written into that kind of body
   'power', // structure id → charge
   'active', // structure id → how many are switched on
   'droneMolding', // drone type id → { on, target }

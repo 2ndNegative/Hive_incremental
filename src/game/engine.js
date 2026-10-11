@@ -81,6 +81,7 @@ import { ITEMS } from './definitions/items/index.js';
 import { ORGANISMS } from './definitions/organisms.js';
 import { BIOMES, totalArea, aridity } from './definitions/biomes.js';
 import { landUse, crewKey, offersAnything } from './land.js';
+import { droneTrait } from './genes.js';
 
 import { BASE_COGIT_CAPACITY, COGIT_PER_DRONE } from './definitions/cognition.js';
 import {
@@ -92,7 +93,7 @@ import {
   foragingTypes,
   exploringTypes,
 } from './definitions/drones.js';
-import { advanceForage, FORAGE_CYCLE } from './forage.js';
+import { advanceForage, cycleFor } from './forage.js';
 import { advanceExpeditions, expeditionSeconds, EXPEDITION_OUTCOMES } from './expedition.js';
 import { formatMass, formatArea } from './units.js';
 
@@ -874,10 +875,16 @@ export function computeRation(state, mod = null, use = null) {
   // bill becomes the only thing on any screen that says the trip was wasted.
   const biomes = use ?? landUse(state);
   let grazed = 0;
+  // Kept per TYPE as well as in total, because appetite is a gene and a gene
+  // belongs to one kind of body: the bill has to know that the four drones
+  // feeding themselves were foragers before it can charge the rest of the
+  // foragers at a forager's rate.
+  const grazedBy = {};
   for (const biome of biomes) {
     for (const crew of biome.crews) {
       if (!crew.drones || !offersAnything(DRONE_TYPES[crew.droneId].gather, crew.biomeId)) continue;
       grazed += crew.drones * crew.efficiency;
+      grazedBy[crew.droneId] = (grazedBy[crew.droneId] || 0) + crew.drones * crew.efficiency;
     }
   }
   // Clamped at 1: a bonus big enough to make a working drone free is a fine
@@ -885,10 +892,27 @@ export function computeRation(state, mod = null, use = null) {
   const share = Math.min(1, SNACK_SHARE * factor(mod, 'grazing'));
   const billable = Math.max(0, drones - grazed * share);
 
-  // Also a COST channel: +0.2 means the drones eat twenty per cent more. It is
-  // applied to the JOULES rather than to the grams, so it costs the same share
-  // of the hive's energy whatever fuel the Metabolism tab is pointed at.
-  const joules = billable * DRONE_RATION_JOULES * factor(mod, 'rationCost');
+  /*
+   * THE BILL, TYPE BY TYPE.
+   *
+   * `rationCost` is a hive-wide COST channel: +0.2 means every drone eats a
+   * fifth more. `appetite` is the same statement about ONE kind of body, and
+   * the two multiply — a hungrier hive full of thrifty foragers is both of
+   * those things at once.
+   *
+   * Summed per type rather than off the headcount, which is what this was.
+   * With one appetite for everything the two are identical arithmetic, and
+   * they stay identical for as long as nothing has a gene — which is why this
+   * change moves no number in a hive that has not opened the Genetics tab.
+   */
+  let typedBill = 0;
+  for (const typeId of DRONE_TYPE_ORDER) {
+    const here = state.droneTypes?.[typeId] || 0;
+    if (here <= 0) continue;
+    const fed = Math.max(0, here - (grazedBy[typeId] || 0) * share);
+    typedBill += fed * droneTrait(state, typeId, 'appetite');
+  }
+  const joules = typedBill * DRONE_RATION_JOULES * factor(mod, 'rationCost');
   const empty = {
     drones,
     grazed,
@@ -1577,10 +1601,15 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
       const patches = [];
       let rate = 0;
 
+      // The type's own cycle, not the constant: a trip worth 30 g every ten
+      // seconds is a different rate from the same trip every twelve, and this
+      // is the figure every screen in the game quotes.
+      const cycle = cycleFor(state, crew.droneId);
+
       for (let i = 0; i < held.length; i += 1) {
         const patch = held[i];
         const grams = patch.grams || 0;
-        const perSecond = ((grams * crew.efficiency * vigour) / FORAGE_CYCLE) * harvest;
+        const perSecond = ((grams * crew.efficiency * vigour) / cycle) * harvest;
         patches.push({
           index: i,
           droneId: crew.droneId,

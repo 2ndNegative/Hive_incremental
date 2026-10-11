@@ -3058,3 +3058,318 @@ textarea.save-box {
   color: var(--bad);
   border-color: var(--bad);
 }
+
+/* ===================================================================== genetics
+ *
+ * Three columns: what a gene goes into, what it does, what there is. The middle
+ * one is the only one that changes, so it is the widest and the other two are
+ * held to a readable list width rather than sharing the space evenly — an even
+ * split gives the gene list room it does not need and the comparison room it
+ * cannot do without.
+ */
+.gene-cols {
+  display: grid;
+  grid-template-columns: minmax(180px, 15rem) minmax(300px, 1.4fr) minmax(260px, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  /* Below this the three-way comparison stops working side by side, and a
+     column squeezed to nothing is worse than a column underneath. */
+  .gene-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.gene-col {
+  margin-bottom: 0;
+}
+
+/* ------------------------------------------------------------------- bodies */
+
+.gene-band {
+  padding: 0.35rem 0.6rem 0.25rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.gene-band .muted {
+  display: block;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.72rem;
+}
+
+.gene-subject {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.3rem 0.6rem;
+  background: none;
+  border: none;
+  /* The selected row is marked on its leading edge rather than by a fill. A
+     fill competes with the tone colours the rest of the tab uses to mean
+     better and worse, and this list is not making that kind of statement. */
+  border-left: 2px solid transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gene-subject:hover {
+  background: var(--bg-deep);
+}
+
+.gene-subject.is-on {
+  border-left-color: var(--accent, var(--good));
+  background: var(--bg-deep);
+  color: var(--text-strong);
+}
+
+.gene-subject.is-locked .gene-subject-name {
+  color: var(--muted);
+}
+
+.gene-subject-name .muted {
+  margin-left: 0.4rem;
+  font-size: 0.72rem;
+}
+
+.gene-subject-right {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+
+/* How many genes are written into that body. Small, because it is a count of
+   something the middle column says properly. */
+.gene-count {
+  min-width: 1.1rem;
+  padding: 0 0.25rem;
+  border: 1px solid currentcolor;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  text-align: center;
+}
+
+.gene-empty {
+  margin: 0;
+  padding: 0 0.6rem 0.4rem;
+  font-size: 0.75rem;
+}
+
+/* --------------------------------------------------------------- what it does */
+
+.gene-subject-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.gene-title {
+  color: var(--text-strong);
+  font-size: 0.95rem;
+}
+
+.gene-desc {
+  margin: 0.3rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.gene-held {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+}
+
+.gene-traits {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A trait that the proposal moves is marked on its edge, so the eye finds the
+   changed one without having to read every multiplier on the panel. */
+.gene-trait {
+  padding: 0.4rem 0.6rem;
+  border-top: 1px solid var(--rule);
+  border-left: 2px solid transparent;
+}
+
+.gene-trait.is-moved {
+  border-left-color: var(--border-bright);
+  background: var(--bg-deep);
+}
+
+.gene-trait-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.gene-trait-name {
+  color: var(--text-strong);
+  font-size: 0.85rem;
+}
+
+.gene-trait-nums {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+/* The concrete consequence, which is the line that actually says what the gene
+   does — "a trip every 10.4s" where the multiplier above says "×1.15". */
+.gene-trait-real {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+}
+
+.gene-trait-desc {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.gene-arrow {
+  color: var(--border-bright);
+}
+
+.strike {
+  text-decoration: line-through;
+}
+
+.gene-commit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--rule);
+  font-size: 0.78rem;
+}
+
+.gene-commit-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.gene-write {
+  padding: 0.2rem 0.7rem;
+  font-size: 0.78rem;
+}
+
+/* ------------------------------------------------------------------- genes */
+
+.gene-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--rule);
+  border-left: 2px solid transparent;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gene-row:hover:not(:disabled) {
+  background: var(--bg-deep);
+}
+
+.gene-row.is-in {
+  border-left-color: var(--good);
+  background: var(--bg-deep);
+}
+
+.gene-row.is-out {
+  border-left-color: var(--warn);
+  background: var(--bg-deep);
+}
+
+.gene-row.is-held {
+  border-left-color: var(--border-bright);
+}
+
+/*
+ * A GENE THAT DOES NOT FIT IS DIMMED BY ITS TEXT, NOT BY ITS BOX.
+ *
+ * `opacity` on the row would fade the reason along with everything else, and
+ * the reason is the one thing on a blocked row that has to be readable — see
+ * the same trap on .assign-cap:disabled over in the Territory grid, where it
+ * also took the row out of the stacking order on the way past.
+ */
+.gene-row:disabled {
+  cursor: default;
+}
+
+.gene-row.is-blocked .gene-row-name,
+.gene-row.is-blocked .gene-row-desc,
+.gene-row.is-blocked .gene-eff {
+  color: var(--border-bright);
+}
+
+.gene-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.gene-row-name {
+  color: var(--text-strong);
+  font-size: 0.85rem;
+}
+
+.gene-row-effects {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.gene-row-desc {
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.gene-row-why {
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.gene-row-state {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gene-note {
+  border-top: 1px solid var(--rule);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}

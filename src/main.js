@@ -75,6 +75,8 @@ import {
   clearStars, focusedOdds,
 } from './game/focus.js';
 import * as forage from './game/forage.js';
+import * as genemod from './game/genes.js';
+import { GENES, TRAITS } from './game/definitions/genes.js';
 import * as discovery from './game/discovery.js';
 import {
   research, ingestItem, consumeBiomass, manualOdds, manualOddsSummary, MANUAL_INTAKE,
@@ -84,7 +86,7 @@ import {
   setGlobalFuel, setFuelOverride, clearFuelOverride, setActive, adjustActive,
   togglePinned, resetPinned, setMolding, toggleMolding, setMoldTarget,
   claimCost, claimableArea, claimTerritory, abandonTerritory,
-  setLandTarget, clearLandTargets, fillLandTarget,
+  setLandTarget, clearLandTargets, fillLandTarget, writeGenome,
   setGeneralBan, toggleGeneralBan, generalContents,
   queueBuild, unqueueBuild, moveQueued, clearBuildQueue,
   CLAIM_COST_PER_SQUARE_METRE, DANGEROUS_CLAIM_MULTIPLIER,
@@ -208,6 +210,20 @@ window.hive = {
     offers: (gather, biomeId) => landvalue.offersAnything(gather, biomeId),
     labelFor: (key) => landvalue.labelFor(state, key),
     meanLoad: landvalue.meanLoad,
+  },
+  // Genetics, for the same reason the land layer is here: the suite that
+  // proves a gene reaches the engine has to drive it from inside the page.
+  genes: {
+    all: GENES,
+    traits: TRAITS,
+    subjects: () => genemod.geneSubjects(state),
+    genome: (key) => genemod.genomeOf(state, key),
+    traitsOf: (key, override) => genemod.traitsOf(state, key, override),
+    droneTrait: (typeId, id) => genemod.droneTrait(state, typeId, id),
+    blocked: (geneId, key) => genemod.blockedBecause(GENES[geneId], genemod.subjectOf(state, key)),
+    read: () => [...genemod.traitsRead()],
+    write: writeGenome,
+    cycleFor: (typeId) => forage.cycleFor(state, typeId),
   },
   forageTable: FORAGE,
   poolFor,

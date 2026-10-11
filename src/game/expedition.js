@@ -23,6 +23,7 @@
 import { BIOMES, rollAdjacent, isDangerous, isColonisable, totalArea } from './definitions/biomes.js';
 import { DRONE_TYPES, exploringTypes } from './definitions/drones.js';
 import { poolFor } from './definitions/forage.js';
+import { droneTrait } from './genes.js';
 import { biomeShares } from './definitions/biomes.js';
 import { recordFind } from './discovery.js';
 import { ITEMS } from './definitions/items/index.js';
@@ -55,7 +56,10 @@ export function expeditionSeconds(state, typeId) {
   const def = DRONE_TYPES[typeId]?.expedition;
   if (!def) return 0;
   const scale = Math.max(1, totalArea(state) / (def.scaleArea || 36));
-  return def.seconds * scale;
+  // Pace is a benefit, so it divides — see cycleFor in forage.js, which is the
+  // same arithmetic for the same trait. An explorer has no forage cycle; this
+  // trip IS its work cycle, so this is where pace lands for it.
+  return (def.seconds * scale) / droneTrait(state, typeId, 'pace');
 }
 
 /** Pick one outcome from the table. */

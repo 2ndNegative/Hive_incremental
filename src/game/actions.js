@@ -16,6 +16,8 @@ import { STRUCTURES, maxLevelOf, isLeveled } from './definitions/structures.js';
 import { CASTES } from './definitions/castes.js';
 import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ITEMS } from './definitions/items/index.js';
+import { GENES } from './definitions/genes.js';
+import { genomeOf, setGenome, subjectOf } from './genes.js';
 import {
   canAfford,
   placeStructure,
@@ -945,4 +947,42 @@ export function logOfflineGain(seconds, before) {
       : `Dormant for ${span}. Nothing accumulated.`,
     'offline',
   );
+}
+
+/* ------------------------------------------------------------------ genetics */
+
+/**
+ * Write a genome into a subject.
+ *
+ * FREE, AND INSTANT, FOR NOW. Both of those are placeholders and neither is a
+ * design decision — there is no insight cost, no gestation, and nothing has to
+ * be unlocked before a gene can be used, because the shape of the screen is
+ * what is being settled and a cost model would be settling the wrong thing
+ * first. Whatever genes end up costing, it gets charged here and nowhere else.
+ *
+ * WHOLE GENOMES, NOT ONE GENE AT A TIME. The tab lets the player stage several
+ * changes and commit them together, so the action it commits is the finished
+ * list. A pair of add/remove calls would make the preview and the write two
+ * different shapes of the same thought, and the preview is the thing the player
+ * actually agreed to.
+ *
+ * `setGenome` drops anything that does not fit the subject, so this cannot
+ * store a claim the engine would then refuse to honour.
+ */
+export function writeGenome(subjectId, geneIds) {
+  const subject = subjectOf(state, subjectId);
+  if (!subject) return null;
+  const before = genomeOf(state, subjectId);
+  const after = setGenome(state, subjectId, Array.isArray(geneIds) ? geneIds : []);
+
+  const added = after.filter((id) => !before.includes(id));
+  const dropped = before.filter((id) => !after.includes(id));
+  const name = (id) => GENES[id]?.name ?? id;
+  if (added.length) {
+    pushLog(`${subject.name} genome: ${added.map(name).join(', ')} written in.`, 'unlock');
+  }
+  if (dropped.length) {
+    pushLog(`${subject.name} genome: ${dropped.map(name).join(', ')} taken out.`, 'info');
+  }
+  return after;
 }

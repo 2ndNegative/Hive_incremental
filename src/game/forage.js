@@ -26,12 +26,31 @@ import { preyFor, ORGANISMS } from './definitions/organisms.js';
 import { CASTES, CASTE_ORDER } from './definitions/castes.js';
 import { DRONE_TYPES, foragingTypes } from './definitions/drones.js';
 import { recordFind, preyKey } from './discovery.js';
+import { droneTrait } from './genes.js';
 import { pickFocused } from './focus.js';
 import { ITEMS } from './definitions/items/index.js';
 
 
 /** How long a caste stays on one find before rolling again, in seconds. */
 export const FORAGE_CYCLE = 12;
+
+/**
+ * How long ONE drone of a type takes over a trip.
+ *
+ * The constant above is the base and stays the base: it is what a trip costs a
+ * body with nothing written into it. `pace` is a benefit, so it DIVIDES — a
+ * drone at +20% pace is not twelve seconds plus a bit, it is twelve seconds
+ * over 1.2, which is ten. See definitions/genes.js, where the floor on `pace`
+ * is what keeps this from being a division by zero.
+ *
+ * Every reader of the cycle goes through here. The old constant was imported
+ * in three places and divided by in two of them, which is exactly the shape
+ * that leaves one site un-updated and a displayed rate disagreeing with the
+ * matter actually arriving.
+ */
+export function cycleFor(state, typeId) {
+  return FORAGE_CYCLE / droneTrait(state, typeId, 'pace');
+}
 
 /** Weighted pick from [{ weight, ... }]. Returns null for an empty pool. */
 export function pickWeighted(pool, random = Math.random) {
@@ -166,8 +185,9 @@ export function patchesFor(state, typeId, biomeId, want) {
   // Staggered rather than synchronised: patches created together would then
   // roll together forever, and the whole intake would step at once every
   // twelve seconds instead of drifting.
+  const cycle = cycleFor(state, typeId);
   while (have.length < want) {
-    have.push({ elapsed: (FORAGE_CYCLE * have.length) / Math.max(1, want), itemId: null });
+    have.push({ elapsed: (cycle * have.length) / Math.max(1, want), itemId: null });
   }
   if (have.length > want) have.length = want;
   return have;
@@ -207,10 +227,14 @@ export function advanceForage(state, dt) {
       const drones = where[biomeId] || 0;
       if (drones < 1) continue;
       live.add(crewKey(typeId, biomeId));
+      // Per TYPE, because pace is written into the body rather than into the
+      // hive — a quickstepped forager and a plain scavenger are on different
+      // clocks on the same ground.
+      const cycle = cycleFor(state, typeId);
       for (const patch of patchesFor(state, typeId, biomeId, drones)) {
         patch.elapsed = (patch.elapsed || 0) + dt;
-        if (patch.elapsed >= FORAGE_CYCLE || !patch.itemId) {
-          patch.elapsed = FORAGE_CYCLE > 0 ? patch.elapsed % FORAGE_CYCLE : 0;
+        if (patch.elapsed >= cycle || !patch.itemId) {
+          patch.elapsed = cycle > 0 ? patch.elapsed % cycle : 0;
           rollPatch(state, typeId, biomeId, patch);
         }
       }
