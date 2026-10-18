@@ -616,7 +616,41 @@ export function claimCost(biomeId, area) {
   return payableCost(state, raw);
 }
 
-/** The most of this patch the hive could pay for right now. */
+/**
+ * The grain this figure is quoted and dialled in at, in square metres.
+ *
+ * It matches `formatArea`'s one decimal place deliberately: the panel prints
+ * this number, puts it in a number field, and then prices it, and a value with
+ * more precision than the screen can show is a value the player cannot type
+ * back. "33.33333333" in the box was this.
+ */
+export const CLAIM_STEP = 0.1;
+
+/**
+ * The most of this patch the hive could pay for right now.
+ *
+ * ROUNDED DOWN, AND THEN CHECKED, because this is a divide that something else
+ * is about to multiply back and the two are not exact inverses.
+ *
+ * Worked example, from the bug: 4000 g of fibre at 120 g/m² gives 33.333…, and
+ * `claimCost` turns that straight back into 4000.0000000000005 g — five
+ * ten-thousandths of a picogram more than the hive owns, so `canAfford` says
+ * no. The button said "All it can pay for" and produced an amount it could not
+ * pay for, with a bill that printed as 4 kg against a store printing as 4 kg.
+ * Nothing on the screen could have told you why.
+ *
+ * Flooring to the step is what actually fixes it: a figure on the 0.1 grid is
+ * priced exactly, and the sliver thrown away is at most a tenth of a square
+ * metre. The re-check afterwards is not a second guess at the same sum — it is
+ * the guarantee this function is making, enforced rather than argued. One step
+ * is always enough to restore it: a step of ground costs at least 0.1 g of the
+ * cheapest line on the bill, which is eleven orders of magnitude above the
+ * float dust it is correcting.
+ *
+ * `mapped` passes through untouched. It is a real stored quantity rather than
+ * the result of a division, and a player taking a whole patch should get the
+ * whole patch rather than a tenth of a metre less than it.
+ */
 export function claimableArea(biomeId) {
   const mapped = state.unclaimed?.[biomeId] || 0;
   if (mapped <= 0) return 0;
@@ -626,7 +660,20 @@ export function claimableArea(biomeId) {
     if (per <= 0) continue;
     most = Math.min(most, (state.nutrients[n] || 0) / per);
   }
-  return Math.max(0, Math.min(mapped, most));
+
+  const want = Math.max(0, Math.min(mapped, most));
+
+  // The whole patch, when the hive can pay for all of it.
+  if (want >= mapped && canAfford(state, claimCost(biomeId, mapped))) return mapped;
+
+  // COUNTED IN WHOLE STEPS AND DIVIDED AT THE END. `333 * 0.1` is
+  // 33.300000000000004 and `333 / 10` is 33.3, and this number goes straight
+  // into a box the player reads and types back — so the grid is walked in
+  // integers and turned into metres once.
+  const grain = Math.round(1 / CLAIM_STEP);
+  let steps = Math.floor(want * grain);
+  if (steps > 0 && !canAfford(state, claimCost(biomeId, steps / grain))) steps -= 1;
+  return Math.max(0, steps / grain);
 }
 
 /**

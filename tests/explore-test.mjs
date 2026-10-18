@@ -302,6 +302,79 @@ check('ground people are on can be, at a premium',
   refuse.urban === 1 && Math.abs(refuse.urbanCost / refuse.plainCost - refuse.multiplier) < 1e-9,
   `×${(refuse.urbanCost / refuse.plainCost).toFixed(1)}`);
 
+/*
+ * ====================== 6b. "ALL IT CAN PAY FOR" HAS TO BE PAYABLE FOR
+ *
+ * It was not. The figure is a division — stores over price per metre — and the
+ * claim is a multiplication back, and the two are not exact inverses: 4000 g of
+ * fibre at 120 g/m² gave 33.333…, which priced at 4000.0000000000005 g against
+ * a store of 4000. The button offered an amount the hive could not buy, and
+ * both figures printed as "4 kg", so nothing on the screen could say why.
+ *
+ * Driven at the exact numbers from the report, then at a spread of prices,
+ * because the failure needs a division that does not terminate in binary and
+ * that is a property of the pair rather than of either number.
+ */
+const payable = await p.evaluate(() => {
+  const s = hive.state;
+  s.territory = { temperateForest: 36 };
+  s.structures.hivecore = 1;
+  s.structures.vacuole = 400;
+
+  const trial = (fibre) => {
+    s.unclaimed = { grassland: 500 };
+    for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e9;
+    s.nutrients.fiber = fibre;
+    const most = hive.claimableArea('grassland');
+    const bill = hive.claimCost('grassland', most);
+    return {
+      fibre,
+      most,
+      // The thing that actually matters: offering it and then taking it.
+      took: hive.claim('grassland', most),
+      over: bill.fiber - fibre,
+    };
+  };
+
+  // 4000 g at 120 g/m² is the case from the report.
+  const reported = trial(4000);
+  // And a spread, to catch the ones that divide awkwardly for other reasons.
+  const spread = [];
+  for (let g = 1000; g <= 9000; g += 137) spread.push(trial(g));
+  return { reported, spread };
+});
+check('the claimable figure from the report is actually claimable',
+  payable.reported.took > 0 && payable.reported.took === payable.reported.most,
+  `offered ${payable.reported.most} m², took ${payable.reported.took} m²`);
+check('and it is priced at or under what the hive holds',
+  payable.reported.over <= 0, `${payable.reported.over} g over`);
+check('and quoted on the grid the panel can print and the player can type back',
+  Math.abs(payable.reported.most * 10 - Math.round(payable.reported.most * 10)) < 1e-9,
+  `${payable.reported.most}`);
+const stuck = payable.spread.filter((t) => t.took !== t.most);
+check('the same holds across sixty prices, not just the one that was reported',
+  stuck.length === 0,
+  stuck.slice(0, 3).map((t) => `${t.fibre} g → offered ${t.most}, took ${t.took}`).join(' | '));
+const ragged = payable.spread.filter(
+  (t) => Math.abs(t.most * 10 - Math.round(t.most * 10)) > 1e-9,
+);
+check('and every one of them is a figure the box can hold',
+  ragged.length === 0, ragged.slice(0, 3).map((t) => `${t.fibre} g → ${t.most}`).join(' | '));
+
+// The whole patch still goes in one click when the hive can afford all of it:
+// `unclaimed` is a stored quantity, not a division, and rounding it down would
+// leave a tenth of a metre nobody can ever take.
+const wholePatch = await p.evaluate(() => {
+  const s = hive.state;
+  s.unclaimed = { grassland: 7.3 };
+  for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e9;
+  const most = hive.claimableArea('grassland');
+  return { most, took: hive.claim('grassland', most), left: s.unclaimed.grassland || 0 };
+});
+check('a patch the hive can afford outright is offered whole, not a step short',
+  wholePatch.most === 7.3 && wholePatch.took === 7.3 && wholePatch.left === 0,
+  `offered ${wholePatch.most} of 7.3 m², ${wholePatch.left} left`);
+
 /* ================================================= 7. the whole loop, ticking */
 
 const live = await p.evaluate(() => {

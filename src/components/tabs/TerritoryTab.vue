@@ -27,9 +27,11 @@ import { describeSlot, FORAGE_CYCLE } from '../../game/forage.js';
 import { formatMass, formatMassFlow, formatArea } from '../../game/units.js';
 import {
   claimCost, claimableArea, claimTerritory, abandonTerritory, DANGEROUS_CLAIM_MULTIPLIER,
+  CLAIM_STEP,
   setLandTarget, fillLandTarget, clearLandTargets,
 } from '../../game/actions.js';
 import { NUTRIENTS, substitutedEntries } from '../../game/definitions/nutrients.js';
+import { canAfford, shortOf } from '../../game/engine.js';
 import { isPinned, pinHandlers } from '../../game/tips.js';
 import {
   isStarred, isStarrable, starsFor, toggleStar, clearStars, focusedOdds, focusStrength,
@@ -173,6 +175,8 @@ const claimPatch = computed(() => {
   const want = Math.max(0, Math.min(Number(claimWant.value) || 0, area));
   const unit = claimCost(id, 1);
   const bill = claimCost(id, want);
+  const swapped = substitutedEntries(unit);
+  const missing = shortOf(state, bill);
   return {
     id,
     def: BIOMES[id],
@@ -182,8 +186,27 @@ const claimPatch = computed(() => {
     bill,
     // Which lines of the bill are bulk standing in for an element the hive
     // cannot see yet. Coloured, not explained — see substitutedEntries.
-    standingIn: substitutedEntries(unit),
-    affordable: want > 0 && Object.entries(bill).every(([n, g]) => (state.nutrients[n] || 0) >= g),
+    standingIn: swapped,
+    // One row per line, carrying its own shortfall. Worked out here rather than
+    // in the template so the figure the row prints and the figure the Claim
+    // button is enabled by are the same subtraction.
+    lines: Object.entries(bill).map(([id, grams]) => {
+      // From the ENGINE's own answer, not a comparison of our own. The two
+      // disagreeing by an epsilon is what greyed the Claim button out on a
+      // bill the engine was willing to take.
+      const short = missing[id] ?? 0;
+      return {
+        id,
+        grams,
+        short,
+        // A shortfall too small to print is still a shortfall, and it is the
+        // one that used to be impossible to see. Named rather than rounded
+        // away to nothing, because "short 0 µg" reads like a second bug.
+        shortText: short >= 0.001 ? formatMass(short) : 'a trace',
+        standingIn: swapped.has(id),
+      };
+    }),
+    affordable: want > 0 && canAfford(state, bill),
     most: claimableArea(id),
     dangerous: isDangerous(id),
     multiplier: DANGEROUS_CLAIM_MULTIPLIER,
@@ -840,7 +863,7 @@ const claimValue = computed(() => {
                 type="number"
                 min="0"
                 :max="claimPatch.area"
-                step="0.1"
+                :step="CLAIM_STEP"
                 aria-label="Square metres to claim"
               />
             </div>
@@ -854,18 +877,25 @@ const claimValue = computed(() => {
               </button>
             </div>
 
+            <!-- A LINE THE HIVE CANNOT PAY SAYS BY HOW MUCH.
+                 Colouring the figure alone is not enough when the shortfall is
+                 smaller than the rounding: a bill of 4000.0000000000005 g
+                 against a store of 4000 g printed as "4 kg" beside "4 kg", in
+                 red, with nothing on the screen able to explain the refusal. -->
             <div class="data-table">
-              <div v-for="(grams, n) in claimPatch.bill" :key="n" class="field-row">
-                <span>{{ NUTRIENTS[n]?.name ?? n }}</span>
+              <div v-for="line in claimPatch.lines" :key="line.id" class="field-row">
+                <span>{{ NUTRIENTS[line.id]?.name ?? line.id }}</span>
                 <span
                   class="num"
-                  :class="claimPatch.standingIn.has(n) ? 'cost-unassayed'
-                    : (state.nutrients[n] || 0) >= grams ? '' : 'bad'"
-                  :title="claimPatch.standingIn.has(n)
+                  :class="line.standingIn ? 'cost-unassayed' : line.short > 0 ? 'bad' : ''"
+                  :title="line.standingIn
                     ? 'Bulk, standing in for an element the hive cannot pick out yet. Assaying it cuts the price fifty-fold.'
                     : null"
                 >
-                  {{ formatMass(grams) }}
+                  {{ formatMass(line.grams) }}<span
+                    v-if="line.short > 0"
+                    class="bad"
+                  > · short {{ line.shortText }}</span>
                 </span>
               </div>
             </div>

@@ -2069,11 +2069,32 @@ export function structureCost(state, id, count = 1) {
  * tonnes, so it cannot spend them.
  */
 export function canAfford(state, cost) {
-  return Object.entries(cost).every(([n, amount]) => {
-    if (n === 'insight') return state.insight >= amount - EPSILON;
-    if (!isRevealed(state, n)) return false;
-    return (state.nutrients[n] || 0) >= amount - EPSILON;
-  });
+  return Object.keys(shortOf(state, cost)).length === 0;
+}
+
+/**
+ * WHAT IS MISSING, line by line — nutrient id to grams short.
+ *
+ * `canAfford` is defined as "nothing is short", so an interface that paints a
+ * line red and a button that refuses the purchase cannot disagree about where
+ * the threshold is. They did: the territory claim panel compared the bill to
+ * the stores with a bare `>=` of its own while the engine allowed EPSILON, so
+ * a bill of 4000.0000000000005 g against 4000 g of fibre greyed the button out
+ * on a purchase the engine would have accepted. Both figures printed as "4 kg".
+ *
+ * An unrevealed micronutrient is short by the whole amount however much of it
+ * the hive is holding: it cannot tell which tonnes are which, so it cannot
+ * spend them.
+ */
+export function shortOf(state, cost) {
+  const out = {};
+  for (const [n, amount] of Object.entries(cost)) {
+    const have = n === 'insight' ? state.insight || 0
+      : isRevealed(state, n) ? state.nutrients[n] || 0 : 0;
+    const missing = amount - EPSILON - have;
+    if (missing > 0) out[n] = amount - have;
+  }
+  return out;
 }
 
 /** Seconds until a cost becomes affordable at current rates, or null. */

@@ -641,6 +641,93 @@ const short = await p.evaluate(() => {
 check('a claim too small for a type says how far short it is',
   short.shortBy, short.text.replace(/\n/g, ' | ').slice(0, 130));
 
+/*
+ * ============== 7b. THE CLAIM BUTTON AGREES WITH THE HIVE ABOUT AFFORDABILITY
+ *
+ * It did not. The panel compared the bill to the stores with a bare `>=` of
+ * its own while `canAfford` allows an epsilon, so a bill of 4000.0000000000005
+ * g of fibre against a store of exactly 4000 g greyed the button out on a
+ * purchase the engine was perfectly willing to make — and both numbers printed
+ * as "4 kg", so the screen could not explain itself.
+ *
+ * Driven through the button rather than through the function, because the
+ * whole defect was the gap between the two.
+ */
+const atTheLimit = await p.evaluate(() => {
+  const s = hive.state;
+  s.unclaimed = { grassland: 500 };
+  for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e9;
+  // Exactly the stores the report had: the binding line divides into an
+  // amount that does not survive being multiplied back.
+  s.nutrients.fiber = 4000;
+  return hive.claimableArea('grassland');
+});
+await p.evaluate((area) => {
+  const input = document.querySelector('.claim-input');
+  input.value = String(area);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}, atTheLimit);
+await p.waitForTimeout(300);
+
+const limit = await p.evaluate(() => {
+  const box = document.querySelector('.claim-box');
+  const button = [...box.querySelectorAll('button')].find((b) => /^Claim /.test(b.innerText));
+  return {
+    label: button?.innerText.trim(),
+    disabled: button?.disabled,
+    held: hive.state.territory.grassland || 0,
+  };
+});
+check('the figure the panel offers can be clicked, not just typed',
+  limit.disabled === false, `"${limit.label}" disabled=${limit.disabled}`);
+
+await p.evaluate(() => {
+  const box = document.querySelector('.claim-box');
+  [...box.querySelectorAll('button')].find((b) => /^Claim /.test(b.innerText)).click();
+});
+await p.waitForTimeout(300);
+const bought = await p.evaluate(() => ({
+  held: hive.state.territory.grassland || 0,
+  open: Boolean(document.querySelector('.claim-box')),
+}));
+check('and clicking it actually takes the ground',
+  bought.held > 0 && !bought.open,
+  `${bought.held} m² held, dialog ${bought.open ? 'still open' : 'closed'}`);
+
+// And when the hive genuinely cannot pay, the line says by how much rather
+// than printing a figure identical to the one beside it in red.
+await p.evaluate(() => {
+  const s = hive.state;
+  s.unclaimed = { grassland: 500 };
+  for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e9;
+  s.nutrients.fiber = 100;
+});
+// The dialog closed on the successful claim above, so it has to be reopened
+// off the map before there is anything to assert about.
+await p.waitForTimeout(300);
+await p.click('.terr-tile.is-unclaimed');
+await p.waitForTimeout(300);
+await p.evaluate(() => {
+  const input = document.querySelector('.claim-input');
+  input.value = '400';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await p.waitForTimeout(300);
+const cannot = await p.evaluate(() => {
+  const box = document.querySelector('.claim-box');
+  if (!box) return { reopened: false };
+  const button = [...box.querySelectorAll('button')].find((b) => /^Claim /.test(b.innerText));
+  return {
+    reopened: true,
+    disabled: button?.disabled,
+    saysShort: /short\s/i.test(box.innerText),
+    text: box.innerText.replace(/\n/g, ' | '),
+  };
+});
+check('a bill the hive cannot pay disables the button and names the shortfall',
+  cannot.reopened && cannot.disabled === true && cannot.saysShort,
+  cannot.text?.slice(0, 120) ?? 'dialog did not reopen');
+
 /* ------------------------------------------------------------------ errors */
 
 check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));

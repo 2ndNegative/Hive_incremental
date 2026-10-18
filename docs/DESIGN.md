@@ -918,6 +918,31 @@ doubling their group. Doubling 2 g gives 4 g against a 10 g cost. They now add f
 shelf, generated from the cap group rather than hand-typed, and `capMult` still multiplies the
 result — so Tight Packing reaches vault room too.
 
+### Nothing decides affordability twice
+
+`shortOf(state, cost)` returns what is missing, line by line, and `canAfford` is defined as
+"nothing is short". Every screen that greys out a button, and every screen that paints a cost
+line red, goes through one of those two — never through a comparison of its own.
+
+That is not tidiness, it is a bug that shipped. The territory claim panel compared the bill to
+the stores with a bare `>=` while the engine allowed `EPSILON`, and a bill of
+4000.0000000000005 g of fibre against exactly 4000 g greyed the Claim button out on a purchase
+`claimTerritory` would have accepted. Both numbers printed as "4 kg", so the screen could not
+explain itself, and the only symptom was a dead button.
+
+The same bill had a second defect behind it, and it is the more general one. **"The most you
+can afford" is a division that something is about to multiply back, and the two are not exact
+inverses.** 4000 ÷ 120 is 33.333…, and 33.333… × 120 is 4000.0000000000005. So `claimableArea`
+floors to `CLAIM_STEP` (0.1 m², matching `formatArea`'s one decimal) and then re-checks its own
+answer against `canAfford`, stepping down once if it has to — the guarantee enforced rather
+than argued. It counts in whole steps and divides at the end, because `333 * 0.1` is
+33.300000000000004 while `333 / 10` is 33.3, and this figure goes into a box the player reads
+and types back. The whole patch passes through untouched: `unclaimed` is a stored quantity
+rather than a division, and rounding it down would leave a sliver nobody could ever take.
+
+Any future "max you can afford" button inherits all of this. The shape to copy is: derive it,
+snap it to the grid the interface prints, then ask the engine whether the answer is real.
+
 ### What is tested, and what deliberately is not
 
 `tests/storagewall-test.mjs` pins the narrow invariant, and getting it narrow mattered. A
