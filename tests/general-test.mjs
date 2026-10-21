@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * The shared pool: what is in it, where it sits, and what is allowed in.
@@ -21,23 +21,16 @@ async function ensureLanded(page) {
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /** A hive with a small pool and more of two things than its shelves can hold. */
@@ -56,7 +49,7 @@ async function fixture() {
 /* ================================================ 1. it sits at the very top */
 
 await fixture();
-await p.waitForTimeout(250);
+await settle(p);
 const placement = await p.evaluate(() => {
   const rows = [...document.querySelectorAll('.res-row')];
   const heads = [...document.querySelectorAll('.group-head')];
@@ -90,9 +83,9 @@ const filled = await p.evaluate(() => {
 check('two things overflowing both land in the pool',
   filled.contents.length === 2, filled.contents.join(', '));
 
-await p.waitForTimeout(250);
+await settle(p);
 await p.locator('.general-row').hover();
-await p.waitForTimeout(300);
+await settle(p);
 const tip = await p.evaluate(() => {
   const body = document.querySelector('.general-row .tip-body');
   return {
@@ -275,9 +268,9 @@ check('barring the macro evicts what was already pooled under it',
 /* ========================================== 6. the dialog, end to end */
 
 await fixture();
-await p.waitForTimeout(250);
+await settle(p);
 await p.locator('.general-row').click();
-await p.waitForTimeout(300);
+await settle(p);
 const dialog = await p.evaluate(() => {
   const box = document.querySelector('.rules-box');
   return {
@@ -301,7 +294,7 @@ const toggled = await p.evaluate(() => {
   btn.click();
   return { before };
 });
-await p.waitForTimeout(250);
+await settle(p);
 const afterToggle = await p.evaluate(() => {
   const box = document.querySelector('.rules-box');
   const row = [...box.querySelectorAll('.field-row')]
@@ -317,18 +310,17 @@ check('a toggle in it bars that resource',
   `${toggled.before} → ${afterToggle.label}`);
 check('and the button shows it', afterToggle.barred);
 
-await p.waitForTimeout(250);
+await settle(p);
 const counted = await p.evaluate(() =>
   document.querySelector('.general-row .res-name')?.innerText.replace(/\s+/g, ' ').trim(),
 );
 check('the row itself says how many are barred', /1 barred/.test(counted || ''), counted);
 
-const all = await p.evaluate(() => {
+await p.evaluate(() => {
   const box = document.querySelector('.rules-box');
   [...box.querySelectorAll('.btn')].find((b) => b.textContent.trim() === 'Bar all').click();
-  return null;
 });
-await p.waitForTimeout(250);
+await settle(p);
 const allBarred = await p.evaluate(() => Object.keys(hive.state.generalBans).length);
 check('and "bar all" bars the lot', allBarred >= 7, `${allBarred} barred`);
 
@@ -336,7 +328,7 @@ await p.evaluate(() => {
   const box = document.querySelector('.rules-box');
   [...box.querySelectorAll('.btn')].find((b) => b.textContent.trim() === 'Allow all').click();
 });
-await p.waitForTimeout(250);
+await settle(p);
 const cleared = await p.evaluate(() => Object.keys(hive.state.generalBans).length);
 check('and "allow all" clears them', cleared === 0, `${cleared} barred`);
 
@@ -344,7 +336,7 @@ await p.evaluate(() => {
   const box = document.querySelector('.rules-box');
   [...box.querySelectorAll('.btn')].find((b) => b.textContent.trim() === 'Close').click();
 });
-await p.waitForTimeout(250);
+await settle(p);
 check('and it closes', await p.evaluate(() => !document.querySelector('.rules-box')));
 
 /* ================================================== 7. a save keeps the rules */
@@ -363,10 +355,4 @@ check('the rules round-trip through a save',
   saved.bans?.water === true && saved.bans?.fiber === true, JSON.stringify(saved.bans));
 check('at the current save version', saved.version === SAVE_VERSION, `v${saved.version}`);
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the general store', fail, errors, browser });

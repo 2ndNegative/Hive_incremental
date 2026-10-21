@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * Expeditions, and the ground they come back with.
@@ -19,29 +19,22 @@ async function ensureLanded(page) {
 }
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(200);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* ===================================================== 1. what one costs */
@@ -386,9 +379,11 @@ const live = await p.evaluate(() => {
   s.expedition = {};
   s.energyPool = 1e9;
   const before = { ...s.unclaimed };
+  const lostBefore = s.stats.explorersLost;
   hive.tick(900, 1); // fifteen minutes: six explorers on a ninety-second trip
   return {
     before,
+    lostDuring: s.stats.explorersLost - lostBefore,
     mapped: Object.entries(s.unclaimed).map(([id, a]) => `${id} ${a.toFixed(1)}`),
     total: Object.values(s.unclaimed).reduce((a, b) => a + b, 0),
     left: s.droneTypes.explorer,
@@ -401,7 +396,23 @@ const live = await p.evaluate(() => {
 });
 check('a hive with explorers out maps ground as it ticks',
   live.total > 0, `${live.total.toFixed(1)} m² across ${live.mapped.length} kinds`);
-check('and loses one now and then', live.left < 6, `${live.left} of 6 came home`);
+/*
+ * A CONSERVATION PROPERTY, NOT A COIN FLIP.
+ *
+ * This asserted that at least one explorer died during the run. Loss is a 5%
+ * outcome and fifteen minutes is about sixty resolutions, so it passed 95% of
+ * the time and failed the other 5% — roughly one run in twenty-two, for no
+ * reason anybody could act on. A test that cries wolf once a fortnight trains
+ * you to rerun it rather than read it.
+ *
+ * What is always true, and worth pinning, is that the headcount and the tally
+ * agree: every explorer missing from the count is one the run recorded losing,
+ * and none went missing any other way. That the loss branch works at all is
+ * section 4's job, where it is driven directly rather than waited for.
+ */
+check('and every explorer missing from the count is one the run recorded losing',
+  6 - live.left === live.lostDuring,
+  `${live.left} of 6 came home, ${live.lostDuring} recorded lost`);
 check('the run keeps the tally',
   live.stats.found > 0 && live.stats.caches > 0,
   `${live.stats.found.toFixed(1)} m² found, ${live.stats.caches} caches, ${live.stats.lost} lost`);
@@ -414,7 +425,7 @@ await p.evaluate(() => {
   s.nutrients.water = 1e6; s.nutrients.protein = 1e5; s.nutrients.fiber = 1e5; s.nutrients.ash = 1e5;
 });
 await openTab(p, 'Territory');
-await p.waitForTimeout(300);
+await settle(p);
 const map = await p.evaluate(() => {
   const tiles = [...document.querySelectorAll('.terr-tile')];
   return {
@@ -468,7 +479,7 @@ await p.evaluate(() => {
     .find((t) => !t.classList.contains('is-blocked') && !t.classList.contains('is-dangerous'));
   tile.click();
 });
-await p.waitForTimeout(300);
+await settle(p);
 const dialog = await p.evaluate(() => {
   const box = document.querySelector('.claim-box');
   return {
@@ -489,7 +500,7 @@ const claimed = await p.evaluate(async () => {
   btn.click();
   return { before, label: btn.textContent.trim() };
 });
-await p.waitForTimeout(300);
+await settle(p);
 const after = await p.evaluate(() => ({
   held: hive.state.territory.grassland || 0,
   mapped: hive.state.unclaimed.grassland || 0,
@@ -515,7 +526,13 @@ const walk = await p.evaluate(() => {
 
   const held = new Set(['temperateForest']);
   let illegal = null;
-  for (let i = 0; i < 4000; i += 1) {
+  // A REACHABILITY claim, sampled. Four thousand walks left tundra out about
+  // one run in six — it sits behind a narrow adjacency path, so the tail is
+  // long. This is in-page arithmetic with nothing rendering, so the honest fix
+  // is simply to walk far enough that the tail stops mattering; it adds well
+  // under a second. If it ever flakes again, walk the adjacency graph directly
+  // rather than sampling it.
+  for (let i = 0; i < 60_000; i += 1) {
     const r = hive.expedition.resolve('explorer');
     s.droneTypes.explorer = 1; // the lost branch would end the walk early
     if (r.outcome !== 'ground' && r.outcome !== 'hostile') continue;
@@ -563,7 +580,7 @@ check('a fractional claim is stored exactly',
   decimals.took === 3.2 && Math.abs(decimals.stored - 39.2) < 1e-9,
   `${decimals.stored} m² held`);
 
-await p.waitForTimeout(300);
+await settle(p);
 const onScreen = await p.evaluate(() => {
   const head = [...document.querySelectorAll('.panel-head')]
     .find((h) => /holdings/i.test(h.innerText));
@@ -581,12 +598,11 @@ check('and the header keeps the decimal', /39\.2 m²/i.test(onScreen.head || '')
 check('so does the tile', /39\.2 m²/.test(onScreen.tile || ''), onScreen.tile);
 check('and the legend', /39\.2 m²/.test(onScreen.legend || ''), onScreen.legend);
 
-const whole = await p.evaluate(() => {
+await p.evaluate(() => {
   hive.state.territory = { temperateForest: 36 };
   hive.state.unclaimed = {};
-  return hive.formatArea ? null : null;
 });
-await p.waitForTimeout(300);
+await settle(p);
 const wholeShown = await p.evaluate(() =>
   [...document.querySelectorAll('.panel-head')].find((h) => /holdings/i.test(h.innerText))
     ?.innerText.replace(/\s+/g, ' ').trim(),
@@ -606,12 +622,12 @@ await p.evaluate(() => {
   s.territory = { temperateForest: 36, taiga: 7 };
   s.unclaimed = { temperateForest: 3.2, kelpForest: 0.8 };
 });
-await p.waitForTimeout(300);
+await settle(p);
 
 const hovered = [];
 for (const tile of await p.$$('.terr-tile')) {
   await tile.hover();
-  await p.waitForTimeout(140);
+  await settle(p);
   hovered.push(
     await p.evaluate((el) => {
       const body = el.querySelector('.tip-body');
@@ -661,10 +677,4 @@ check('and none of them opens off the edge of the window',
   hovered.every((h) => !h.offscreen),
   `${hovered.filter((h) => h.offscreen).length} off-screen`);
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'exploring and claiming', fail, errors, browser });

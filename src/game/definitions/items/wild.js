@@ -1146,7 +1146,7 @@ export default [
     name: 'Crowberry',
     category: 'fruit',
     tags: ['berry', 'tundra'],
-    source: 'Modelled from Empetrum nigrum literature and USDA wild-blueberry row',
+    source: 'Modelled from Empetrum nigrum literature and USDA SR Legacy 167640 (blueberries, wild)',
     confidence: 'model',
     coverage: 'partial',
     g: { water: 84, protein: 0.5, fat: 1, carb: 9, fiber: 4, ash: 0.4 },

@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, shot } from './harness.mjs';
+import { BASE, LAUNCH, shot, finish, settle } from './harness.mjs';
 
 /**
  * These suites were written before landing sites existed. A fresh save now
@@ -22,7 +22,7 @@ async function ensureLanded(page) {
  */
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 const base = BASE;
@@ -34,9 +34,16 @@ const check = (label, ok, detail = '') => {
   if (!ok) fail.push(label);
 };
 
+// COLLECTED, NOT JUST PRINTED. This suite reloads the page a dozen times and
+// drives migrations through it; an exception on one of those loads is the
+// whole thing it is testing going wrong, and it used to scroll past as a log
+// line while every assertion below still passed.
+const errors = [];
+
 const fresh = async () => {
   const p = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  p.on('pageerror', (e) => console.log('   pageerror:', e.message));
+  p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await p.goto(base, { waitUntil: 'networkidle' });
   await p.evaluate(() => localStorage.clear());
   await p.reload({ waitUntil: 'networkidle' });
@@ -124,7 +131,7 @@ const fresh = async () => {
     check('the failure is identified as a quota problem', result.status.reason === 'quota', result.status.reason);
     check('the message tells the player what to do',
       /export/i.test(result.status.error || ''), (result.status.error || '').slice(0, 70));
-    await p.waitForTimeout(250);
+    await settle(p);
     const banner = await p.textContent('.save-alert').catch(() => null);
     check('a banner appears, not just a log line', banner !== null && /not being saved/i.test(banner));
     const indicator = await p.textContent('.topbar .meta:last-of-type');
@@ -136,7 +143,7 @@ const fresh = async () => {
     Object.keys(localStorage).filter((k) => k.startsWith('junk.')).forEach((k) => localStorage.removeItem(k));
     return { ok: hive.save(), status: { ...hive.saveStatus } };
   });
-  await p.waitForTimeout(250);
+  await settle(p);
   const gone = await p.$('.save-alert');
   check('it recovers when space is freed',
     recovered.ok === true && recovered.status.ok === true && gone === null);
@@ -226,6 +233,95 @@ const fresh = async () => {
   await p.close();
 }
 
-console.log(fail.length ? `\n=== ${fail.length} CHECK(S) FAILED: ${fail.join('; ')} ===` : '\n=== save layer verified ===');
-await browser.close();
-console.log('=== save test finished ===');
+
+/*
+ * ============== A SAVE IS AN INPUT, AND INPUTS GET CHECKED
+ *
+ * Nothing checked this one. A save holding `"broken"` where a quantity belongs
+ * went straight into the live hive, where the first arithmetic on it turns
+ * into NaN and spreads through every rate in the game. A save from a version
+ * that does not exist yet was accepted and written back stamped with this
+ * build's version, quietly downgrading a run played on a newer build. And an
+ * import whose write failed replaced the hive anyway and reported success, so
+ * a player on a full disk lost the run they had open AND did not gain the one
+ * they were importing.
+ */
+{
+  const p = await fresh();
+  const guard = await p.evaluate(() => {
+    const enc = (o) => btoa(encodeURIComponent(JSON.stringify(o)));
+    hive.state.origin = 'anthill';
+    hive.state.nutrients.carb = 500;
+    hive.save();
+    const body = JSON.parse(localStorage.getItem('hiveidle.save.v2'));
+    const out = {};
+
+    // 1. Wrong types are repaired to the schema rather than installed.
+    const junk = JSON.parse(JSON.stringify(body));
+    junk.nutrients.carb = 'broken';
+    junk.larvae = -5000;
+    junk.droneTypes = { forager: 'lots' };
+    out.junkAccepted = hive.importSave(enc(junk));
+    out.carb = hive.state.nutrients.carb;
+    out.larvae = hive.state.larvae;
+    out.forager = hive.state.droneTypes.forager;
+    // And the repaired hive still simulates: a NaN here would spread.
+    hive.tick(1, 1);
+    out.finiteAfterTick = Number.isFinite(hive.derived().energy.demand);
+
+    // 2. A save from the future is refused outright, and changes nothing.
+    hive.state.nutrients.carb = 1234;
+    const future = JSON.parse(JSON.stringify(body));
+    future.version = 999;
+    future.nutrients.carb = 777;
+    out.futureAccepted = hive.importSave(enc(future));
+    out.carbAfterFuture = hive.state.nutrients.carb;
+
+    // 3. So is anything that is not a save at all.
+    out.nullAccepted = hive.importSave(btoa(encodeURIComponent('null')));
+    out.garbageAccepted = hive.importSave('@@@not base64@@@');
+    out.carbAfterGarbage = hive.state.nutrients.carb;
+
+    // 4. An import that cannot be stored puts the hive back as it was.
+    hive.state.nutrients.carb = 4321;
+    hive.save();
+    const good = JSON.parse(JSON.stringify(body));
+    good.nutrients.carb = 31337;
+    const realSet = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new Error('quota exceeded'); };
+    out.brokenWriteAccepted = hive.importSave(enc(good));
+    Storage.prototype.setItem = realSet;
+    out.carbAfterBrokenWrite = hive.state.nutrients.carb;
+    return out;
+  });
+
+  check('a save with the wrong types in it is repaired, not installed',
+    guard.junkAccepted === true && guard.carb === 0 && guard.larvae === 0
+    && guard.forager === 0,
+    JSON.stringify(guard));
+  check('and the hive it produces still simulates', guard.finiteAfterTick);
+  check('a save from a newer build is refused rather than downgraded',
+    guard.futureAccepted === false && guard.carbAfterFuture === 1234,
+    `accepted ${guard.futureAccepted}, carb ${guard.carbAfterFuture}`);
+  check('so is anything that is not a save',
+    guard.nullAccepted === false && guard.garbageAccepted === false
+    && guard.carbAfterGarbage === 1234, JSON.stringify(guard));
+  check('an import that cannot be written puts the hive back and says so',
+    guard.brokenWriteAccepted === false && guard.carbAfterBrokenWrite === 4321,
+    `reported ${guard.brokenWriteAccepted}, carb ${guard.carbAfterBrokenWrite}`);
+
+  // The stat the cull block writes, and a parked research purchase, both
+  // survive a round trip — a closed map drops whatever the schema forgot.
+  const kept = await p.evaluate(() => {
+    hive.state.stats.culled = 42;
+    hive.state.tech.lithovory = true;
+    hive.save();
+    hive.load();
+    return { culled: hive.state.stats.culled, parked: hive.state.tech.lithovory };
+  });
+  check('a stat the simulation writes survives a save', kept.culled === 42, `${kept.culled}`);
+  check('and so does a purchase of parked research', kept.parked === true);
+  await p.close();
+}
+
+await finish({ name: 'save layer', fail, errors, browser });

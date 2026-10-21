@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue';
-import { state } from '../../game/useGame.js';
+import { ref, computed, watch } from 'vue';
+import { state, ageSince } from '../../game/useGame.js';
 import {
   save,
   wipe,
@@ -42,10 +42,26 @@ function confirmWipeNow() {
 }
 
 /** Offered inside the wipe dialog, because losing this by accident is forever. */
+/*
+ * THE SAME TWO OUTCOMES `doExport` ALREADY HANDLES, fifty lines below.
+ *
+ * This swallowed the clipboard failure and then announced success regardless —
+ * and in a page served without a secure context `navigator.clipboard` is
+ * undefined, so the optional call short-circuits, nothing is copied, and the
+ * log still said it was. That is the last message a player reads before wiping
+ * their save, which makes it the worst line in the game to be wrong.
+ */
 function exportBeforeWipe() {
   saveText.value = exportSave();
-  navigator.clipboard?.writeText(saveText.value).catch(() => {});
-  pushLog('Save string copied to the clipboard and written into Settings.', 'info');
+  const copied = navigator.clipboard?.writeText(saveText.value);
+  if (!copied) {
+    pushLog('Save string written into Settings below. Copy it before wiping.', 'info');
+    return;
+  }
+  copied.then(
+    () => pushLog('Save string copied to the clipboard and written into Settings.', 'info'),
+    () => pushLog('Save string written into Settings below — the clipboard refused it.', 'info'),
+  );
 }
 
 const headroom = ref(null);
@@ -58,11 +74,9 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-const lastWrite = computed(() => {
-  if (!saveStatus.at) return 'not yet';
-  const secs = Math.max(0, Math.round((Date.now() - saveStatus.at) / 1000));
-  return secs < 60 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`;
-});
+// Through the shared clock. `Date.now()` inside a computed is read once and
+// then never again, so this used to freeze at "0s ago" — see ageSince.
+const lastWrite = computed(() => ageSince(saveStatus.at) ?? 'not yet');
 
 /** Yields a frame first so the button can show its busy state before blocking. */
 function runHeadroomTest() {
@@ -91,6 +105,16 @@ function submitCode() {
   }
 }
 
+/*
+ * The DOM used to be written only by the buttons below, so an import or a wipe
+ * swapped `settings.theme` and the page kept the old one — the highlight moved
+ * and nothing else did. Watching the setting means every route that changes it
+ * is a route that changes the page, including ones not written yet.
+ */
+watch(() => state.settings.theme, (theme) => {
+  document.documentElement.dataset.theme = theme;
+});
+
 function applyTheme(theme) {
   state.settings.theme = theme;
   document.documentElement.dataset.theme = theme;
@@ -106,8 +130,10 @@ function doExport() {
 
 function doImport() {
   if (!saveText.value.trim()) return;
-  importSave(saveText.value);
-  saveText.value = '';
+  // CLEARED ONLY ON SUCCESS. It used to clear either way, so a paste that
+  // failed to import was logged as an error and destroyed in the same breath,
+  // leaving nothing to retry and nothing to inspect.
+  if (importSave(saveText.value)) saveText.value = '';
 }
 
 </script>
@@ -252,6 +278,7 @@ function doImport() {
 
         <textarea
           class="save-box"
+          aria-label="Save string"
           v-model="saveText"
           placeholder="Export writes your save string here; paste one in and press Import to restore it."
         />
@@ -357,6 +384,7 @@ function doImport() {
             class="codex-search"
             style="max-width: 16rem; flex: 0 1 16rem"
             type="text"
+            aria-label="Unlock code"
             v-model="codeInput"
             placeholder="code"
             @keyup.enter="submitCode()"

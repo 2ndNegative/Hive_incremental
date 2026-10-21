@@ -862,7 +862,7 @@ export const RATION_KEY = 'drones';
  * does, for the same reason — a hive that starves to death while the player is
  * asleep is a hive nobody comes back to.
  */
-export function computeRation(state, mod = null, use = null) {
+export function computeRation(state, mod = null, use = null, dt = 1, claimed = null) {
   const drones = droneCount(state);
 
   // WHAT THEY ATE OUT THERE. A drone on ground it can work feeds itself partly
@@ -920,6 +920,7 @@ export function computeRation(state, mod = null, use = null) {
     share,
     joules,
     nutrient: null,
+    choice: null,
     grams: 0,
     wantGrams: 0,
     ratio: 1,
@@ -934,8 +935,16 @@ export function computeRation(state, mod = null, use = null) {
   );
   // Rate in grams of the preferred fuel, which is all chooseFuel needs it for.
   const nominal = order[0] ? joules / Math.max(EPSILON, joulesPerGram(order[0])) : 0;
-  const nutrient = chooseFuel(state, RATION_KEY, order, nominal).nutrient;
-  if (!nutrient) return { ...empty, ratio: 0, multiplier: HYDRATION_FLOOR, hungry: true };
+  // THE WHOLE CHOICE, not just the nutrient. `switched` and `hold` are what
+  // the changeover cooldown is made of, and they were being thrown away here —
+  // so the lock this reads on the next call was never written, the "nothing in
+  // the tank" branch ran every time, and the ration re-picked its fuel freely.
+  // The doc above promises the generators' cooldown; this is what keeps it.
+  const choice = chooseFuel(state, RATION_KEY, order, nominal);
+  const nutrient = choice.nutrient;
+  if (!nutrient) {
+    return { ...empty, choice, ratio: 0, multiplier: HYDRATION_FLOOR, hungry: true };
+  }
 
   // RAW joules per gram, NOT the generator's efficiency. `burnBase` is what a
   // Metabolic Generator fails to recover out of a fuel; a drone eating is not a
@@ -944,9 +953,31 @@ export function computeRation(state, mod = null, use = null) {
   // is 0.15 g/s of sugar a drone, as specified, and research does not change it.
   const perGram = joulesPerGram(nutrient);
   const wantGrams = perGram > EPSILON ? joules / perGram : 0;
-  const have = state.nutrients?.[nutrient] || 0;
-  // Per second: what it wants against what a second of eating could find.
-  const grams = Math.min(wantGrams, have);
+
+  /*
+   * WHAT IS ACTUALLY THERE, OVER THE STEP THAT IS ACTUALLY BEING TAKEN.
+   *
+   * Both halves of that were wrong. `wantGrams` is a RATE and the store is a
+   * STOCK, and this compared them directly — so a hive holding one gram of
+   * sugar, wanting 0.15 g a second, reported `ratio: 1`, `hungry: false` and
+   * a full vigour multiplier. Fine at a tenth of a second. During an offline
+   * catch-up, where a step is up to an hour, it meant a hive with ninety
+   * seconds of food in the cupboard sailed through ten hours at full strength.
+   * Dividing the stock by the step says what the store can actually sustain
+   * for the length of the step being taken.
+   *
+   * And the brood is drinking from the same cup. `claimed` is what has already
+   * been spoken for this derive — the larvae eat first, because a larva that
+   * goes unfed DIES and a drone that goes unfed only slows down, and of the
+   * two outcomes only one can be undone. Before this, each claimant measured
+   * itself against the whole store: a tenth of a gram fed four drones AND five
+   * larvae, and both reported themselves fed out of a stock that could not
+   * cover either.
+   */
+  const spokenFor = claimed?.[nutrient] || 0;
+  const have = Math.max(0, (state.nutrients?.[nutrient] || 0) - spokenFor * Math.max(dt, EPSILON));
+  const sustainable = have / Math.max(dt, EPSILON);
+  const grams = Math.min(wantGrams, sustainable);
   const ratio = wantGrams > EPSILON ? grams / wantGrams : 1;
   return {
     drones,
@@ -955,6 +986,7 @@ export function computeRation(state, mod = null, use = null) {
     share,
     joules,
     nutrient,
+    choice,
     grams,
     wantGrams,
     ratio,
@@ -1023,7 +1055,21 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   const use = landUse(state);
 
   const hydration = computeHydration(state, mod);
-  const ration = computeRation(state, mod, use);
+
+  /*
+   * ONE STOCK, ONE BUDGET. The brood's claim is worked out here, before the
+   * ration, and handed to it — so the two are drawing from the same sugar
+   * rather than each measuring itself against the whole of it.
+   *
+   * The brood eats first. A larva that goes unfed dies; a drone that goes
+   * unfed slows down, and of the two only one is reversible. It is the same
+   * figure the brood block downstream reports, computed once here so the
+   * claimant and the claim cannot disagree.
+   */
+  const broodCount = Math.floor(state.larvae || 0);
+  const broodWant = broodCount * LARVA_CARB_PER_SECOND;
+  const broodClaim = Math.min(broodWant, (state.nutrients.carb || 0) / Math.max(dt, EPSILON));
+  const ration = computeRation(state, mod, use, dt, { carb: broodClaim });
 
   // One number, because they compound honestly: a hive that is both parched and
   // hungry is in twice the trouble, and should feel it.
@@ -1078,6 +1124,7 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
     // Something it is allowed to make, whether or not it can make it yet.
     const wants = running > 0 && Boolean(moldTarget);
     const active = wants && larvaeOnHand && moldAffordable;
+    const moldCycleRate = active ? ((units * pace) / def.seconds) * factor(mod, 'moldRate') : 0;
     molding.push({
       id,
       name: STRUCTURES[id].name,
@@ -1096,9 +1143,17 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
       // CYCLES per second — see the note on the brood block. One press is one
       // drone, so for molding this is also the drone rate; it is named
       // separately anyway so tick() has one thing to read on both paths.
-      cycleRate: active ? (units * pace) / def.seconds : 0,
-      // Drones per second at this many chambers, at this charge, at this pace.
-      rate: active ? ((units * pace) / def.seconds) * factor(mod, 'moldRate') : 0,
+      // THE MODIFIER IS IN HERE, not only in `rate`. It used to be applied to
+      // the advertised figure alone while `tick` advanced the unmodified one,
+      // so a gene or building aimed at `moldRate` would have moved the number
+      // on the screen and nothing else. Nothing contributes to the channel
+      // today, which is exactly why it had to be fixed today: the first thing
+      // that does would have shipped a display that lies about the simulation.
+      cycleRate: moldCycleRate,
+      // Drones per second. One press is one drone, so for molding the two are
+      // the same figure — DERIVED from the cycle rate rather than computed
+      // beside it, so they cannot drift apart again.
+      rate: moldCycleRate,
       // Work in front of it and an empty brood behind it.
       starved: wants && larvaeOnHand === false,
       // Work in front of it and nothing to build it out of.
@@ -1250,7 +1305,13 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
         // rate: what they actually found to process
         owned: per * count,
         capacity: rate,
-        rate: rate - gramsLeft / Math.max(dt, EPSILON),
+        // CLAMPED AT ZERO. `gramsLeft` is the budget scaled by burnRate, which
+        // for carbohydrate is 3 — so a generator pointed at an empty carb
+        // store reported -20 g/s of "processing". Nothing reads this yet,
+        // which is the only reason nobody saw a negative mass rate on a
+        // screen. What it means is grams actually taken per second, and that
+        // cannot be less than none.
+        rate: Math.max(0, rate - gramsLeft / Math.max(dt, EPSILON)),
         watts,
         preferred,
         fallback,
@@ -1398,7 +1459,12 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   for (const n of fuelled) {
     const grams = state.nutrients[n] || 0;
     fuelEnergy += grams * joulesPerGram(n);
-    fuelYield += grams * joulesPerGram(n) * efficiency[n];
+    // THE BURN LOSS BELONGS HERE TOO. The generator's own conversion is
+    // `joulesPerGram × efficiency × burnLoss` (see the generator block above);
+    // this estimate left the last term out, so "how long until the generators
+    // run dry" was overstated by the whole of the loss — about eleven per cent
+    // for a carbohydrate-fed hive, always in the optimistic direction.
+    fuelYield += grams * joulesPerGram(n) * efficiency[n] * (NUTRIENTS[n].burnEfficiency ?? 1);
   }
 
   // How much of what the hive asked for it actually got. Everything that does
@@ -1421,6 +1487,7 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
     const def = STRUCTURES[id].brood;
     if (!def) continue;
     const units = working(state, charges, id);
+    const broodCycleRate = ((units * pace) / def.seconds) * factor(mod, 'broodRate');
     brood.push({
       id,
       name: STRUCTURES[id].name,
@@ -1443,9 +1510,14 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
       // is a hive whose screen and whose simulation disagree about how fast it
       // is breeding, which is the one failure the authored/derived split exists
       // to make impossible.
-      cycleRate: (units * pace) / def.seconds,
-      // Larvae per second at this many chambers, at this charge, at this pace.
-      rate: ((units * pace) / def.seconds) * (def.yield ?? 1) * factor(mod, 'broodRate'),
+      // THE MODIFIER IS IN HERE, not only in `rate`. `tick` advances
+      // `cycleRate`, so applying `broodRate` to the advertised figure alone
+      // moved the number on the screen and left the brood laying at the old
+      // speed. See the same fix on the molding block above.
+      cycleRate: broodCycleRate,
+      // Larvae per second: cycles times what a cycle yields. Derived from the
+      // cycle rate rather than recomputed, so the two cannot disagree.
+      rate: broodCycleRate * (def.yield ?? 1),
       affordable: Object.entries(def.cost).every(
         ([n, g]) => (state.nutrients[n] || 0) >= g - EPSILON,
       ),
@@ -1763,9 +1835,11 @@ export function computeDerived(state, dt = TICK_SECONDS, { explain = true } = {}
   // The brood eats. A larva is not a consumer of ENERGY — it is a consumer of
   // sugar, directly, the way the water loss below is a loss of water, so it is
   // drawn straight off the store rather than going through the pool.
-  const larvaeCount = Math.floor(state.larvae || 0);
-  const larvaeWant = larvaeCount * LARVA_CARB_PER_SECOND;
-  const larvaeDrain = Math.min(larvaeWant, (state.nutrients.carb || 0) / Math.max(dt, EPSILON));
+  // Worked out at the top of this function, where the shared sugar budget is
+  // settled, and reported here. See the note beside `broodClaim`.
+  const larvaeCount = broodCount;
+  const larvaeWant = broodWant;
+  const larvaeDrain = broodClaim;
   const larvaeStarving = larvaeCount > 0 && larvaeWant - larvaeDrain > EPSILON;
   const hunger = larvaeStarving ? state.larvaeHunger || 0 : 0;
   if (larvaeWant > EPSILON) {
@@ -2311,6 +2385,19 @@ export function tick(state, dt) {
     state.fuelLock[g.key] = { on: g.using, hold: held };
   }
 
+  // AND THE RATION'S, which is the same decision and was never written down.
+  // Without it the drones' fuel choice had no memory between ticks, so a hive
+  // sitting on two nearly-equal stores flipped between them every frame — the
+  // exact stutter the cooldown exists to prevent, and the reason the
+  // generators have one.
+  {
+    const r = derived.ration;
+    const choice = r?.choice;
+    const held = choice?.switched ? FUEL_SWITCH_SECONDS : Math.max(0, (choice?.hold || 0) - dt);
+    if (!choice?.nutrient && held <= 0) delete state.fuelLock[RATION_KEY];
+    else state.fuelLock[RATION_KEY] = { on: choice?.nutrient ?? null, hold: held };
+  }
+
   // Brownout. Every standing building walks towards the share of its upkeep it
   // is actually being paid, at a constant rate — a full swing takes
   // BROWNOUT_SECONDS either way, so a building cut off entirely is dark in
@@ -2363,7 +2450,25 @@ export function tick(state, dt) {
         const canPay = Object.entries(b.cost).every(
           ([n, grams]) => (state.nutrients[n] || 0) >= grams - 1e-12,
         );
-        if (!canPay) break;
+        /*
+         * A FAILED ATTEMPT IS LOST, AND SO IS EVERY ONE BEHIND IT.
+         *
+         * `break` alone left the rest of the completed cycles sitting in
+         * `progress`, which is the backlog the comment above swears this does
+         * not keep. A live tenth-of-a-second step never banks more than a
+         * sliver, so it looked fine — but one coarse offline step with no
+         * protein banked a hundred and forty-nine cycles, and the moment
+         * protein arrived the brood laid thirty-three larvae in a tenth of a
+         * second. Nothing stops the player arranging that deliberately.
+         *
+         * The stores do not change inside this loop except by being spent, so
+         * an attempt that cannot be paid for means none of the ones behind it
+         * can be either. They all go.
+         */
+        if (!canPay) {
+          progress %= 1;
+          break;
+        }
         for (const [n, grams] of Object.entries(b.cost)) broodStore.apply(n, -grams);
         state.larvae = (state.larvae || 0) + b.yield;
       }
@@ -2438,17 +2543,24 @@ export function tick(state, dt) {
         // the next one instead of overshooting by however many chambers were
         // part-way through.
         const makes = nextMoldable(state, free);
-        if (!makes || (state.larvae || 0) < 1) break;
+        if (!makes || (state.larvae || 0) < 1) {
+          progress %= 1;
+          break;
+        }
         const cost = payableCost(state, DRONE_TYPES[makes].cost);
         const payable = Object.entries(cost).every(
           ([n, g]) => (state.nutrients[n] || 0) >= g - EPSILON,
         );
         // An attempt it cannot pay for is LOST, the same as a brood cycle that
-        // cannot find its protein. A chamber does not bank a queue of drones.
-        if (!payable) break;
-        for (const [n, g] of Object.entries(cost)) {
-          state.nutrients[n] = Math.max(0, (state.nutrients[n] || 0) - g);
+        // cannot find its protein. A chamber does not bank a queue of drones —
+        // and `progress` has to say so, or a coarse step builds exactly the
+        // queue this comment promises there is not. See the brood block.
+        if (!payable) {
+          progress %= 1;
+          break;
         }
+        // Through the store, like every other purchase — see moveCost.
+        moveCost(state, cost, -1);
         state.larvae -= 1;
         state.droneTypes[makes] = (state.droneTypes[makes] || 0) + 1;
         state.stats.molded = (state.stats.molded || 0) + 1;
@@ -2501,7 +2613,7 @@ export function tick(state, dt) {
         log(state, `Let ${n} ${DRONE_TYPES[id].name}${n === 1 ? '' : 's'} go.`, 'warn');
       }
       // Nothing is reclaimed. The matter in a drone is simply gone, which is a
-      // placeholder and not a design: see the note in DESIGN.md.
+      // placeholder and not a design: see the note in docs/SYSTEMS.md.
     }
   }
 
@@ -2590,20 +2702,40 @@ export function tick(state, dt) {
     state.clickHeat = Math.max(0, state.clickHeat - dt / MANUAL_COMBO_COOL_SECONDS);
   }
 
-  state.stats.peakDrones = Math.max(state.stats.peakDrones, state.drones);
+  // `droneCount`, not `state.drones`. The latter is the PARKED caste
+  // population — nothing has added to it since the drone rebuild — so the peak
+  // sat at zero for a hive with twenty standing, and every run summary and
+  // lifetime record built on it read zero too.
+  state.stats.peakDrones = Math.max(state.stats.peakDrones, droneCount(state));
   state.playtime += dt;
   state.stats.ticks += 1;
 
   return derived;
 }
 
-/** Synchronous catch-up, used by the tools and the debug handle. */
-export function advance(state, seconds, step = 1) {
+/**
+ * Synchronous catch-up, used by the tools and the debug handle.
+ *
+ * `onStep` is run after every tick, and the one caller that matters passes the
+ * research queue drain. It is a parameter rather than an import because
+ * `actions.js` imports this module and the cycle would be real.
+ *
+ * THE QUEUE HAS TO BE DRAINED INSIDE THE LOOP. Live play drains it every tick
+ * (see startLoop's onTick) and offline catch-up drains it inside its chunk
+ * loop, for a reason its own comment spells out: a tech bought at hour three
+ * changes what the next five hours generate. This path did not drain it at
+ * all, so dev fast-forward and the balance simulator banked insight for the
+ * whole run and deliberately declined to spend it — three entry points into
+ * the same simulation, agreeing about everything except what the hive does
+ * with what it learns.
+ */
+export function advance(state, seconds, step = 1, onStep = null) {
   const total = seconds;
   let done = 0;
   while (done < total) {
     const dt = Math.min(step, total - done);
     tick(state, dt);
+    onStep?.();
     done += dt;
   }
   return done;
@@ -2660,11 +2792,36 @@ export { MACROS, MICROS, DRONE_PROTEIN_COST };
  * but it does mean "full refund" means "the whole cost handed back", not "the
  * whole cost kept".
  */
+/*
+ * AND IT GOES THROUGH THE STORE, because the store is where the shared pool is
+ * accounted for.
+ *
+ * This used to write `state.nutrients` directly. The totals came out right and
+ * `state.general` — how much of each nutrient is sitting in the SHARED pool
+ * rather than on its own shelf — did not: spending twenty grams that were
+ * partly pooled left the pool still claiming to hold them. Nothing
+ * self-heals, either. `reconcile` only clamps a pool entry that exceeds the
+ * total, so the phantom occupancy sits there for the rest of the run, and
+ * `generalFree` subtracts it from the room available to everything else.
+ *
+ * `openStore` needs the storage shape, which is derived — so it is computed
+ * here rather than threaded through every caller. That is one extra pass over
+ * the structure list at the moment something is bought, which is not a hot
+ * path; the alternative is two ways of spending mass, and this codebase has
+ * already been bitten once by having two of those.
+ */
+export function spendCost(state, cost) {
+  moveCost(state, cost, -1);
+}
+
 function moveCost(state, cost, sign) {
-  for (const [n, amount] of Object.entries(cost)) {
-    if (n === 'insight') state.insight = Math.max(0, (state.insight || 0) + sign * amount);
-    else state.nutrients[n] = Math.max(0, (state.nutrients[n] || 0) + sign * amount);
+  const nutrients = Object.entries(cost).filter(([n]) => n !== 'insight');
+  if (cost.insight) {
+    state.insight = Math.max(0, (state.insight || 0) + sign * cost.insight);
   }
+  if (!nutrients.length) return;
+  const store = openStore(state, computeCaps(state, computeCharges(state)).storage);
+  for (const [n, amount] of nutrients) store.apply(n, sign * amount);
 }
 
 /**

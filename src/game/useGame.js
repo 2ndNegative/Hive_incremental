@@ -3,7 +3,7 @@
 // `derived` is a Vue computed, so every component reads the same numbers and
 // it only recalculates when state actually changes.
 
-import { computed, reactive } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { state } from './state.js';
 import { computeDerived } from './engine.js';
 
@@ -72,3 +72,30 @@ export function showInCodex(itemId) {
 }
 
 export { state };
+
+/**
+ * A SLOW SHARED CLOCK, for anything that displays an age.
+ *
+ * "Saved 12s ago" is computed from `Date.now()` inside a `computed`, which has
+ * no reactive dependency on the clock — so it was worked out once, at the
+ * moment of the save, and then sat there saying "0s ago" for as long as you
+ * left the tab open. The tab re-renders ten times a second for other reasons,
+ * which is exactly why nobody noticed: the number was being re-rendered
+ * constantly and recomputed never.
+ *
+ * One ticking ref, shared, at one second — the resolution these readouts are
+ * quoted in. A `computed` that reads it is invalidated once a second, which is
+ * as often as "12s ago" can change and no more often.
+ */
+const nowRef = ref(Date.now());
+if (typeof window !== 'undefined') {
+  setInterval(() => { nowRef.value = Date.now(); }, 1000);
+}
+export const now = nowRef;
+
+/** Seconds since a timestamp, as a phrase. Null for "never". */
+export function ageSince(stamp) {
+  if (!stamp) return null;
+  const secs = Math.max(0, Math.round((now.value - stamp) / 1000));
+  return secs < 60 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`;
+}

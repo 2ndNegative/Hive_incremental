@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, shot } from './harness.mjs';
+import { BASE, LAUNCH, shot, finish, settle } from './harness.mjs';
 
 /**
  * These suites were written before landing sites existed. A fresh save now
@@ -22,7 +22,7 @@ async function ensureLanded(page) {
  */
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 const base = BASE;
@@ -70,7 +70,7 @@ check('restart dialog explains what is kept vs cleared',
   /Lifetime totals and records/.test(restartText) && /All nutrient stores/.test(restartText));
 
 await p.click('.modal-foot .btn:text-is("Cancel")');
-await p.waitForTimeout(200);
+await settle(p);
 const afterCancel = await p.evaluate(() => ({ drones: hive.state.drones, runs: hive.state.lifetime.runs }));
 check('cancelling changes nothing', afterCancel.drones > 1 && afterCancel.runs === 1, `${afterCancel.drones} drones intact`);
 
@@ -86,7 +86,7 @@ const before = await p.evaluate(() => ({
 await p.click('button:text-is("Restart run")');
 await p.waitForSelector('.modal-card');
 await p.click('.modal-foot .btn:text-is("Restart run")');
-await p.waitForTimeout(300);
+await settle(p);
 // A restart hands the player back to the landing-site chooser, so the new run
 // has to be landed before it has any stores to check.
 await ensureLanded(p);
@@ -131,7 +131,6 @@ check('dialog closes itself', after.modalGone);
 /* lifetime shown in the UI includes the run in progress */
 await openTab(p, 'Stats');
 await p.waitForSelector('.data-table');
-const statsText = await p.textContent('.panel-box');
 check('stats tab reports a lifetime panel', /Lifetime/.test(await p.textContent('.main-col')));
 
 /* ------------------------------------------------------------ wipe: gated */
@@ -150,22 +149,22 @@ const disabled = await p.isDisabled('.modal-foot .btn:text-is("Delete everything
 check('confirm is disabled until the phrase is typed', disabled === true);
 
 await p.fill('.confirm-phrase input', 'delete me');
-await p.waitForTimeout(100);
+await settle(p);
 check('a wrong phrase keeps it disabled', await p.isDisabled('.modal-foot .btn:text-is("Delete everything")'));
 
 await p.fill('.confirm-phrase input', 'DELETE');
-await p.waitForTimeout(100);
+await settle(p);
 check('the exact phrase enables it', !(await p.isDisabled('.modal-foot .btn:text-is("Delete everything")')));
 
 /* export-before-wipe escape hatch */
 await p.click('.modal-card .btn:text-is("Export save")');
-await p.waitForTimeout(200);
+await settle(p);
 const exported = await p.evaluate(() => document.querySelector('.save-box')?.value?.length ?? 0);
 check('export-before-wipe produces a save string', exported > 100, `${exported} chars`);
 
 /* backing out of the wipe */
 await p.click('.modal-foot .btn:text-is("Cancel")');
-await p.waitForTimeout(200);
+await settle(p);
 check('cancelling the wipe keeps the save', await p.evaluate(() => hive.state.lifetime.runs === 2));
 
 /* and finally, actually wiping */
@@ -173,7 +172,7 @@ await p.click('button:text-is("Wipe save")');
 await p.waitForSelector('.modal-card.is-danger');
 await p.fill('.confirm-phrase input', 'DELETE');
 await p.click('.modal-foot .btn:text-is("Delete everything")');
-await p.waitForTimeout(300);
+await settle(p);
 const wiped = await p.evaluate(() => ({
   runs: hive.state.lifetime.runs,
   lifetimePlaytime: hive.state.lifetime.playtime,
@@ -201,7 +200,4 @@ await p.click('button:text-is("Restart run")');
 await p.waitForSelector('.modal-card');
 await p.screenshot({ path: shot('restart-dialog.png') });
 
-console.log(`\nconsole errors: ${errors.length ? errors.slice(0, 4).join(' | ') : 'none'}`);
-console.log(fail.length ? `\n=== ${fail.length} CHECK(S) FAILED: ${fail.join('; ')} ===` : '\n=== runs and wipe verified ===');
-await browser.close();
-console.log('=== run test finished ===');
+await finish({ name: 'runs and wipe', fail, errors, browser });

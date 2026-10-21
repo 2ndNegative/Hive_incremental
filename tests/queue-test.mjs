@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * The build queue.
@@ -22,32 +22,25 @@ async function ensureLanded(page) {
 
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(200);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
 /** Three ones, in any arrangement the merge happens to produce. */
 const added3 = (list) => list.slice(0, 3).every((n) => n === 1);
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /** A hive with nothing queued, no research, and empty stores. */
@@ -418,7 +411,7 @@ check('and every card says how long it takes to grow',
   strip.grow[0]);
 
 await p.evaluate(() => document.querySelectorAll('.action-card')[0].click());
-await p.waitForTimeout(300);
+await settle(p);
 const afterClick = await p.evaluate(() => {
   const box = document.querySelector('.queue-strip');
   return {
@@ -460,7 +453,7 @@ const bench = await p.evaluate(() => {
   return { id, bench: hive.buildTime.now()?.id };
 });
 check('the fixture got a job started', bench.bench === bench.id, `${bench.bench}`);
-await p.waitForTimeout(300);
+await settle(p);
 const benchRow = await p.evaluate(() => {
   const row = document.querySelector('.queue-job');
   return {
@@ -499,19 +492,18 @@ await p.evaluate(() => {
   hive.state.building = null;
   for (const n of Object.keys(hive.state.nutrients)) hive.state.nutrients[n] = 0;
 });
-await p.waitForTimeout(300);
+await settle(p);
 
 // Distinct cards, because a levelled building may only have one upgrade left
 // and clicking it twice would fill one slot rather than two. queueBuild clamps
 // every press itself, so clicking past the point it fills is harmless.
-const full = await p.evaluate(() => {
+await p.evaluate(() => {
   for (const card of document.querySelectorAll('.action-card')) {
     if (hive.queue.room() <= 0) break;
     card.click();
   }
-  return hive.queue.used();
 });
-await p.waitForTimeout(300);
+await settle(p);
 const atCap = await p.evaluate(() => ({
   used: hive.queue.used(),
   disabled: [...document.querySelectorAll('.action-card')].every((b) => b.disabled),
@@ -522,17 +514,11 @@ check('a full queue disables every card',
 check('and says so', atCap.warned === true);
 
 await p.evaluate(() => document.querySelector('.queue-clear').click());
-await p.waitForTimeout(300);
+await settle(p);
 const cleared = await p.evaluate(() => ({
   used: hive.queue.used(),
   empty: Boolean(document.querySelector('.queue-empty')),
 }));
 check('clear empties it', cleared.used === 0 && cleared.empty);
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the build queue', fail, errors, browser });

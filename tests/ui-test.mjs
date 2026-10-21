@@ -1,5 +1,7 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, ensureLanded, openTab } from './harness.mjs';
+import {
+  BASE, LAUNCH, ensureLanded, openTab, checker, openPage, finish, settle,
+} from './harness.mjs';
 
 /**
  * THE INTERFACE TELLS THE TRUTH, AND STAYS ON THE SCREEN.
@@ -18,26 +20,19 @@ import { BASE, LAUNCH, ensureLanded, openTab } from './harness.mjs';
  *     and press a button at the right moment.
  */
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
 const browser = await chromium.launch(LAUNCH);
-const errors = [];
 // DELIBERATELY SHORT. The tooltip bug only exists when the window is not tall
 // enough to hold the panel below its anchor, and at 1000px nothing clips.
-const p = await browser.newPage({ viewport: { width: 1340, height: 560 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1340, height: 560 } });
 
 await p.goto(BASE, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* ===================== 1. a tooltip never opens off the bottom of the screen */
@@ -219,13 +214,13 @@ await p.evaluate(() => {
   for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 3000;
   for (let i = 0; i < 40; i += 1) hive.tick(1);
 });
-await p.waitForTimeout(250);
+await settle(p);
 
 const sideTips = [];
 const sideRows = await p.$$('.res-row.tip');
 for (let i = 0; i < sideRows.length; i += 1) {
   await sideRows[i].hover();
-  await p.waitForTimeout(40);
+  await settle(p);
   sideTips.push(await p.evaluate((idx) => {
     const el = document.querySelectorAll('.res-row.tip')[idx];
     const body = el.querySelector(':scope > .tip-body');
@@ -260,7 +255,7 @@ check('and not so far up that the topbar eats its title',
   side.filter((t) => t.underTopbar > 1).map((t) => t.name).join(', '));
 
 await p.setViewportSize({ width: 1340, height: 560 });
-await p.waitForTimeout(200);
+await settle(p);
 
 /* ===================== 3b. the reserve drains and never fills */
 
@@ -328,7 +323,7 @@ await p.evaluate(() => {
   for (let i = 0; i < 20; i += 1) hive.tick(1);
 });
 await openTab(p, 'Territory');
-await p.waitForTimeout(250);
+await settle(p);
 
 const out = await p.evaluate(() => {
   // Panel heads are uppercased by the stylesheet, so innerText comes back
@@ -399,7 +394,7 @@ await p.evaluate(() => {
     );
   }
 });
-await p.waitForTimeout(250);
+await settle(p);
 
 const assign = await p.evaluate(() => {
   const who = [...document.querySelectorAll('.panel-box')]
@@ -446,7 +441,15 @@ check('with who is standing there right now beside the target',
  * Driven through the real keyboard rather than by dispatching events, because
  * the bug lives in the gap between what the DOM holds and what the render
  * binds, and a synthetic `input` event does not reproduce it.
+ *
+ * AND WITH THE CLOCK RUNNING. This suite stops the loop at the top so the
+ * earlier sections can measure a still hive, and nothing restarted it — so the
+ * ten-renders-a-second pressure that IS the bug was absent, and the test could
+ * not have failed on the code it was written against. It is restarted for this
+ * section and stopped again after.
  */
+await p.evaluate(() => hive.loop.start());
+await settle(p);
 const row = async (n) => p.evaluate((i) => {
   const who = [...document.querySelectorAll('.panel-box')]
     .find((b) => /^who works what/i.test(b.innerText));
@@ -463,29 +466,40 @@ const readField = () => p.evaluate(() => ({
 
 await (await p.$('.assign-input')).click();
 await p.keyboard.type('12', { delay: 60 });
-await p.waitForTimeout(200);
+await settle(p);
 const typed = await readField();
 check('a two-digit target can be typed without the field resetting',
   typed.field === '12' && typed.state === 12, JSON.stringify(typed));
 
 await p.keyboard.press('Tab');
-await p.waitForTimeout(250);
+await settle(p);
 const blurred = await readField();
 check('and it survives losing focus', blurred.field === '12' && blurred.state === 12,
   JSON.stringify(blurred));
 
-await row(1); await p.waitForTimeout(220);
+await row(1); await settle(p);
 const up = await readField();
-await row(0); await p.waitForTimeout(220);
+await row(0); await settle(p);
 const down = await readField();
 check('the stepper moves it by one in each direction, and the box follows',
   up.state === 13 && up.field === '13' && down.state === 12 && down.field === '12',
   `${typed.state} → ${up.state} → ${down.state}`);
 
-await row(2); await p.waitForTimeout(220);
+await row(2); await settle(p);
 const filled = await readField();
 check('fill sets it to what the ground carries, overriding what was typed',
   filled.state === 30 && filled.field === '30', `${filled.state} on 120 m² at 4 m² each`);
+
+// A last proof that the clock really was running through all of that: the hive
+// moved. Without this the section could quietly go back to testing a still
+// page and nobody would know.
+const ticked = await p.evaluate(() => hive.state.stats.ticks);
+await p.waitForTimeout(400);
+const tickedAgain = await p.evaluate(() => hive.state.stats.ticks);
+check('and the hive was actually ticking while all that was typed',
+  tickedAgain > ticked, `${ticked} → ${tickedAgain} ticks`);
+await p.evaluate(() => hive.loop.stop());
+await settle(p);
 
 /*
  * ================= 5b. THE GRID'S TOOLTIPS, which broke in three ways at once
@@ -511,7 +525,7 @@ await p.evaluate(() => {
   s.droneTypes = { forager: 20, scavenger: 0 };
   s.assign = { temperateForest: { forager: 13 }, farmland: { forager: 4 } };
 });
-await p.waitForTimeout(260);
+await settle(p);
 
 const atRest = await p.evaluate(() => {
   const sc = document.querySelector('.assign-scroll');
@@ -524,7 +538,7 @@ check('the grid does not scroll vertically on tooltips nobody is looking at',
 const tipAt = async (handle) => {
   await p.mouse.move(4, 4);
   await handle.hover();
-  await p.waitForTimeout(220);
+  await settle(p);
   return p.evaluate(() => {
     const el = document.querySelector('.assign-grid .tip:hover')
       || [...document.querySelectorAll('.assign-grid .tip')].find(
@@ -583,7 +597,7 @@ await p.evaluate(() => {
   hive.state.droneTypes = { forager: 10, scavenger: 4 };
 });
 await p.mouse.move(4, 4);
-await p.waitForTimeout(260);
+await settle(p);
 
 
 
@@ -594,7 +608,7 @@ await p.evaluate(() => {
     .find((b) => /^who works what/i.test(b.innerText));
   who.querySelector('.focus-clear').click();
 });
-await p.waitForTimeout(220);
+await settle(p);
 const clearedPlan = await p.evaluate(() => ({
   field: document.querySelector('.assign-input').value,
   state: hive.state.assign?.temperateForest?.forager ?? 0,
@@ -603,7 +617,7 @@ check('and clear empties both the plan and the box',
   clearedPlan.state === 0 && clearedPlan.field === '', JSON.stringify(clearedPlan));
 
 await p.click('.terr-tile.is-unclaimed');
-await p.waitForTimeout(300);
+await settle(p);
 
 const claim = await p.evaluate(() => {
   const box = document.querySelector('.claim-box');
@@ -633,7 +647,7 @@ const threshold = await p.evaluate(() => {
   return null;
 });
 void threshold;
-await p.waitForTimeout(300);
+await settle(p);
 const short = await p.evaluate(() => {
   const text = document.querySelector('.claim-box')?.innerText ?? '';
   return { shortBy: /short of the\s+first one/i.test(text), text: text.slice(0, 200) };
@@ -667,7 +681,7 @@ await p.evaluate((area) => {
   input.value = String(area);
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }, atTheLimit);
-await p.waitForTimeout(300);
+await settle(p);
 
 const limit = await p.evaluate(() => {
   const box = document.querySelector('.claim-box');
@@ -685,7 +699,7 @@ await p.evaluate(() => {
   const box = document.querySelector('.claim-box');
   [...box.querySelectorAll('button')].find((b) => /^Claim /.test(b.innerText)).click();
 });
-await p.waitForTimeout(300);
+await settle(p);
 const bought = await p.evaluate(() => ({
   held: hive.state.territory.grassland || 0,
   open: Boolean(document.querySelector('.claim-box')),
@@ -704,15 +718,15 @@ await p.evaluate(() => {
 });
 // The dialog closed on the successful claim above, so it has to be reopened
 // off the map before there is anything to assert about.
-await p.waitForTimeout(300);
+await settle(p);
 await p.click('.terr-tile.is-unclaimed');
-await p.waitForTimeout(300);
+await settle(p);
 await p.evaluate(() => {
   const input = document.querySelector('.claim-input');
   input.value = '400';
   input.dispatchEvent(new Event('input', { bubbles: true }));
 });
-await p.waitForTimeout(300);
+await settle(p);
 const cannot = await p.evaluate(() => {
   const box = document.querySelector('.claim-box');
   if (!box) return { reopened: false };
@@ -728,10 +742,4 @@ check('a bill the hive cannot pay disables the button and names the shortfall',
   cannot.reopened && cannot.disabled === true && cannot.saysShort,
   cannot.text?.slice(0, 120) ?? 'dialog did not reopen');
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the interface at large', fail, errors, browser });

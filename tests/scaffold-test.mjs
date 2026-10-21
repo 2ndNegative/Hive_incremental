@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * Scaffolding: a Genetics tab, a Molding Chamber, and drones restructured into
@@ -19,22 +19,15 @@ async function ensureLanded(page) {
 }
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(160);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
@@ -45,7 +38,7 @@ await ensureLanded(p);
 // checks are about molding and the Drones tab, not about the gate, so the tech
 // is granted up front rather than leaving half the drone table invisible.
 await p.evaluate(() => { hive.state.tech.scavenging = true; });
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* ============================================================ 1. Genetics */
@@ -216,7 +209,7 @@ check('and it says what the chambers are doing, or why they are not',
   dronesTab.note.replace(/^.*SETTINGS\s*/, '').slice(0, 90));
 
 await p.click('.band-toggle');
-await p.waitForTimeout(200);
+await settle(p);
 // v-show, like the Hive tab: the cards stay in the DOM and stop being drawn,
 // so this has to ask whether they are visible rather than whether they exist.
 const visibleCards = () =>
@@ -229,7 +222,7 @@ check('folding a caste band shut hides its types', folded && (await visibleCards
   `${await visibleCards()} cards visible with the band shut`);
 
 await p.click('.band-toggle');
-await p.waitForTimeout(200);
+await settle(p);
 check('and opening it brings them back', (await visibleCards()) === 3,
   `${await visibleCards()} rows visible with the band open`);
 
@@ -244,11 +237,24 @@ check('the old flat caste system is still parked, not resurrected',
 
 /* ------------------------------------------------------- nothing broke */
 
+/*
+ * MEASURED ON THE PANEL, NOT THE PAGE.
+ *
+ * `.main-col` contains the tab bar, so this counted the ten tab labels — about
+ * seventy characters — and passed every threshold with a completely blank
+ * panel underneath. The check that was supposed to catch a tab rendering
+ * nothing could not catch a tab rendering nothing.
+ */
 const everyTab = ['Hive', 'Drones', 'Genetics', 'Territory', 'Storage', 'Metabolism', 'Research', 'Codex', 'Stats', 'Settings'];
 for (const label of everyTab) {
   await openTab(p, label);
-  const painted = await p.evaluate(() => document.querySelector('.main-col').innerText.trim().length);
-  if (painted < 20) fail.push(`tab ${label} empty`);
+  const painted = await p.evaluate(() => {
+    const main = document.querySelector('.main-col');
+    const panel = [...main.children].find((n) => !n.classList.contains('tab-bar'));
+    return { chars: panel?.innerText.trim().length ?? 0, found: Boolean(panel) };
+  });
+  if (!painted.found) fail.push(`tab ${label} has no panel`);
+  else if (painted.chars < 20) fail.push(`tab ${label} empty (${painted.chars} chars)`);
 }
 check(`all ${everyTab.length} tabs still render`, !fail.some((f) => f.startsWith('tab ')));
 
@@ -469,7 +475,7 @@ await openTab(p, 'Drones');
 // An earlier block leaves the band folded, and a control inside a folded band
 // is present but not clickable — which times out rather than failing cleanly.
 await p.evaluate(() => { hive.state.ui.droneBands = {}; });
-await p.waitForTimeout(250);
+await settle(p);
 const controls = await p.evaluate(() => {
   const row = document.querySelector('.main-col .job-row');
   return {
@@ -484,7 +490,7 @@ check('the row carries a switch, a target and a status',
 check('an empty target reads as no ceiling', controls.target === '', `"${controls.target}"`);
 
 await p.click('.main-col .job-row .mold-toggle');
-await p.waitForTimeout(250);
+await settle(p);
 const afterToggle = await p.evaluate(() => ({
   on: hive.state.droneMolding.forager.on,
   label: document.querySelector('.main-col .mold-toggle')?.textContent.trim(),
@@ -504,7 +510,7 @@ async function typeTarget(value) {
     el.value = v;
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }, value);
-  await p.waitForTimeout(200);
+  await settle(p);
 }
 
 await typeTarget('12');
@@ -529,8 +535,4 @@ check('the switch and the target survive a reload',
   persisted && back.on === true && back.target === 7,
   `on: ${back.on}, target: ${back.target}`);
 
-check('no console errors anywhere in all that', errors.length === 0, errors.slice(0, 3).join(' / '));
-
-await browser.close();
-console.log(`\n${fail.length ? `FAILURES (${fail.length}): ${fail.join(', ')}` : 'All checks passed.'}`);
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the rebuilt screens', fail, errors, browser });

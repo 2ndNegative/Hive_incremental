@@ -20,6 +20,7 @@ import { GENES } from './definitions/genes.js';
 import { genomeOf, setGenome, subjectOf } from './genes.js';
 import {
   canAfford,
+  spendCost,
   placeStructure,
   storageFor,
   slotsFor,
@@ -365,8 +366,13 @@ export function queueBuild(id, count = 1) {
   // counts as promised too — its level is paid for, it just has not landed.
   const headroom = maxLevelOf(id) - (state.structures[id] || 0) - inFlightCount(state, id);
 
-  const want = count === 'max' ? queueRoom(state) : count;
-  const adding = Math.min(want, queueRoom(state), headroom);
+  // A COUNT IS A WHOLE, FINITE NUMBER. `queueBuild(id, 2.5)` used to store a
+  // queue entry of 2.5, and `queueBuild(id, NaN)` stored NaN — `NaN <= 0` is
+  // false, so the guard below waved it through, and the queue then held an
+  // entry that could never drain.
+  const asked = count === 'max' ? queueRoom(state) : Math.floor(Number(count));
+  if (!Number.isFinite(asked)) return 0;
+  const adding = Math.min(asked, queueRoom(state), headroom);
   if (adding <= 0) return 0;
 
   const last = state.buildQueue[state.buildQueue.length - 1];
@@ -771,7 +777,11 @@ export function setLandTarget(biomeId, typeId, want) {
   if (!BIOMES[biomeId] || !DRONE_TYPES[typeId]) return null;
   state.assign ??= {};
   const here = (state.assign[biomeId] ??= {});
-  const n = Math.max(0, Math.floor(Number(want) || 0));
+  // Infinity floors to Infinity and is not caught by `|| 0`, so it used to be
+  // stored as a target — and `landUse` then reported `claimed: Infinity` and a
+  // NaN in every figure beside it.
+  const asked = Math.floor(Number(want) || 0);
+  const n = Number.isFinite(asked) ? Math.max(0, asked) : 0;
   if (n <= 0) {
     delete here[typeId];
     // An empty plan for a biome is deleted outright rather than left as {}: it
@@ -904,10 +914,10 @@ export function research(id) {
   const cost = payableCost(state, def.cost);
   if (!canAfford(state, cost)) return false;
 
-  for (const [n, amount] of Object.entries(cost)) {
-    if (n === 'insight') state.insight -= amount;
-    else state.nutrients[n] -= amount;
-  }
+  // Through the store, not straight off `state.nutrients`. Mass that was
+  // sitting in the shared pool has to leave the pool's books as well as the
+  // total, or `general` keeps claiming room that was spent — see moveCost.
+  spendCost(state, cost);
 
   // Snapshot which micros were invisible a moment ago, so the reveal can say
   // what the hive has been quietly sitting on.

@@ -209,6 +209,31 @@ export const CASTE_ORDER = ['dormant'];
  */
 export const DEPRECATED_CASTE_ORDER = ['siphon', 'forager', 'analyst', 'scavenger', 'excavator', 'hunter'];
 
+/* --------------------------------------- the two orders account for every caste
+ *
+ * The same partition the structure and research tables keep, for the same
+ * reason: both of these lists work by omission, so a caste in neither is not
+ * parked, it is lost — not assignable, not displayed, and not seeded into
+ * `state.castes`, which is where a save keeps its counts.
+ */
+{
+  const seen = new Set();
+  for (const id of [...CASTE_ORDER, ...DEPRECATED_CASTE_ORDER]) {
+    if (!CASTES[id]) throw new Error(`castes.js: "${id}" is listed in an order but not defined.`);
+    if (seen.has(id)) {
+      throw new Error(`castes.js: "${id}" is listed twice. A caste is live or parked, not both.`);
+    }
+    seen.add(id);
+  }
+  const missing = Object.keys(CASTES).filter((id) => !seen.has(id));
+  if (missing.length) {
+    throw new Error(
+      `castes.js: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} defined but on `
+      + `neither CASTE_ORDER nor DEPRECATED_CASTE_ORDER — add it to one of them.`,
+    );
+  }
+}
+
 /** Multiplier channels that castes and structures feed into. */
 // The old multiplier channel list. Superseded by CHANNELS in
 // definitions/modifiers.js, which names channels after what they multiply

@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, shot } from './harness.mjs';
+import { BASE, LAUNCH, shot, finish, settle } from './harness.mjs';
 
 // ---------------------------------------------------------------- test larder
 // The hive holds nothing on its own any more: every gram of room comes from
@@ -43,7 +43,7 @@ async function ensureLanded(page) {
  */
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 const base = BASE;
@@ -186,7 +186,7 @@ const revealed = await page.evaluate(() => {
   const ok = hive.research('bulkMineralAssay');
   return { ok, heldBefore, tech: hive.state.tech.bulkMineralAssay, log: hive.state.log.slice(0, 4).map((l) => l.text) };
 });
-await page.waitForTimeout(300);
+await settle(page);
 const afterReveal = await page.$$eval('.res-name', (els) => els.map((e) => e.textContent.trim()));
 check(
   'assay reveals minerals already in store',
@@ -212,7 +212,7 @@ await page.evaluate(() => {
 await openTab(page, 'Codex');
 await page.waitForSelector('.codex-row');
 await page.fill('.codex-search', 'beef liver');
-await page.waitForTimeout(200);
+await settle(page);
 await page.click('.codex-row');
 await page.waitForSelector('.codex-detail .data-table');
 const codex = await page.evaluate(() => ({
@@ -244,7 +244,7 @@ await openTab(page, 'Metabolism');
 await page.waitForSelector('.fuel-row');
 await page.screenshot({ path: shot('metabolism.png') });
 await openTab(page, 'Hive');
-await page.waitForTimeout(200);
+await settle(page);
 await page.screenshot({ path: shot('hive.png') });
 await openTab(page, 'Stats');
 await page.waitForSelector('.data-table');
@@ -260,7 +260,4 @@ await page.waitForSelector('.res-row');
 const after = await page.evaluate(() => ({ k: hive.state.nutrients.potassium, tech: hive.state.tech.bulkMineralAssay }));
 check('save survives a reload', after.tech === before.tech && after.k > 0, `tech kept, K=${after.k.toFixed(2)}g`);
 
-console.log(`\nconsole errors: ${errors.length ? errors.join(' | ') : 'none'}`);
-console.log(fail.length ? `\n=== ${fail.length} CHECK(S) FAILED: ${fail.join('; ')} ===` : '\n=== all checks passed ===');
-await browser.close();
-console.log('=== smoke test finished ===');
+await finish({ name: 'smoke', fail, errors, browser });

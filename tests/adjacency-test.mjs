@@ -17,12 +17,9 @@
  */
 
 import { ADJACENCY, BIOME_IDS, BIOMES, realmOf } from '../src/game/definitions/biomes.js';
+import { checker, finish } from './harness.mjs';
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
 /** Breadth-first walk from `start`, optionally refusing to leave a realm. */
 function reach(start, allowed = () => true) {
@@ -125,5 +122,4 @@ check('though it can map every bit of it',
   wetMapped.length === BIOME_IDS.length - realms.land.length,
   `${wetMapped.length} wet biomes mappable from land`);
 
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'reach and the water gate', fail });

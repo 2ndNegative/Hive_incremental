@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * Thinking: the two buildings that do it, and what the hive does with bandwidth
@@ -24,29 +24,22 @@ async function ensureLanded(page) {
 
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(250);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /** A quiet hive: one Hivecore, nothing else, no drones, fully paid. */
@@ -285,10 +278,4 @@ check('and the top bar explains why the ceiling moved',
   chip.text.slice(chip.text.indexOf('Spare'), chip.text.indexOf('Spare') + 70)
     || chip.text.slice(0, 70));
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'insight and the assays', fail, errors, browser });

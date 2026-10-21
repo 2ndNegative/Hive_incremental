@@ -14,7 +14,6 @@ const itemId = ref('beef_liver');
 const itemGrams = ref(10000);
 const insightAmount = ref(5000);
 const droneCount = ref(10);
-const skipHours = ref(1);
 const biomeId = ref('denseUrban');
 const biomeArea = ref(36);
 

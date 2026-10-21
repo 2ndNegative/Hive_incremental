@@ -37,12 +37,23 @@ export default [
   js.configs.recommended,
   ...vue.configs['flat/recommended'],
 
+  /*
+   * ONE SET OF GLOBALS PER ENVIRONMENT, not both everywhere.
+   *
+   * This handed `window` and `process` to every file at once, which defeats
+   * the only rule that catches a typo'd global: `no-undef` cannot flag
+   * `process.env` in a browser module or `document` in a build script if both
+   * are declared everywhere. The game runs in a browser, the tools run in
+   * Node, and the suites drive a browser from Node — three environments, said
+   * out loud.
+   */
   {
     files: ['**/*.{js,mjs,vue}'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
-      globals: { ...globals.browser, ...globals.node },
+      // __APP_VERSION__ is replaced at build time by Vite — see vite.config.js.
+      globals: { ...globals.browser, __APP_VERSION__: 'readonly' },
     },
     plugins: { 'unused-imports': unusedImports },
     rules: {
@@ -116,11 +127,24 @@ export default [
     },
   },
 
+  // Build scripts, the validator and the balance simulator are Node programs,
+  // not pages. Declaring both environments everywhere — which is what this
+  // config used to do — defeats `no-undef` for exactly the typos it exists to
+  // catch: `document` in a build script and `process` in a browser module are
+  // both real mistakes, and both were legal.
   {
-    // The suites drive a real browser and reach into `hive`, the debug handle
+    files: ['tools/*.mjs', 'tools/**/*.mjs', 'vite.config.js', 'eslint.config.js'],
+    languageOptions: { globals: { ...globals.node } },
+  },
+
+  {
+    // The suites are Node processes driving a real browser, so they are the one
+    // place that legitimately holds both — plus `hive`, the debug handle
     // main.js hangs on window. It is global by construction and there is no
     // import to declare it with.
     files: ['tests/**/*.mjs'],
-    languageOptions: { globals: { ...globals.node, hive: 'readonly' } },
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser, hive: 'readonly' },
+    },
   },
 ];

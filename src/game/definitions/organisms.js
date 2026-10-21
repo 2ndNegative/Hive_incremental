@@ -14,6 +14,19 @@
 // `difficulty` is a placeholder cost multiplier for the future hunt loop:
 // roughly how much effort a kill costs relative to its mass.
 
+import { BIOMES } from './biomes.js';
+
+/*
+ * THE BIOME SHORTHANDS, so a `biomes` map reads as a map rather than as a
+ * paragraph. One per biome in the game, including the three nothing lives in
+ * yet — TW, AB and HV are the deep sea, and the hunt loop has no diver.
+ *
+ * Kept complete rather than trimmed to what is used, because the next organism
+ * added to one of them should need no new line here, and a half-table is the
+ * kind of thing somebody "tidies" by deleting the wrong half. The load-time
+ * check under SHORTHANDS is what makes keeping them honest: an unused constant
+ * that nothing verifies is the one that quietly stops naming a real biome.
+ */
 const F = 'temperateForest';
 const TR = 'temperateRainforest';
 const JR = 'tropicalRainforest';
@@ -40,6 +53,27 @@ const FA = 'farmland';
 const LU = 'lightUrban';
 const DU = 'denseUrban';
 const IN = 'industrial';
+
+/*
+ * Every shorthand above, so none of them can rot.
+ *
+ * Three are referenced by nothing else in the file, which eslint is right to
+ * notice: a name nothing reads is a name nothing proves. Listing them here
+ * reads them, and the check below proves what they claim — that each one names
+ * a biome that actually exists. A typo in a shorthand used by an organism shows
+ * up as that organism never being huntable anywhere, which is a silent nothing;
+ * a typo in an unused one shows up as nothing at all until the day it is used.
+ */
+const SHORTHANDS = {
+  F, TR, JR, TA, GR, SV, TU, DE, AL, WE, RI, LK, CO, ES,
+  KE, RE, SH, OO, TW, AB, HV, PO, FA, LU, DU, IN,
+};
+
+for (const [short, biomeId] of Object.entries(SHORTHANDS)) {
+  if (!BIOMES[biomeId]) {
+    throw new Error(`organisms.js: shorthand ${short} names "${biomeId}", which is not a biome`);
+  }
+}
 
 export const ORGANISMS = {
   cattle: {

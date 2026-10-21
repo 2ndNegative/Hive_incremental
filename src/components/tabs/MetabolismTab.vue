@@ -236,15 +236,33 @@ function formatReserve(seconds) {
         </p>
       </div>
       <div class="panel-body">
+        <!-- WHICH COLUMN IS WHICH. Two identical dropdowns side by side with
+             no headings, and the only thing saying what they meant was the
+             paragraph above — which names the two in prose and in order, so
+             the reader had to hold "first, then fallback" in their head and
+             map it onto position. A screen reader got less than that: two
+             unlabelled comboboxes per row, repeated once per generator. The
+             aria-label on each select carries the same two words, because a
+             header cell in a CSS grid is not programmatically a header of
+             anything. -->
+        <div class="fuel-row is-head" aria-hidden="true">
+          <span></span>
+          <span>reaches for</span>
+          <span>falls back to</span>
+          <span></span>
+        </div>
+
         <div class="fuel-row is-global">
           <span class="field-label">
             Hive default
             <span class="field-help">Used by anything without its own setting.</span>
           </span>
-          <select class="fuel-select" :value="state.energy.preferred" @change="setPreferred('global', $event.target.value)">
+          <select class="fuel-select" aria-label="Fuel the hive reaches for by default"
+                  :value="state.energy.preferred" @change="setPreferred('global', $event.target.value)">
             <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
           </select>
-          <select class="fuel-select" :value="state.energy.fallback" @change="setFallback('global', $event.target.value)">
+          <select class="fuel-select" aria-label="Fuel the hive falls back to by default"
+                  :value="state.energy.fallback" @change="setFallback('global', $event.target.value)">
             <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
           </select>
           <span class="muted" style="width: 5.5rem; text-align: right">—</span>
@@ -283,11 +301,13 @@ function formatReserve(seconds) {
               </template>
             </span>
           </span>
-          <select class="fuel-select" :value="dronesFeed.preferred"
+          <select class="fuel-select" aria-label="Fuel the drones reach for"
+                  :value="dronesFeed.preferred"
                   @change="setPreferred(dronesFeed.key, $event.target.value)">
             <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
           </select>
-          <select class="fuel-select" :value="dronesFeed.fallback"
+          <select class="fuel-select" aria-label="Fuel the drones fall back to"
+                  :value="dronesFeed.fallback"
                   @change="setFallback(dronesFeed.key, $event.target.value)">
             <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
           </select>
@@ -326,10 +346,12 @@ function formatReserve(seconds) {
               </template>
             </span>
           </span>
-          <select class="fuel-select" :value="g.preferred" @change="setPreferred(g.key, $event.target.value)">
+          <select class="fuel-select" :aria-label="`Fuel ${g.name} reaches for`"
+                  :value="g.preferred" @change="setPreferred(g.key, $event.target.value)">
             <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
           </select>
-          <select class="fuel-select" :value="g.fallback" @change="setFallback(g.key, $event.target.value)">
+          <select class="fuel-select" :aria-label="`Fuel ${g.name} falls back to`"
+                  :value="g.fallback" @change="setFallback(g.key, $event.target.value)">
             <option v-for="f in usableFuels" :key="f.id" :value="f.id">{{ f.def.name }}</option>
           </select>
           <button

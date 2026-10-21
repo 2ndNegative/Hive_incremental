@@ -48,6 +48,16 @@ export const FORAGE_CYCLE = 12;
  * that leaves one site un-updated and a displayed rate disagreeing with the
  * matter actually arriving.
  */
+/**
+ * How many trips one patch may resolve in a single step.
+ *
+ * Only reached by a coarse step — a live tenth-of-a-second tick never spans
+ * more than one cycle. Enough rolls to sample the pool rather than to simulate
+ * every trip: discovery wants a representative handful, not a faithful
+ * thousand.
+ */
+const CATCHUP_ROLLS = 8;
+
 export function cycleFor(state, typeId) {
   return FORAGE_CYCLE / droneTrait(state, typeId, 'pace');
 }
@@ -234,8 +244,26 @@ export function advanceForage(state, dt) {
       for (const patch of patchesFor(state, typeId, biomeId, drones)) {
         patch.elapsed = (patch.elapsed || 0) + dt;
         if (patch.elapsed >= cycle || !patch.itemId) {
+          /*
+           * A STEP THAT SPANS MANY CYCLES ROLLS MANY TIMES.
+           *
+           * It used to roll once however long the step was. Production was
+           * fine — the rate is grams over the cycle, applied across the whole
+           * step — but DISCOVERY is counted per roll, so an eight-hour offline
+           * catch-up taught the hive about its own ground roughly as much as
+           * eight hours of play taught it in the first twelve seconds. Come
+           * back from a weekend away and the forage table had barely moved.
+           *
+           * Capped, because the point of a coarse step is not to do the fine
+           * work anyway: a handful of rolls samples the pool honestly, which
+           * is all discovery needs, without resolving three thousand trips
+           * nobody watched. The last roll is the one the patch keeps, so what
+           * the crew is carrying is still a fresh draw.
+           */
+          const spanned = cycle > 0 ? Math.floor(patch.elapsed / cycle) : 1;
+          const rolls = Math.max(1, Math.min(CATCHUP_ROLLS, spanned));
           patch.elapsed = cycle > 0 ? patch.elapsed % cycle : 0;
-          rollPatch(state, typeId, biomeId, patch);
+          for (let i = 0; i < rolls; i += 1) rollPatch(state, typeId, biomeId, patch);
         }
       }
     }

@@ -27,7 +27,12 @@ const SUFFIXES = [
  */
 export function formatNumber(value, opts = {}) {
   const { decimals = 1, notation = 'suffix' } = opts;
-  if (!Number.isFinite(value)) return '∞';
+  // Told apart rather than lumped together — see formatSI. A NaN printed as
+  // "∞" is a bug wearing a success's clothes.
+  if (Number.isNaN(value) || value === undefined || value === null) return '?';
+  if (value === Infinity) return '∞';
+  if (value === -Infinity) return '-∞';
+  if (!Number.isFinite(value)) return '?';
   const sign = value < 0 ? '-' : '';
   let n = Math.abs(value);
 
@@ -35,6 +40,9 @@ export function formatNumber(value, opts = {}) {
     // Avoid printing "0.0" for a tiny but non-zero trickle.
     if (n > 0 && n < 0.1 && decimals > 0) return `${sign}${n.toFixed(2)}`;
     const rounded = n % 1 === 0 ? n.toFixed(0) : n.toFixed(decimals);
+    // 999.96 rounds to "1000.0", which is a thousand written the long way.
+    // Promote it rather than print it.
+    if (Number(rounded) >= 1000) return formatNumber(Number(rounded) * (value < 0 ? -1 : 1), opts);
     return `${sign}${rounded}`;
   }
 
@@ -75,8 +83,28 @@ export function formatDuration(seconds) {
 export function formatEta(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) return null;
   if (seconds < 1) return '<1s';
-  if (seconds < 60) return `${Math.ceil(seconds)}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.ceil(seconds % 60)}s`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  return `${Math.floor(seconds / 86400)}d`;
+
+  /*
+   * ROUNDED ONCE, UP FRONT, BEFORE IT IS SPLIT.
+   *
+   * This floored the minutes and ceilinged the seconds, which are two
+   * different roundings of the same number: 119.5 s came out as "1m 60s", and
+   * 59.5 s as "60s". Rounding to whole seconds first and then dividing means
+   * the parts can only ever add back up to the whole.
+   */
+  const whole = Math.ceil(seconds - 1e-9);
+  if (whole < 60) return `${whole}s`;
+  if (whole < 3600) return `${Math.floor(whole / 60)}m ${whole % 60}s`;
+
+  // Minutes, at this scale, round rather than truncate: "2h 0m" for something
+  // 119 minutes away is a worse answer than "2h 0m" being impossible.
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.round((whole % 3600) / 60);
+  if (whole < 86400) {
+    if (minutes < 60) return `${hours}h ${minutes}m`;
+    // The carry can reach a whole day, and "24h 0m" is a day written the long
+    // way round.
+    return hours + 1 >= 24 ? '1d' : `${hours + 1}h 0m`;
+  }
+  return `${Math.floor(whole / 86400)}d`;
 }

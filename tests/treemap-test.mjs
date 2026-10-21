@@ -1,6 +1,7 @@
 import { squarify } from '../src/game/treemap.js';
-let fails = 0;
-const ck = (l, ok, d='') => { console.log(`${ok?'PASS':'FAIL'}  ${l}${d?` — ${d}`:''}`); if(!ok) fails++; };
+import { checker, finish } from './harness.mjs';
+
+const { check: ck, fail } = checker();
 
 const W = 1000, H = 300;
 const mk = (vals) => vals.map((v, i) => ({ id: `b${i}`, value: v }));
@@ -12,7 +13,7 @@ for (let trial = 0; trial < 300; trial += 1) {
   const vals = Array.from({ length: n }, () => Math.random() ** 2 * 100 + 0.5);
   const total = vals.reduce((a,b)=>a+b,0);
   const tiles = squarify(mk(vals), W, H);
-  if (tiles.length !== n) { console.log('count mismatch'); fails++; }
+  if (tiles.length !== n) ck(`every holding gets a tile (${n} in, ${tiles.length} out)`, false);
   for (const t of tiles) {
     const expected = (t.value / total) * W * H;
     worstArea = Math.max(worstArea, Math.abs(t.w * t.h - expected) / expected);
@@ -77,5 +78,30 @@ const sq = squarify(many, W, H);
 const worstSq = Math.max(...sq.map(t => Math.max(t.w/t.h, t.h/t.w)));
 ck('16 biomes all stay close to square', worstSq < 8, `worst aspect ${worstSq.toFixed(1)}:1`);
 
-console.log(fails ? `\n=== ${fails} FAILED ===` : '\n=== treemap geometry verified ===');
-process.exit(fails?1:0);
+/*
+ * EXTREME RATIOS, where the edge-snapping used to swallow neighbours.
+ *
+ * Closing the last seam was a flat half pixel, so a tile 799.92 px wide in an
+ * 800 px frame was stretched the whole way — over the 0.08 px of its neighbour
+ * and everything past it. Ground the hive owned, drawn under another biome,
+ * unhoverable.
+ */
+for (const vals of [[10000, 1, 0.01, 0.01, 0.01], [1e6, 0.01], [500, 500, 0.001], [1, 1e-9]]) {
+  const tiles = squarify(mk(vals), 800, 400);
+  let overlap = 0;
+  for (let i = 0; i < tiles.length; i += 1) {
+    for (let j = i + 1; j < tiles.length; j += 1) {
+      const a = tiles[i]; const b = tiles[j];
+      const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+      const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+      if (ox > 1e-9 && oy > 1e-9) overlap += ox * oy;
+    }
+  }
+  ck(`no tile swallows another at ${vals.length} tiles, ratio ${Math.round(vals[0] / vals[vals.length - 1])}:1`,
+    overlap < 1e-6, `${overlap.toFixed(3)} px² of overlap`);
+  const area = tiles.reduce((t, x) => t + x.w * x.h, 0);
+  ck('and the tiles still fill the frame exactly',
+    Math.abs(area - 800 * 400) < 1, `${area.toFixed(1)} of ${800 * 400}`);
+}
+
+await finish({ name: 'treemap geometry', fail });

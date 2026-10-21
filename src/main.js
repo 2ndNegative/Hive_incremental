@@ -37,7 +37,10 @@ import {
   queueRoom,
   BUILD_QUEUE_BASE,
 } from './game/engine.js';
-import { load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS } from './game/save.js';
+import {
+  load, save, wipe, saveStatus, measureStorageHeadroom, AUTOSAVE_SECONDS,
+  importSave, exportSave,
+} from './game/save.js';
 import { SAVE_VERSION } from './game/state.js';
 import { runOfflineCatchup, offline, skipOffline } from './game/offline.js';
 import {
@@ -68,7 +71,7 @@ import {
   TIME, TIME_ORDER, BUILD_COUNT_EXPONENT, duration, nearestTime, buildWork,
 } from './game/definitions/times.js';
 import {
-  CHANNELS, CHANNEL_ORDER, channelsRead, unreadChannels,
+  CHANNELS, CHANNEL_ORDER, channelsRead, unreadChannels, addModifiers, emptyModifiers,
 } from './game/definitions/modifiers.js';
 import {
   FOCUS_SHARE, focusStrength, isStarrable, isStarred, starsFor, setStar, toggleStar,
@@ -133,7 +136,13 @@ installTipFlip();
 // offline time to do but confuse the player with an empty progress bar.
 const pendingOffline = state.origin ? offlineSeconds : 0;
 
-runOfflineCatchup(state, pendingOffline).then(() => {
+runOfflineCatchup(state, pendingOffline).catch((err) => {
+  // Belt and braces: the catch-up handles its own failures, and if one ever
+  // escapes anyway the game still has to start. A modal over a dead hive is
+  // the one outcome worse than a short catch-up.
+  console.error('offline catch-up failed', err);
+  offline.active = false;
+}).then(() => {
   save();
   // The research queue is drained from the loop callback rather than from
   // inside tick(): tick lives in engine.js, research() lives in actions.js, and
@@ -150,7 +159,7 @@ setInterval(() => {
 // console: hive.state.nutrients.fat = 1e6, hive.derived(), hive.save().
 window.hive = {
   state,
-  derived: () => computeDerived(state),
+  derived: (dt = 1) => computeDerived(state, dt),
   nutrients: NUTRIENTS,
   fuels: FUELS,
   items: ITEMS,
@@ -222,6 +231,7 @@ window.hive = {
     droneTrait: (typeId, id) => genemod.droneTrait(state, typeId, id),
     blocked: (geneId, key) => genemod.blockedBecause(GENES[geneId], genemod.subjectOf(state, key)),
     read: () => [...genemod.traitsRead()],
+    forgetRead: () => genemod.resetTraitsRead(),
     write: writeGenome,
     cycleFor: (typeId) => forage.cycleFor(state, typeId),
   },
@@ -267,6 +277,11 @@ window.hive = {
   releaseAllCogits,
   save,
   load,
+  // The save layer is reachable from the console for the same reason the land
+  // and gene layers are: the suite that proves a malformed save cannot reach
+  // the live hive has to drive it from inside the page.
+  importSave,
+  exportSave,
   wipe,
   saveVersion: SAVE_VERSION,
   saveStatus,
@@ -274,7 +289,7 @@ window.hive = {
   // `step` is the simulated slice per iteration, as offline catch-up scales it:
   // a month at one-second steps is 2.6 million of them, which is minutes of
   // wall clock for a result a coarse step reaches in a moment.
-  tick: (seconds, step = 1) => advance(state, seconds, step),
+  tick: (seconds, step = 1) => advance(state, seconds, step, advanceResearchQueue),
   // Hand control of the clock, so a test can take exact samples instead of
   // racing the live loop.
   loop: { start: () => startLoop(state, advanceResearchQueue), stop: stopLoop },
@@ -397,6 +412,12 @@ window.hive = {
     read: () => [...channelsRead()],
     // Should be empty. Anything here is a bonus that goes nowhere.
     unread: () => unreadChannels(),
+    // The raw adder, so the suite can prove a mistyped channel name throws
+    // instead of silently summing into a key nobody reads. It used to look for
+    // this under `modsApi`, which never existed, and accepted the miss as a
+    // pass — a check that could only ever succeed.
+    add: (mod, bonuses, scale) => addModifiers(mod, bonuses, scale),
+    empty: () => emptyModifiers(),
   },
   buildTime: {
     rungs: TIME,
@@ -430,8 +451,40 @@ window.hive = {
   castesLive: CASTE_ORDER.filter((id) => CASTES[id].assignable).length,
 };
 
+/*
+ * A HIDDEN TAB IS NOT A RUNNING TAB, and now it says so.
+ *
+ * The live loop clamps each step to MAX_CATCHUP_SECONDS, which is right while
+ * the tab is visible — a stall should not be paid back in one enormous tick —
+ * and wrong once it is not, because browsers throttle a background timer to
+ * about once a minute. The loop then woke up, saw fifty-odd seconds, simulated
+ * five of them and threw the rest away. Offline catch-up only ever ran at
+ * startup, so a tab left open behind another window lost most of its day,
+ * while the same tab CLOSED and reopened lost nothing. The player was punished
+ * for leaving the game open.
+ *
+ * So the loop stops when the tab is hidden and the gap is caught up properly
+ * when it comes back — the same path a reopened tab takes, for the same
+ * reason. `save()` on the way out is what leaves the timestamp to measure the
+ * gap from, which is also what makes this safe if the tab never comes back.
+ */
+function resume() {
+  if (offline.active) return;
+  const away = state.savedAt ? (Date.now() - state.savedAt) / 1000 : 0;
+  const pending = state.origin && state.settings.offlineProgress && away > 1 ? away : 0;
+  runOfflineCatchup(state, pending).then(() => {
+    save();
+    startLoop(state, advanceResearchQueue);
+  });
+}
+
 // Best-effort save on the way out; also covers mobile tab suspension.
 window.addEventListener('beforeunload', () => save());
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') save();
+  if (document.visibilityState === 'hidden') {
+    save();
+    stopLoop();
+  } else {
+    resume();
+  }
 });

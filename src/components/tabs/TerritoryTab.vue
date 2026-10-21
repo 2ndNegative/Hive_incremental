@@ -38,7 +38,7 @@ import {
   FOCUS_SHARE,
 } from '../../game/focus.js';
 import {
-  isNamed, rateLabel, rateConfidence, timesFound, preyKey, RANGE_AT, EXACT_AT,
+  isNamed, nameLabel, rateLabel, rateConfidence, timesFound, preyKey, RANGE_AT, EXACT_AT,
 } from '../../game/discovery.js';
 import { claimPreview, offersAnything } from '../../game/landvalue.js';
 import { SNACK_SHARE } from '../../game/definitions/castes.js';
@@ -231,14 +231,37 @@ const expeditions = computed(() => derived.value.expeditions ?? []);
 function topFinds(biomeId, limit = 4) {
   const raw =
     gather.value === 'hunter'
-      ? [...preyFor(biomeId).map((p) => ({ name: ORGANISMS[p.organismId].name, weight: p.weight })),
-         ...poolFor('hunter', biomeId).map((p) => ({ name: ITEMS[p.itemId].name, weight: p.weight }))]
-      : poolFor(gather.value, biomeId).map((p) => ({ name: ITEMS[p.itemId].name, weight: p.weight }));
+      ? [...preyFor(biomeId).map((p) => ({
+        key: preyKey(p.organismId), name: ORGANISMS[p.organismId].name, weight: p.weight,
+      })),
+      ...poolFor('hunter', biomeId).map((p) => ({
+        key: p.itemId, name: ITEMS[p.itemId].name, weight: p.weight,
+      }))]
+      : poolFor(gather.value, biomeId).map((p) => ({
+        key: p.itemId, name: ITEMS[p.itemId].name, weight: p.weight,
+      }));
   const total = raw.reduce((a, e) => a + e.weight, 0);
+  /*
+   * THROUGH THE SAME DISCOVERY GATE AS EVERY OTHER PANEL.
+   *
+   * This printed real names and exact percentages straight out of the
+   * definition files, two panels above a table that carefully shows "???" and
+   * "?%" for the same finds. Hovering a tile on the map was a way of reading
+   * the whole forage table for nothing — and the thing the hive is supposed to
+   * be doing is going and finding out.
+   */
   return raw
     .sort((a, b) => b.weight - a.weight)
     .slice(0, limit)
-    .map((e) => ({ ...e, chance: total > 0 ? e.weight / total : 0 }));
+    .map((e) => {
+      const chance = total > 0 ? e.weight / total : 0;
+      return {
+        ...e,
+        chance,
+        label: nameLabel(state, e.key, e.name),
+        rate: rateLabel(state, biomeId, e.key, chance),
+      };
+    });
 }
 
 const GATHERS = ['forager', 'scavenger', 'hunter', 'excavator', 'siphon'];
@@ -696,9 +719,9 @@ const claimValue = computed(() => {
 
       <div class="panel-body">
         <p class="muted" style="font-size: 0.78rem; margin: 0 0 0.5rem">
-          Every time a drone goes out it picks a patch of this land at random — weighted by nothing
-          but area — and brings back whatever that patch had. Half city and half forest is a coin
-          flip, every time.
+          A drone stands on ONE biome and works it. What it finds is whatever that ground
+          offers — the land here is not a single pool to roll against, it is a set of places,
+          and which of them a drone is standing on is yours to decide in “who works what”.
         </p>
       </div>
 
@@ -773,9 +796,9 @@ const claimValue = computed(() => {
               <span class="tip-title" style="font-size: 0.72rem">
                 Likeliest {{ GATHER_TYPES[gather].name.toLowerCase() }} here
               </span>
-              <span v-for="fnd in t.finds" :key="fnd.name" class="tip-row">
-                <span>{{ fnd.name }}</span>
-                <span>{{ (fnd.chance * 100).toFixed(0) }}%</span>
+              <span v-for="fnd in t.finds" :key="fnd.key" class="tip-row">
+                <span :class="fnd.label === '???' ? 'muted' : ''">{{ fnd.label }}</span>
+                <span :class="fnd.rate === '?%' ? 'muted' : ''">{{ fnd.rate }}</span>
               </span>
               <span v-if="!t.finds.length" class="tip-row warn">
                 <span>Nothing for this caste</span><span>—</span>
@@ -1458,8 +1481,12 @@ const claimValue = computed(() => {
               {{ o.starCount }} focused · {{ (o.strength * 100).toFixed(0) }}% of trips
               <button class="focus-clear" @click="unfocus(o.id)">clear</button>
             </span>
+            <!-- The clear button used to live inside the branch above, which
+                 counts only LIVE stars — so a ground whose stars had all gone
+                 dead showed the complaint and no way to act on it. -->
             <span v-if="o.dead" class="focus-note bad">
               {{ o.dead }} star{{ o.dead === 1 ? '' : 's' }} on nothing this ground offers
+              <button v-if="!o.starCount" class="focus-clear" @click="unfocus(o.id)">clear</button>
             </span>
             <span class="muted num">{{ (o.share * 100).toFixed(0) }}% of the hive's land</span>
           </span>

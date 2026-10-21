@@ -57,17 +57,28 @@ export const TOPBAR = {
     desc: 'What the generators are making, and what is banked.',
     read: (state, derived) => {
       const e = derived.energy;
-      // Generation is the headline, but the POOL is the thing that rises and
-      // falls — so the pool's net change is what decides where this sits.
-      const net = e.generated - e.delivered;
+      /*
+       * THE POOL ONLY EVER GOES DOWN, so the chip may only ever say so.
+       *
+       * This read `generated - delivered` and called a positive result "to the
+       * pool". There is no energy storage building yet — the reserve is
+       * one-way — so a surplus goes nowhere at all; the engine calls it
+       * `wasted` and the chip was quietly reporting it as savings, and ranking
+       * the hive as gaining on the strength of it.
+       *
+       * What the pool actually does is cover the shortfall when generation
+       * falls short of draw. That is `fromPool`, and it is never positive.
+       */
+      const net = -(e.fromPool || 0);
       return {
         text: formatPower(e.generated),
         sub: null,
         tone: e.generated > 0 ? 'good' : 'muted',
         store: formatEnergy(e.pool),
         rate: net,
-        rateText: Math.abs(net) > 1e-9 ? `${formatPower(net)} to the pool` : null,
-        note: e.generated <= 0 && e.demand > 0 ? 'nothing is generating' : null,
+        rateText: Math.abs(net) > 1e-9 ? `${formatPower(net)} out of the reserve` : null,
+        note: e.generated <= 0 && e.demand > 0 ? 'nothing is generating'
+          : (e.wasted || 0) > 1e-9 ? `${formatPower(e.wasted)} going to waste` : null,
       };
     },
   },
@@ -151,7 +162,10 @@ export const TOPBAR = {
     desc: 'The brood. Laid out of protein, and eating the whole time.',
     read: (state, derived) => {
       const l = derived.larvae;
-      const net = (derived.broodRate || 0) - (l.deathRate || 0);
+      // MINUS WHAT MOLDING TAKES. A larva pressed into a drone is a larva
+      // gone, and this counted only the ones that died — so a hive molding
+      // faster than it lays showed a rising trend while the count fell.
+      const net = (derived.broodRate || 0) - (l.deathRate || 0) - (derived.moldRate || 0);
       return {
         text: String(Math.floor(state.larvae || 0)),
         sub: null,

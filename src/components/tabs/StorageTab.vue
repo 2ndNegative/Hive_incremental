@@ -124,11 +124,22 @@ const rows = computed(() => {
   return out.sort(SORTS[state.ui.storageSort] ?? SORTS.mass);
 });
 
+/*
+ * THE GLOBAL FIGURES ARE GLOBAL, not "whatever the search box left showing".
+ *
+ * `spoiling` summed the FILTERED rows, so typing in the search box changed the
+ * hive's total spoilage and could hide its warning entirely — searching for
+ * "wheat" made the fact that the larder was overflowing disappear. A total
+ * that moves when you look for something is not a total.
+ */
 const totals = computed(() => ({
   held: rows.value.reduce((a, r) => a + r.held, 0),
   spoiled: Object.values(state.spilledItems || {}).reduce((a, b) => a + b, 0),
-  spoiling: rows.value.reduce((a, r) => a + r.spill, 0),
+  spoiling: Object.values(d.value.itemSpill || {}).reduce((a, b) => a + b, 0),
 }));
+
+/** Is the larder genuinely empty, or is the search just not matching? */
+const searching = computed(() => Boolean(state.ui.storageSearch?.trim()));
 
 /** How full the shared larder is. */
 const larder = computed(() => {
@@ -245,9 +256,10 @@ const gutFill = computed(() => {
             v-model="state.ui.storageSearch"
             class="codex-search"
             type="text"
+            aria-label="Filter stored matter"
             placeholder="Filter stored matter…"
           />
-          <select v-model="state.ui.storageSort">
+          <select v-model="state.ui.storageSort" aria-label="Sort stored matter by">
             <option value="mass">Most held</option>
             <option value="rate">Fastest gathered</option>
             <option value="energy">Densest</option>
@@ -256,8 +268,15 @@ const gutFill = computed(() => {
         </div>
       </div>
 
+      <!-- An empty larder and an unmatched search are different facts, and
+           telling a player to mold a Forager when they have four hundred items
+           and a typo in the search box is the interface not listening. -->
       <div v-if="!rows.length" class="panel-body">
-        <span class="muted" style="font-size: 0.78rem">
+        <span v-if="searching" class="muted" style="font-size: 0.78rem">
+          Nothing in the larder matches “{{ state.ui.storageSearch.trim() }}”.
+          <button class="focus-clear" @click="state.ui.storageSearch = ''">show everything</button>
+        </span>
+        <span v-else class="muted" style="font-size: 0.78rem">
           Nothing in the larder and nothing being gathered. Mold a Forager and whatever it brings
           back will appear here.
         </span>
@@ -334,6 +353,13 @@ const gutFill = computed(() => {
             <span v-for="b in r.breakdown.known" :key="b.n" class="tip-row">
               <span>{{ b.name }}</span>
               <span>{{ formatMass(b.grams) }}</span>
+            </span>
+            <!-- The list is cut at eight, and the count of what was cut was
+                 worked out and then never rendered — so a 28-nutrient item
+                 showed eight entries and looked complete. -->
+            <span v-if="r.breakdown.more" class="tip-row muted">
+              <span>+{{ r.breakdown.more }} smaller, not shown</span>
+              <span>…</span>
             </span>
             <span v-if="r.breakdown.unresolved" class="tip-row muted">
               <span>+{{ r.breakdown.unresolved }} unresolved in this sample</span>

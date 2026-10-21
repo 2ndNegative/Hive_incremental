@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, ensureLanded } from './harness.mjs';
+import { BASE, LAUNCH, ensureLanded, checker, openPage, finish } from './harness.mjs';
 
 /**
  * WHAT GROUND IS WORTH, AND WHETHER THE PREVIEW IS TELLING THE TRUTH.
@@ -20,17 +20,10 @@ import { BASE, LAUNCH, ensureLanded } from './harness.mjs';
  * from the engine and would be wrong the same way.
  */
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
 const browser = await chromium.launch(LAUNCH);
-const errors = [];
-const p = await browser.newPage();
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser);
 
 await p.goto(BASE, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
@@ -209,10 +202,4 @@ check('a preview never names a find the hive has not discovered',
   spoil.anyNamed === false && spoil.label === null,
   `${spoil.movers} finds moved, none nameable`);
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'what ground is worth', fail, errors, browser });

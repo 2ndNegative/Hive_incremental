@@ -16,42 +16,104 @@
 import { DRONE_TYPES, DRONE_TYPE_ORDER } from './definitions/drones.js';
 import {
   GENES, GENE_ORDER, TRAITS, TRAIT_ORDER, subjectKey, splitSubjectKey,
+  SUBJECT_KIND_ORDER,
 } from './definitions/genes.js';
 
 export { subjectKey, splitSubjectKey };
 
 /* ------------------------------------------------------------------ subjects */
 
-/**
- * Everything genetics can be written into right now.
+/*
+ * ONE BUILDER PER KIND, and a roster that says which kinds exist.
  *
- * LOCKED TYPES ARE LISTED. A drone the hive cannot grow yet is still a thing
- * genetics applies to, and hiding it makes the tab lie about how big the system
- * is — the player would find out that scavengers take genes by researching
- * scavenging, which is a strange way to learn it. It is listed, marked, and its
- * genome can be written in advance; nothing is wearing it until one exists.
+ * Both halves of the subject layer used to be the drone loop written out: the
+ * list built every subject, and `subjectOf` built the whole list and then threw
+ * all but one away. That is why `trait()` cost 1.2 µs a call with 0.6 of it in
+ * `subjectOf` — the engine asks for a trait per drone type per tick, and every
+ * one of those calls ran `unlock(state)` and rebuilt the genome for EVERY type
+ * to answer about one.
+ *
+ * It also meant the second kind of subject — buildings, declared and empty in
+ * definitions/genes.js — would have had to be added to the list and to the
+ * lookup, separately, and the lookup is the one you forget: it fails as "genes
+ * silently do nothing to buildings", not as an error.
+ *
+ * So: a builder per kind, keyed by the kind name the subject key carries.
+ * `geneSubjects` walks the roster; `subjectOf` indexes it. Adding buildings is
+ * one entry here and one in SUBJECT_KINDS, and neither can be done without the
+ * other showing up.
  */
+const BUILDERS = {
+  /**
+   * LOCKED TYPES ARE LISTED. A drone the hive cannot grow yet is still a thing
+   * genetics applies to, and hiding it makes the tab lie about how big the
+   * system is — the player would find out that scavengers take genes by
+   * researching scavenging, which is a strange way to learn it. It is listed,
+   * marked, and its genome can be written in advance; nothing is wearing it
+   * until one exists.
+   */
+  drone: {
+    ids: () => DRONE_TYPE_ORDER,
+    build: (state, typeId) => {
+      const def = DRONE_TYPES[typeId];
+      if (!def) return null;
+      return {
+        id: subjectKey('drone', typeId),
+        kind: 'drone',
+        typeId,
+        name: def.name,
+        desc: def.desc,
+        count: state?.droneTypes?.[typeId] || 0,
+        unlocked: def.unlock ? Boolean(def.unlock(state)) : true,
+        genes: genomeOf(state, subjectKey('drone', typeId)),
+      };
+    },
+  },
+  // `structure` is deliberately absent rather than declared empty here: the
+  // KIND is declared in definitions/genes.js, which is what the tab reads to
+  // say "buildings, not yet", and a builder with no ids would be a second
+  // place claiming the same thing. The load-time check below keeps the two
+  // honest in the one direction that matters — a builder for a kind nobody
+  // declared.
+};
+
+/** Everything genetics can be written into right now. */
 export function geneSubjects(state) {
   const out = [];
-  for (const typeId of DRONE_TYPE_ORDER) {
-    const def = DRONE_TYPES[typeId];
-    out.push({
-      id: subjectKey('drone', typeId),
-      kind: 'drone',
-      typeId,
-      name: def.name,
-      desc: def.desc,
-      count: state?.droneTypes?.[typeId] || 0,
-      unlocked: def.unlock ? Boolean(def.unlock(state)) : true,
-      genes: genomeOf(state, subjectKey('drone', typeId)),
-    });
+  for (const kind of SUBJECT_KIND_ORDER) {
+    const builder = BUILDERS[kind];
+    if (!builder) continue;
+    for (const id of builder.ids()) {
+      const subject = builder.build(state, id);
+      if (subject) out.push(subject);
+    }
   }
   return out;
 }
 
-/** One subject by key, or null. */
+/**
+ * One subject by key, or null.
+ *
+ * Builds the one asked for rather than filtering the list, which is the hot
+ * path: `trait()` comes through here on every tick for every drone type.
+ */
 export function subjectOf(state, key) {
-  return geneSubjects(state).find((s) => s.id === key) ?? null;
+  const { kind, id } = splitSubjectKey(key);
+  return BUILDERS[kind]?.build(state, id) ?? null;
+}
+
+{
+  // A builder for a kind the definitions do not declare would build subjects
+  // the tab has no column for — present to the engine, invisible to the
+  // player, which is the hardest version of this to notice.
+  for (const kind of Object.keys(BUILDERS)) {
+    if (!SUBJECT_KIND_ORDER.includes(kind)) {
+      throw new Error(
+        `genes.js builds subjects of kind "${kind}", which definitions/genes.js `
+        + `does not declare. Add it to SUBJECT_KINDS or drop the builder.`,
+      );
+    }
+  }
 }
 
 /* ------------------------------------------------------------------- genomes */
@@ -113,7 +175,6 @@ export function traitsOf(state, key, override = null) {
 
   const out = {};
   for (const id of TRAIT_ORDER) {
-    READ.add(id);
     out[id] = Math.max(TRAITS[id].floor ?? 0, 1 + total[id]);
   }
   return out;
@@ -123,9 +184,18 @@ export function traitsOf(state, key, override = null) {
  * One trait of one subject. The engine's door into this file.
  *
  * Takes a key rather than a subject so a hot path does not rebuild the whole
- * subject list to ask about one drone type — see the memo below.
+ * subject list to ask about one drone type — see BUILDERS above.
  */
 export function trait(state, key, id) {
+  // RECORDED HERE, where ONE trait is asked for by name.
+  //
+  // It used to be recorded inside `traitsOf`, which builds the whole map — so
+  // a single request for `pace` marked every declared trait as read, and the
+  // guard could never fail. Worse, `traitsOf` is also the interface's preview
+  // path, so merely opening the Genetics tab satisfied it. A guard that cannot
+  // go red is decoration; this one exists because the layer it watches is
+  // invisible when it stops working.
+  READ.add(id);
   return traitsOf(state, key)[id] ?? 1;
 }
 
@@ -150,6 +220,18 @@ const READ = new Set();
 
 export function traitsRead() {
   return new Set(READ);
+}
+
+/**
+ * Forget what has been read, so a test can ask the question cleanly.
+ *
+ * The guard is only worth anything if the reads it counts came from the
+ * ENGINE. A suite that pokes `droneTrait` directly and then asks what has been
+ * read is marking its own homework, so it resets first, drives one real tick,
+ * and asks again.
+ */
+export function resetTraitsRead() {
+  READ.clear();
 }
 
 /* ------------------------------------------------------------------ writing */

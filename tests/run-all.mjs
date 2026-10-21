@@ -6,6 +6,7 @@
  *   npm test -- queue water   # just those two
  *   npm test -- --no-build    # against whatever dist/ already holds
  *   npm test -- --bail        # stop at the first red suite
+ *   npm test -- --jobs=1      # one at a time, for reading a failure in order
  *
  * WHY THIS EXISTS. The suites were written one at a time and run by hand, one
  * at a time, against a `vite preview` somebody remembered to start. That is
@@ -20,10 +21,21 @@
  *     assumed a server was already up would silently test a stale build, which
  *     is worse than testing nothing because it looks like it passed.
  *
- *   — It runs them STRICTLY ONE AT A TIME. Every suite clears localStorage for
- *     the origin and then drives a fresh hive through it; two running at once
- *     on the same origin would wipe each other mid-run and fail at random. The
- *     price is wall-clock time, which is the right thing to spend here.
+ *   — It runs SEVERAL AT A TIME, up to a limit taken from the machine. This
+ *     file used to say they had to run one at a time, because each suite clears
+ *     localStorage for the origin and two at once would wipe each other
+ *     mid-run. That is wrong, and it cost about half the wall clock of every
+ *     run since: a suite calls `chromium.launch()`, which starts its own
+ *     browser process with its own temporary profile, so its storage is not
+ *     shared with anything — same origin or not. Four suites were run at once
+ *     against one server to check, before this was changed.
+ *
+ *     The limit is `cpus - 1`, capped at four and floored at two. These are
+ *     browsers: the ceiling is not politeness, it is that a machine swapping
+ *     makes every suite slower and some of them flaky, since a suite waiting
+ *     200ms for a render is waiting on a clock rather than on the render.
+ *     `--jobs=1` puts it back to one at a time, which is what to do when a
+ *     failure needs reading in order.
  *
  *   — It EXITS NON-ZERO if anything is red, so CI and a human reading `echo $?`
  *     get the same answer. The one thing a test runner must never do is finish
@@ -31,7 +43,8 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { cpus } from 'node:os';
+import { readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -42,6 +55,21 @@ const flags = new Set(args.filter((a) => a.startsWith('--')));
 const wanted = args.filter((a) => !a.startsWith('--'));
 const bail = flags.has('--bail');
 
+/**
+ * How many suites may be in flight at once.
+ *
+ * `--jobs=N`, then `HIVE_JOBS`, then the machine. One is a legitimate answer
+ * and the one to use when reading a failure: with several in flight the output
+ * arrives in completion order, so a suite's own lines are no longer adjacent to
+ * the line announcing it.
+ */
+const jobsFlag = args.find((a) => a.startsWith('--jobs='));
+const JOBS = Math.max(1, Number(
+  jobsFlag?.slice('--jobs='.length)
+  ?? process.env.HIVE_JOBS
+  ?? Math.min(4, Math.max(2, cpus().length - 1)),
+) || 1);
+
 // A port of its own, not 4173 and not 5173, so a runner started while the
 // author has `npm run dev` open does not fight them for it.
 const PORT = Number(process.env.HIVE_TEST_PORT) || 4188;
@@ -50,21 +78,39 @@ const URL_BASE = `http://localhost:${PORT}`;
 /**
  * The order is deliberate: cheap and foundational first, so a break in
  * something everything else depends on is the first thing you read rather than
- * the twenty-ninth. Anything not named here still runs, after these.
+ * the thirty-ninth. Anything not named here still runs, after these.
+ *
+ * IT IS ALSO THE START ORDER FOR THE POOL, and those two goals pull against
+ * each other: a suite that takes forty seconds and is started last is the tail
+ * the whole run waits on. So the long ones — `verify`, `landvalue`, `layout`,
+ * `ui` — sit near the front whether or not anything depends on them, and the
+ * ten-second ones fill in behind.
  */
 const ORDER = [
-  'verify', 'smoke', 'storage', 'rebuild', 'save', 'run', 'origin', 'territory',
+  'verify', 'landvalue', 'layout', 'ui', 'smoke', 'storage', 'rebuild', 'save',
+  'history', 'run', 'origin', 'territory',
   'single', 'treemap', 'cogit', 'topbar', 'drone', 'fuel', 'click', 'chamber',
   'mold', 'land', 'explore', 'adjacency', 'general', 'focus', 'queue', 'water',
   'codex', 'cost', 'insight', 'economy', 'power', 'scaffold', 'buildtime',
-  'modifier',
-  'storagewall',
-  'landvalue',
-  'ui',
+  'modifier', 'storagewall', 'access', 'genes', 'format',
 ];
 
+const NOT_SUITES = new Set(['run-all.mjs', 'harness.mjs']);
+
+/*
+ * A SUITE IS A `.mjs` FILE HERE THAT IS NOT PART OF THE MACHINERY.
+ *
+ * Dotfiles are excluded, which is not housekeeping: a throwaway `.probe.mjs`
+ * written to reproduce a bug got picked up as a suite called ".probe" and run
+ * on every `npm test` after. A file whose name starts with a dot is a scratch
+ * file by universal convention, and `tests/.last-failure-*.log` already lives
+ * here on that understanding.
+ *
+ * `fixtures/` is a directory, so `readdirSync` lists it and the extension
+ * filter drops it; nothing in it is ever executed on its own.
+ */
 const files = readdirSync(HERE)
-  .filter((f) => f.endsWith('.mjs') && f !== 'run-all.mjs' && f !== 'harness.mjs');
+  .filter((f) => f.endsWith('.mjs') && !f.startsWith('.') && !NOT_SUITES.has(f));
 
 const nameOf = (file) => file.replace(/(-test)?\.mjs$/, '');
 const suites = files
@@ -135,12 +181,31 @@ const server = spawn(npx, ['vite', 'preview', '--port', String(PORT), '--strictP
   shell: SHELL, // same .cmd rule as the build above
   detached: process.platform !== 'win32',
 });
-// A server that never starts would otherwise show up as thirty-two suites
+// A server that never starts would otherwise show up as every suite
 // timing out on their first selector, which is a long way to travel to learn
 // that one process did not launch.
 server.on('error', (err) => {
   console.error(`\ncould not start the preview server (${npx}): ${err.message}`);
   process.exit(1);
+});
+
+/*
+ * AND A SERVER THAT STARTS AND THEN DIES IS A FAILURE TOO.
+ *
+ * `error` fires when the process cannot be SPAWNED. It does not fire when vite
+ * starts, finds port 4188 already held — by a stale preview from a run that
+ * was killed badly, which `--strictPort` guarantees it will refuse rather than
+ * move past — and exits. The readiness probe then fetched the OLD server, got
+ * a 200, and every suite ran against whatever build that server was serving.
+ *
+ * Which is precisely the failure the header of this file says the runner
+ * exists to prevent: "a runner that assumed a server was already up would
+ * silently test a stale build, which is worse than testing nothing because it
+ * looks like it passed."
+ */
+let serverExited = null;
+server.on('exit', (code, signal) => {
+  if (!stopped) serverExited = `the preview server exited early (code ${code}, signal ${signal})`;
 });
 
 let stopped = false;
@@ -151,7 +216,13 @@ function stopServer() {
     // The whole process group on POSIX: `vite preview` spawns an esbuild child
     // that outlives a plain kill and then holds the port against the next run.
     if (process.platform !== 'win32' && server.pid) process.kill(-server.pid, 'SIGTERM');
-    else server.kill();
+    else if (server.pid) {
+      // Windows has no process groups, and `shell: true` means `server` is a
+      // cmd.exe that dies without taking vite or its esbuild child with it —
+      // which then holds --strictPort against the next run, i.e. exactly the
+      // stale-server failure above. taskkill /T walks the tree.
+      spawnSync('taskkill', ['/pid', String(server.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else server.kill();
   } catch { /* already gone */ }
 }
 process.on('exit', stopServer);
@@ -160,18 +231,26 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stopServer(); p
 async function waitForServer(timeoutMs = 30_000) {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
+    // Checked every pass, not once at the end: the moment the process we
+    // started is gone, a 200 from this port is somebody else's server.
+    if (serverExited) return serverExited;
     try {
       const res = await fetch(URL_BASE, { signal: AbortSignal.timeout(2000) });
       if (res.ok) return true;
     } catch { /* not up yet */ }
     await new Promise((r) => { setTimeout(r, 250); });
   }
-  return false;
+  return 'the preview server never came up';
 }
 
 process.stdout.write(`serving ${URL_BASE} … `);
-if (!await waitForServer()) {
-  console.log('FAILED — the preview server never came up');
+const ready = await waitForServer();
+if (ready !== true) {
+  console.log(`FAILED — ${ready}`);
+  if (serverExited) {
+    console.log(`  Something else is probably holding port ${PORT}. --strictPort means vite`);
+    console.log('  refuses to move, which is deliberate: the alternative is testing a stale build.');
+  }
   process.exit(1);
 }
 console.log('ok\n');
@@ -181,33 +260,108 @@ console.log('ok\n');
 const results = [];
 const started = Date.now();
 
-for (const suite of suites) {
-  const label = suite.name.padEnd(12);
-  process.stdout.write(`  ${label} `);
+/** One suite, in its own process. Resolves with what it did; never rejects. */
+function runSuite(suite) {
   const began = Date.now();
-  const out = spawnSync(process.execPath, [suite.file], {
-    cwd: HERE,
-    encoding: 'utf8',
-    env: { ...process.env, HIVE_URL: URL_BASE },
-    timeout: 5 * 60_000,
+  return new Promise((done) => {
+    const child = spawn(process.execPath, [suite.file], {
+      cwd: HERE,
+      env: { ...process.env, HIVE_URL: URL_BASE },
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+
+    // The five-minute cap, kept from the serial version. `spawn` has no
+    // `timeout` option that reports the way `spawnSync` does, so it is a timer
+    // and a recorded signal — otherwise a hung suite is an exit code of null
+    // with no explanation, which is the hardest failure to read.
+    let timedOut = false;
+    const cap = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 5 * 60_000);
+
+    child.on('error', (err) => {
+      clearTimeout(cap);
+      done({
+        ...suite, ok: false, secs: '0',
+        out: { stdout, stderr: `${stderr}\ncould not start the suite: ${err.message}`, status: null, signal: null },
+      });
+    });
+    child.on('close', (status, signal) => {
+      clearTimeout(cap);
+      done({
+        ...suite,
+        ok: status === 0,
+        secs: ((Date.now() - began) / 1000).toFixed(0),
+        out: { stdout, stderr, status, signal: timedOut ? 'SIGKILL (runner cap)' : signal },
+      });
+    });
   });
-  const secs = ((Date.now() - began) / 1000).toFixed(0);
-  const ok = out.status === 0;
-  results.push({ ...suite, ok, out, secs });
-  console.log(ok ? `ok   ${secs}s` : `FAIL ${secs}s`);
+}
+
+/*
+ * A POOL, NOT A WAVE.
+ *
+ * Suites are started in ORDER and reported as they FINISH, which are two
+ * different sequences once more than one is in flight — so every line names
+ * its suite rather than relying on the position it was announced at. With
+ * `--jobs=1` the two sequences are the same and the output is exactly what it
+ * always was.
+ *
+ * `--bail` stops STARTING new ones. It cannot stop the ones already running,
+ * and killing them would throw away results that are nearly in hand for no
+ * gain.
+ */
+let next = 0;
+
+async function worker() {
+  for (;;) {
+    // Read off `results` rather than a flag a worker sets after an await: the
+    // flag is the textbook lost-update, and "has anything failed yet" is
+    // already recorded.
+    if (next >= suites.length) return;
+    if (bail && results.some((r) => !r.ok)) return;
+    const suite = suites[next];
+    next += 1;
+    const result = await runSuite(suite);
+    results.push(result);
+    report(result);
+  }
+}
+
+function report({ name, file, ok, out, secs }) {
+  console.log(`  ${name.padEnd(12)} ${ok ? `ok   ${secs}s` : `FAIL ${secs}s`}`);
+  const suite = { name, file };
   if (!ok) {
     // Only the lines that say what went wrong. The suites print a PASS line per
     // check and there are hundreds; dumping all of it buries the one that
     // matters. The full output is one `node tests/<name>.mjs` away.
     const text = `${out.stdout ?? ''}\n${out.stderr ?? ''}`;
+    // `=== N CHECK(S) FAILED: … ===` is the suites' own summary of WHICH
+    // checks failed, and the old filter missed it — `^FAIL` is anchored and
+    // that line starts with `===`. Stack frames were dropped too.
     const interesting = text.split('\n')
-      .filter((l) => /^FAIL|FAILURES|Error|error:|Timeout/.test(l.trim()))
-      .slice(0, 10);
+      .filter((l) => /^FAIL|FAILURES|CHECK\(S\) FAILED|Error|error:|Timeout|^\s+at /.test(l.trim()))
+      .slice(0, 25);
     for (const line of interesting) console.log(`      ${line.trim()}`);
-    if (!interesting.length) console.log(`      (exit ${out.status}; run it alone to see why)`);
-    if (bail) break;
+    // A timeout kills the suite with no output at all and `status === null`,
+    // so it has to be named rather than left as "(exit null)".
+    if (out.signal || out.status === null) {
+      console.log(`      killed after ${secs}s (${out.signal ?? 'no exit code'}) — `
+        + 'the runner\'s five-minute cap, or a crash');
+    }
+    if (!interesting.length && !out.signal) {
+      console.log(`      (exit ${out.status}; run it alone to see why)`);
+    }
+    // The whole thing is kept regardless, so a failure is never a thing you
+    // have to reproduce before you can read it.
+    writeFileSync(new URL(`../tests/.last-failure-${suite.name}.log`, import.meta.url), text);
+    console.log(`      full output: tests/.last-failure-${suite.name}.log`);
   }
 }
+
+if (JOBS > 1) console.log(`  (${JOBS} at a time; --jobs=1 to run them in order)\n`);
+await Promise.all(Array.from({ length: Math.min(JOBS, suites.length) }, worker));
 
 stopServer();
 

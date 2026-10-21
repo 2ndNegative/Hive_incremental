@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * What a drone costs to press, and what stops a chamber pressing one.
@@ -22,22 +22,15 @@ async function ensureLanded(page) {
 }
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(200);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
@@ -48,7 +41,7 @@ await ensureLanded(p);
 // checks are about molding and the Drones tab, not about the gate, so the tech
 // is granted up front rather than leaving half the drone table invisible.
 await p.evaluate(() => { hive.state.tech.scavenging = true; });
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /**
@@ -101,6 +94,7 @@ const ceiling = await p.evaluate(() => {
   const after = hive.cognition();
   return {
     capacity: after.capacity,
+    usedBefore: before.used,
     used: after.used,
     over: after.over,
     drones: s.droneTypes.forager,
@@ -115,6 +109,12 @@ check('and the row says why it stopped',
   ceiling.status === 'no bandwidth', ceiling.status);
 check('the larvae it could not use are still in the brood',
   ceiling.larvaeLeft === 40 - ceiling.drones, `${ceiling.larvaeLeft} left of 40`);
+// The before-sample was taken and never compared. Pressing drones is the only
+// thing in this fixture that draws cognition, so the rise is the proof that the
+// ceiling above was reached by WORKING up to it rather than by starting there.
+check('and the bandwidth it stopped at is bandwidth it filled',
+  ceiling.used > ceiling.usedBefore,
+  `${ceiling.usedBefore} Cg → ${ceiling.used} Cg`);
 
 const widened = await p.evaluate(() => {
   const s = hive.state;
@@ -166,7 +166,6 @@ check('and idles rather than drawing its working watts',
 /* ========================================== 3. a cost the hive cannot see yet */
 
 const locked = await p.evaluate(() => {
-  const s = hive.state;
   const def = hive.drones.types.scavenger;
   return {
     declared: def.cost,
@@ -303,7 +302,7 @@ check('a packed brood really does press more drones in the same minute',
 
 await fixture({ nodes: 10, larvae: 20 });
 await openTab(p, 'Drones');
-await p.waitForTimeout(250);
+await settle(p);
 const rows = await p.evaluate(() => {
   const out = {};
   for (const r of document.querySelectorAll('.job-row')) {
@@ -355,7 +354,7 @@ const readField = () =>
     };
   });
 await p.fill(field, '');
-await p.waitForTimeout(300);
+await settle(p);
 await p.type(field, '42', { delay: 60 });
 await p.waitForTimeout(400);
 const typed = await readField();
@@ -371,10 +370,10 @@ await p.evaluate(() => {
   el.value = '0';
   el.dispatchEvent(new Event('input', { bubbles: true }));
 });
-await p.waitForTimeout(250);
+await settle(p);
 for (let i = 0; i < 10; i += 1) {
   await p.press(field, 'ArrowUp');
-  await p.waitForTimeout(90);
+  await settle(p);
 }
 const stepped = await readField();
 check('and stepped, ten clicks for ten steps rather than one',
@@ -385,10 +384,4 @@ await p.evaluate(() => {
   hive.drones.setMoldTarget('forager', '');
 });
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'molding drones', fail, errors, browser });

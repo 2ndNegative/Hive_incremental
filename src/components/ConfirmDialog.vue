@@ -4,6 +4,7 @@
 // alone is too easy to hit by reflex.
 
 import { ref, computed, watch } from 'vue';
+import { useDialog, dialogId } from './useDialog.js';
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -26,12 +27,29 @@ watch(
 const satisfied = computed(
   () => !props.requirePhrase || typed.value.trim().toUpperCase() === props.requirePhrase.toUpperCase(),
 );
+
+// Focus placement, trapping, restoration, Escape, and the page behind made
+// inert — see useDialog. This is the dialog that asks you to type DELETE, and
+// it used to be reachable by Tab from the page underneath it.
+const card = ref(null);
+const titleId = dialogId();
+useDialog(card, () => props.show, () => emit('cancel'));
 </script>
 
 <template>
   <div v-if="show" class="modal-backdrop" @click.self="emit('cancel')">
-    <div class="modal-card" :class="{ 'is-danger': danger }">
-      <div class="modal-head" :class="{ 'is-danger': danger }">{{ title }}</div>
+    <div
+      ref="card"
+      class="modal-card"
+      :class="{ 'is-danger': danger }"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="titleId"
+      tabindex="-1"
+    >
+      <div :id="titleId" class="modal-head" :class="{ 'is-danger': danger }">
+        {{ title }}
+      </div>
 
       <div class="modal-body">
         <slot />

@@ -57,19 +57,43 @@ export const CONFIDENCE = ['high', 'medium', 'low', 'model'];
  */
 export const COVERAGE = ['full', 'partial', 'macroOnly'];
 
+/**
+ * A QUANTITY HAS TO BE A FINITE, NON-NEGATIVE NUMBER.
+ *
+ * Nothing checked. `sodium: NaN` in a micro passed the validator without a
+ * murmur, because every downstream sum coerces it away with `|| 0` — so the
+ * item simply contained no sodium, for ever, and the only trace was a
+ * mass-balance warning on a completely different line. The database is hand-
+ * authored, which is exactly why it gets a gate at the door.
+ *
+ * Thrown at module load, like the unknown-nutrient check beside it: a
+ * malformed item should stop the build, not quietly become a worse item.
+ */
+function assertAmount(value, id, itemId, unit) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(
+      `Item "${itemId}" declares ${unit} "${id}" as ${JSON.stringify(value)}. `
+      + 'Quantities must be finite numbers of zero or more.',
+    );
+  }
+}
+
 export function normalizeItem(raw) {
   const per100g = {};
 
   for (const [id, grams] of Object.entries(raw.g || {})) {
     assertNutrient(id, raw.id);
+    assertAmount(grams, id, raw.id, 'g');
     per100g[id] = (per100g[id] || 0) + grams;
   }
   for (const [id, mg] of Object.entries(raw.mg || {})) {
     assertNutrient(id, raw.id);
+    assertAmount(mg, id, raw.id, 'mg');
     per100g[id] = (per100g[id] || 0) + mg / 1000;
   }
   for (const [id, ug] of Object.entries(raw.ug || {})) {
     assertNutrient(id, raw.id);
+    assertAmount(ug, id, raw.id, 'µg');
     per100g[id] = (per100g[id] || 0) + ug / 1_000_000;
   }
 

@@ -18,6 +18,7 @@ import { ORIGINS, originAvailability } from './definitions/origins.js';
 import { BIOMES } from './definitions/biomes.js';
 import { releaseAllCogits } from './actions.js';
 import { formatDuration } from './format.js';
+import { droneCount } from './engine.js';
 import { formatMass } from './units.js';
 
 /**
@@ -170,7 +171,7 @@ export function chooseOrigin(id) {
   const drones = start.drones || 0;
   state.drones += drones;
   state.castes.dormant += drones;
-  state.stats.peakDrones = Math.max(state.stats.peakDrones, state.drones);
+  state.stats.peakDrones = Math.max(state.stats.peakDrones, droneCount(state));
 
   // Nothing carries a reservation across the start of a run.
   releaseAllCogits();

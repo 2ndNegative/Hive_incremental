@@ -31,7 +31,25 @@ import { holdings, totalArea, isColonisable } from '../src/game/definitions/biom
 import { formatDuration } from '../src/game/format.js';
 import { formatMass, formatEnergy, formatPower, formatMassFlow } from '../src/game/units.js';
 
-const hours = Number(process.argv[2]) || 6;
+/*
+ * ARGUMENTS ARE CHECKED, not coerced and hoped over.
+ *
+ * `Number(argv[2]) || 6` turned "abc" into six, "0" into six, and accepted
+ * both "-5" (a loop that never runs, reported as a -5h run) and "Infinity" (a
+ * loop that never ends). A simulator you cannot trust to have run the hours it
+ * says it ran is worse than no simulator.
+ */
+function hoursArg(raw) {
+  if (raw === undefined) return 6;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.error(`Not a length of time: "${raw}"`);
+    console.error('Usage: npm run balance -- [hours] [--quiet] [--seed N]');
+    process.exit(2);
+  }
+  return n;
+}
+const hours = hoursArg(process.argv[2]);
 const quiet = process.argv.includes('--quiet');
 const STEP = 1;
 const TOTAL = hours * 3600;
@@ -468,6 +486,19 @@ console.log(
 console.log(`intake          ${formatMassFlow(derived.ingestRate)}  (lifetime ${formatMass(state.stats.ingested)})`);
 console.log(`insight         ${Math.floor(state.insight)} / ${Math.round(derived.insightCap)}  (+${derived.insightRate.toFixed(2)}/s)`);
 console.log(`starving        ${((starvedTicks / TOTAL) * 100).toFixed(1)}% of ticks, ${state.stats.dronesLost} drones lost`);
+/*
+ * WHAT THE BOT DID BY HAND, which the report never mentioned.
+ *
+ * It clicks Consume biomass every simulated second while the hive is under
+ * CLICK_UNTIL drones — with no time bound, so a run that never reaches that
+ * many is hand-fed from start to finish. That is a player at the keyboard for
+ * the whole run, and a balance figure that silently includes one is not a
+ * figure about the game as it plays itself.
+ */
+console.log(
+  `hand-fed        ${state.stats.clicks} manual gathers `
+  + `(the bot clicks while under ${CLICK_UNTIL} drones; ${((state.stats.clicks / (TOTAL / STEP)) * 100).toFixed(0)}% of ticks)`,
+);
 
 {
   const d = computeDerived(state);
@@ -558,9 +589,21 @@ for (const id of STRUCTURE_ORDER) {
     // reading it as iron reported four buildings as walled at zero when none
     // of them is.
     const cost = payableCost(state, def.cost(n));
-    // What the hive could hold, with n of this already standing. `capsMax` is
-    // the honest ceiling: dedicated room plus whatever the shared pool adds.
-    const ceiling = derived.capsMax;
+    /*
+     * THE CEILING AS IT WOULD BE WITH n OF THEM STANDING.
+     *
+     * The comment said that and the code did not: `derived` is the single
+     * end-of-run derive, hoisted outside this loop, so the ceiling was
+     * whatever the hive happened to finish with while the COST walked up the
+     * curve. For a storage building — the only kind where a wall of this shape
+     * matters — that compares the nth unit's price against room that already
+     * includes however many were built, and understates every wall.
+     *
+     * Derived on a copy, so asking the question does not answer it differently
+     * next time.
+     */
+    const hypothetical = { ...state, structures: { ...state.structures, [id]: n } };
+    const ceiling = computeDerived(hypothetical).capsMax;
     const over = Object.entries(cost).find(([res, grams]) => grams > (ceiling[res] ?? Infinity));
     if (!over) continue;
     walls.push({ id, n, resource: over[0], cost: Math.round(over[1]), ceiling: Math.round(ceiling[over[0]] ?? 0) });

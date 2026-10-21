@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, shot } from './harness.mjs';
+import { BASE, LAUNCH, shot, finish, settle } from './harness.mjs';
 
 /**
  * Territory, biome weighting and forage rolls.
@@ -20,7 +20,7 @@ async function ensureLanded(page) {
 
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 const base = BASE;
@@ -566,7 +566,7 @@ check('it shows what the ground offers', tab.offers > 10, `${tab.offers} entries
 
 /* switching gather type changes what is listed */
 await p.selectOption('.filter-row select', 'excavator');
-await p.waitForTimeout(250);
+await settle(p);
 const switched = await p.evaluate(() => {
   const names = [...document.querySelectorAll('.offer-chip')].map((c) => c.textContent.trim());
   return { names, allDiggable: names.every((n) => !/bread|mussel/i.test(n)) };
@@ -619,7 +619,4 @@ check('every biome supports every caste',
 
 await p.screenshot({ path: shot('territory-test.png') });
 
-console.log(`\nconsole errors: ${errors.length ? errors.slice(0, 4).join(' | ') : 'none'}`);
-console.log(fail.length ? `\n=== ${fail.length} CHECK(S) FAILED: ${fail.join('; ')} ===` : '\n=== territory, biomes and forage rolls verified ===');
-await browser.close();
-console.log('=== territory test finished ===');
+await finish({ name: 'territory, biomes and forage rolls', fail, errors, browser });

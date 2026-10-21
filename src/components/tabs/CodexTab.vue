@@ -147,15 +147,18 @@ const CONFIDENCE_LABEL = {
       <input
         class="codex-search"
         type="search"
+        aria-label="Search the codex"
         placeholder="Search by name, category, tag or what is in it…"
         v-model="state.ui.codexSearch"
       />
-      <select class="fuel-select" v-model="state.ui.codexCategory">
+      <select class="fuel-select" aria-label="Filter the codex by category"
+              v-model="state.ui.codexCategory">
         <option v-for="c in categories" :key="c" :value="c">
           {{ c === 'all' ? 'All categories' : CATEGORIES[c].name }}
         </option>
       </select>
-      <select class="fuel-select" v-model="state.ui.codexSort">
+      <select class="fuel-select" aria-label="Sort the codex by"
+              v-model="state.ui.codexSort">
         <option value="name">By name</option>
         <option value="energy">By energy density</option>
         <option value="protein">By protein</option>

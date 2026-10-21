@@ -110,11 +110,35 @@ export function squarify(items, width, height) {
     }
   }
 
-  // Floating point can leave the last row a hair short of the frame edge.
-  // Snapping it closes the seam without moving anything measurably.
+  /*
+   * Floating point can leave the last row a hair short of the frame edge.
+   * Snapping it closes the seam without moving anything measurably.
+   *
+   * A TILE MAY ONLY GROW INTO EMPTY SPACE. The old rule was a flat half pixel,
+   * which is fine for ordinary holdings and wrong at extremes: an ocean tile
+   * 799.92 px wide in an 800 px frame is within half a pixel of the edge, so
+   * it was stretched the whole way — straight over the 0.08 px of vent beyond
+   * it and the three slivers after that, which then overlap it, cannot be
+   * hovered, and cannot be found. The hive owned them and the map had eaten
+   * them.
+   *
+   * So the question is not "how close is this to the edge" but "is there
+   * anything out there". A tile with a neighbour past its right edge keeps its
+   * width however small the seam; one with nothing beyond it closes it.
+   */
+  const touches = (a, b) => a.y < b.y + b.h - 1e-9 && b.y < a.y + a.h - 1e-9;
+  const touchesV = (a, b) => a.x < b.x + b.w - 1e-9 && b.x < a.x + a.w - 1e-9;
   for (const tile of out) {
-    if (tile.x + tile.w > width - 0.5) tile.w = width - tile.x;
-    if (tile.y + tile.h > height - 0.5) tile.h = height - tile.y;
+    const right = tile.x + tile.w;
+    const bottom = tile.y + tile.h;
+    if (right > width - 0.5
+      && !out.some((o) => o !== tile && touches(tile, o) && o.x + o.w > right + 1e-9)) {
+      tile.w = width - tile.x;
+    }
+    if (bottom > height - 0.5
+      && !out.some((o) => o !== tile && touchesV(tile, o) && o.y + o.h > bottom + 1e-9)) {
+      tile.h = height - tile.y;
+    }
   }
 
   return out;

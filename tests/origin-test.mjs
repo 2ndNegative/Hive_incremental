@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, shot } from './harness.mjs';
+import { BASE, LAUNCH, shot, finish, settle } from './harness.mjs';
 
 /**
  * Open a tab by its label. Nth-child indices broke the moment a tab was
@@ -8,7 +8,7 @@ import { BASE, LAUNCH, shot } from './harness.mjs';
  */
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 const base = BASE;
@@ -183,7 +183,4 @@ check('and is not re-seeded on top of its progress',
   `${Math.round(migrated.playtime)}s of play intact, now v${migrated.version}`);
 await p2.close();
 
-console.log(`\nconsole errors: ${errors.length ? errors.slice(0, 4).join(' | ') : 'none'}`);
-console.log(fail.length ? `\n=== ${fail.length} CHECK(S) FAILED: ${fail.join('; ')} ===` : '\n=== landing sites verified ===');
-await browser.close();
-console.log('=== origin test finished ===');
+await finish({ name: 'landing sites', fail, errors, browser });

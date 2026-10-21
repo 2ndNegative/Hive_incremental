@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * Telling a route what to look for.
@@ -21,29 +21,22 @@ async function ensureLanded(page) {
 
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(200);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /** A hive holding one forest, with that ground fully mapped. */
@@ -282,7 +275,7 @@ const vague = await p.evaluate(() => {
   s.found.temperateForest[pool[0].itemId] = 12; // bracketed only
   return pool[0].itemId;
 });
-await p.waitForTimeout(300);
+await settle(p);
 const gated = await p.evaluate(() => {
   const chips = [...document.querySelectorAll('.offer-chip')];
   const vagueChip = chips.find((c) => /–\d+%|\?%/.test(c.innerText));
@@ -298,7 +291,7 @@ check('a find the hive has only bracketed shows no star at all',
 await p.evaluate((key) => {
   hive.state.found.temperateForest[key] = hive.discovery.EXACT_AT + 15;
 }, vague);
-await p.waitForTimeout(300);
+await settle(p);
 
 const clicked = await p.evaluate(() => {
   const chip = [...document.querySelectorAll('.offer-chip')].find((c) => c.querySelector('.star-btn'));
@@ -306,13 +299,19 @@ const clicked = await p.evaluate(() => {
   chip.querySelector('.star-btn').click();
   return name;
 });
-await p.waitForTimeout(300);
+await settle(p);
 const afterClick = await p.evaluate(() => {
   // Scoped to the offerings panel. Three panels on this tab use `.offer-head`
   // now — the assignment grid and "Out now" both group by biome the same way —
   // so an unscoped query picks whichever is highest on the page.
+  //
+  // Matched on the panel's HEADING, not on its whole text. Matching the body
+  // meant any panel that happened to use the words "ground offers" in a
+  // sentence won instead, which is exactly what happened the moment the
+  // holdings blurb was rewritten — a test failing because prose three panels
+  // away changed is a test measuring the wrong thing.
   const panel = [...document.querySelectorAll('.panel-box')]
-    .find((b) => /ground offers/i.test(b.innerText));
+    .find((b) => /ground offers/i.test(b.querySelector('.panel-head')?.innerText ?? ''));
   const head = panel?.querySelector('.offer-head');
   const chip = [...document.querySelectorAll('.offer-chip')].find((c) =>
     c.querySelector('.star-btn.star-on'));
@@ -332,10 +331,10 @@ check('and the biome header says how much of the route is spoken for',
 
 await p.evaluate(() => {
   const panel = [...document.querySelectorAll('.panel-box')]
-    .find((b) => /ground offers/i.test(b.innerText));
+    .find((b) => /ground offers/i.test(b.querySelector('.panel-head')?.innerText ?? ''));
   panel.querySelector('.focus-clear').click();
 });
-await p.waitForTimeout(300);
+await settle(p);
 const cleared = await p.evaluate(() => ({
   state: Object.keys(hive.state.focus?.forager?.temperateForest || {}).length,
   filled: document.querySelectorAll('.offer-chip .star-btn.star-on').length,
@@ -352,7 +351,7 @@ const perRoute = await p.evaluate(() => {
   hive.focus_.set('forager', 'temperateForest', key, true);
   return key;
 });
-await p.waitForTimeout(300);
+await settle(p);
 const foragerView = await p.evaluate(() =>
   document.querySelectorAll('.offer-chip .star-btn.star-on').length);
 await p.selectOption('.filter-row select', 'scavenger');
@@ -365,7 +364,8 @@ const backAgain = await p.evaluate(() =>
   document.querySelectorAll('.offer-chip .star-btn.star-on').length);
 check('the panel shows the selected route\'s stars and no others',
   foragerView === 1 && scavengerView === 0 && backAgain === 1,
-  `forager ${foragerView}, scavenger ${scavengerView}, back to ${backAgain}`);
+  `${perRoute} starred for the forager: forager ${foragerView}, `
+  + `scavenger ${scavengerView}, back to ${backAgain}`);
 
 /* ========================================== 10. a save keeps the orders */
 
@@ -421,10 +421,4 @@ check('and it still rolls its ground', afterLoad.rolls !== 'none', afterLoad.rol
 check('with nothing thrown on the way in', qErrors.length === 0, qErrors.slice(0, 2).join(' | '));
 await q.close();
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'telling a route what to look for', fail, errors, browser });

@@ -43,10 +43,18 @@ console.log('building single-file bundle…');
 await rm(outDir, { recursive: true, force: true });
 await mkdir(outDir, { recursive: true });
 
+// `configFile: false` means NOTHING from vite.config.js applies here, which is
+// deliberate — this build has its own output shape — but it also means every
+// `define` has to be repeated. __APP_VERSION__ was not, and the portable build
+// threw on boot: the header reads it during setup, so the whole app failed to
+// mount. Anything added to `define` there belongs here too.
+const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+
 await build({
   root,
   configFile: false,
   base: './',
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   plugins: [vue()],
   logLevel: 'warn',
   build: {
@@ -110,16 +118,38 @@ html = html.replace(
   () => `<head>\n    <!--\n      HiveIdle — self-contained build. No install, no server: open it in a browser.\n      Built ${new Date().toISOString()}. Regenerate with: node tools/build-single.mjs\n    -->`,
 );
 
+/*
+ * THE WEB FONT GOES. It is the one thing in here that made "no requests at
+ * all" untrue: a portable file opened on a plane fetched Lato from Google,
+ * failed, and fell back — so the font was never reliable anyway, and the
+ * request leaked which machine opened the file to a third party. The CSS has
+ * carried 'Segoe UI', system-ui, sans-serif behind it from the beginning.
+ */
+const fontLinks = html.match(/<link[^>]*fonts\.(googleapis|gstatic)\.com[^>]*>/g) ?? [];
+for (const link of fontLinks) html = html.replace(link, '');
+
 await writeFile(target, html, 'utf8');
 await rm(outDir, { recursive: true, force: true });
 
 const kb = (Buffer.byteLength(html, 'utf8') / 1024).toFixed(0);
-const leftovers = html.match(/(src|href)="(?!data:|https:|#)[^"]+"/g);
-
 console.log(`\nwrote ${path.relative(root, target)}  (${kb} kB, everything inlined)`);
-if (leftovers) {
-  console.log(`WARNING: still references external files: ${leftovers.join(', ')}`);
+if (fontLinks.length) console.log(`dropped ${fontLinks.length} web-font link(s); the stack falls back to the system font`);
+
+/*
+ * AND THE CHECK FAILS RATHER THAN MUTTERING.
+ *
+ * It ran after the file was already written and printed a WARNING nobody was
+ * going to read in a build that exited 0 — so a portable build that was not
+ * portable shipped quietly. It also excluded `https:`, which is precisely the
+ * category that breaks the promise. A file that still reaches outside itself
+ * is not the artifact this script claims to produce, so the script says so and
+ * exits non-zero; the file is left on disk to be inspected.
+ */
+const leftovers = html.match(/(src|href)="(?!data:|#)[^"]+"/g) ?? [];
+if (leftovers.length) {
+  console.error(`\nNOT PORTABLE: still reaches outside itself: ${leftovers.join(', ')}`);
+  process.exitCode = 1;
 } else {
-  console.log('no local file references remain — safe to move or copy anywhere');
+  console.log('nothing outside the file is referenced — safe to move or copy anywhere');
 }
 console.log('=== single-file build finished ===');

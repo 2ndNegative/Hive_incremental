@@ -160,11 +160,33 @@ a:hover {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  /* A HIDDEN TOOLTIP MUST NOT WIDEN THE PAGE.
+     `visibility: hidden` keeps a box in the layout, and there are dozens of
+     them parked beside their rows at any moment — so on a narrow window the
+     document's scroll width was 580px inside a 420px viewport and the whole
+     page scrolled sideways, with nothing to see at the far end. The same trap
+     once gave the assignment panel a vertical scrollbar nobody asked for.
+     `clip` rather than `hidden` on purpose: `hidden` makes this a scroll
+     container, which forces `overflow-y` to `auto` as well and would clip the
+     sticky topbar's own positioning. `clip` clips one axis and leaves the
+     other genuinely visible. Visible tooltips are pulled back inside the
+     window by tips.js before this can cut one — see fitToWindow. */
+  overflow-x: clip;
 }
 
 .topbar {
   display: flex;
   align-items: center;
+  /* WRAPS RATHER THAN OVERFLOWS. The bar holds the brand, the resource chips,
+     the cognition and power readouts and the save state, and on a narrow
+     window (a phone, or half a desktop screen) the row was simply wider than
+     the viewport: it pushed a horizontal scrollbar onto the whole page and the
+     readouts on the right-hand end went off the edge, where nothing but
+     scrolling sideways could reach them. Wrapping gives the bar a second line
+     instead, and because it is `position: sticky` the taller bar still pins
+     correctly — and tips.js measures the bar rather than assuming one line,
+     so tooltips still clear it. See topGutter() in game/tips.js. */
+  flex-wrap: wrap;
   gap: 1.25rem;
   padding: 0.4rem 0.9rem;
   background: var(--bg-deep);
@@ -227,6 +249,17 @@ a:hover {
 .main-col {
   flex: 1;
   min-width: 0;
+  /* AND NEVER WIDER THAN WHAT HOLDS IT.
+     `min-width: 0` is about the main axis. Below 860px `.hive-body` turns into
+     a COLUMN, so width becomes the cross axis — and a stretched flex item's
+     cross size is at least its own content's, whatever `min-width` says. One
+     un-shrinkable grid track inside any tab therefore widened the whole column
+     and pushed every panel on it off the screen.
+     This clamps it. It does not excuse the content: anything that still does
+     not fit now overflows `.main-col` visibly, which `tests/layout-test.mjs`
+     reports as an element hanging off the right-hand edge rather than as a
+     page that scrolls sideways. One symptom, in one place, naming the culprit. */
+  max-width: 100%;
 }
 
 @media (max-width: 860px) {
@@ -534,7 +567,10 @@ a:hover {
 
 .job-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  /* `minmax(0, 1fr)` and not `1fr`: a bare `1fr` is `minmax(auto, 1fr)`, so the
+     track can never go below its content's min-content width — one long word in
+     a drone's description was enough to stop the row shrinking. */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 0.6rem;
   padding: 0.45rem 0.6rem;
@@ -716,6 +752,36 @@ a:hover {
   font-weight: 400;
 }
 
+/*
+ * A DATA TABLE ON A PHONE SCROLLS SIDEWAYS RATHER THAN PUSHING THE PAGE.
+ *
+ * There are seven of these — Metabolism, Codex, Stats, Settings — and a table
+ * of numbers has a floor: four columns of figures with headings cannot be made
+ * narrower than about 440px without turning into something unreadable. At
+ * 390px the Metabolism tab's fuel table therefore stuck 57px off the right-hand
+ * edge, which is a column of numbers nobody can see and a page that scrolls
+ * sideways to reach it.
+ *
+ * `:has()` rather than a wrapper div in seven templates: the rule is "a panel
+ * body whose direct child is a data table", which is exactly what it says, and
+ * the eighth table added later needs nothing.
+ *
+ * `overflow-x: auto` drags `overflow-y` to `auto` with it — the two axes cannot
+ * disagree about whether they scroll — so the tooltips inside have to come out
+ * of the flow, or they get cropped by the panel's bottom edge and their hidden
+ * bodies add to its scroll height. That is the same pair of bugs `.assign-scroll`
+ * had and the same fix; `tips.js` places a fixed tooltip against the window.
+ */
+@media (max-width: 760px) {
+  .panel-body:has(> .data-table) {
+    overflow-x: auto;
+  }
+
+  .panel-body:has(> .data-table) .tip > .tip-body {
+    position: fixed;
+  }
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -848,6 +914,18 @@ textarea.save-box {
   border-bottom: none;
 }
 
+/* Column headings for the two fuel dropdowns. `aria-hidden` in the markup: a
+   screen reader gets the same two words from each select's own aria-label,
+   which is the only version that survives the grid collapsing. */
+.fuel-row.is-head {
+  padding-bottom: 0.15rem;
+  border-bottom: none;
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .fuel-row.is-global {
   border-bottom: 1px solid var(--border-bright);
   padding-bottom: 0.5rem;
@@ -879,6 +957,11 @@ textarea.save-box {
   }
   .fuel-row .field-label {
     grid-column: 1 / -1;
+  }
+  /* Two columns here, four headings there — the headings would sit over the
+     wrong things. The aria-labels carry the meaning at every width. */
+  .fuel-row.is-head {
+    display: none;
   }
 }
 
@@ -1036,6 +1119,34 @@ textarea.save-box {
   border: 1px solid var(--border-bright);
   border-radius: var(--radius);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  /* A DIALOG TALLER THAN THE WINDOW MUST SCROLL, NOT HANG.
+     The backdrop is `position: fixed` and centres its card, so a card taller
+     than the viewport is centred on an axis that has nowhere to go: it
+     overflows equally off the top and the bottom, and the page behind cannot
+     scroll it into view because the backdrop is fixed. What goes off the
+     bottom is `.modal-foot`, which is where every button is. The origin
+     chooser lists every landing site and the offline modal lists everything
+     that happened while you were away, so on a short window — a laptop with
+     the browser not maximised, a phone in landscape — the dialog that cannot
+     be dismissed is the one you cannot reach the buttons of.
+     Column layout with the body as the only flexible part, so the head and
+     foot stay put and the long list in the middle is what scrolls. */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 2rem);
+}
+
+.modal-card > .modal-body {
+  overflow-y: auto;
+  /* `min-height: 0` because a flex item's default `min-height: auto` refuses to
+     shrink below its content, which makes `overflow-y` on it dead letter —
+     the item grows and the card overflows exactly as before. */
+  min-height: 0;
+}
+
+.modal-card > .modal-head,
+.modal-card > .modal-foot {
+  flex: none;
 }
 
 .modal-head {
@@ -1075,6 +1186,28 @@ textarea.save-box {
 
 .modal-body > .columns {
   margin-bottom: 0;
+}
+
+/* BULMA'S OUTER GUTTER NEEDS A PADDED PARENT, AND A TAB PANEL HAS NONE.
+   `.columns` carries -0.75rem of margin on each side so that its children's
+   padding lines up with whatever contains it. Dropped straight into a panel
+   with no padding, the row is simply 24px wider than its parent — which, at
+   every single width, put the Stats tab's two-column block exactly on the
+   window's right edge and gave the document a horizontal scrollbar.
+   Neutralised rather than padded, and the outer column padding goes with it:
+   the gutter BETWEEN columns is what the class is for; the one outside them is
+   an artefact of how Bulma expects to be nested. */
+#tab-panel .columns {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+#tab-panel .columns > .column:first-child {
+  padding-left: 0;
+}
+
+#tab-panel .columns > .column:last-child {
+  padding-right: 0;
 }
 
 .plain-list {
@@ -1304,7 +1437,8 @@ textarea.save-box {
 /* Lift the hovered element above its siblings. The sidebar rows are all
    position:relative, so without this a tooltip can lose the paint order to a
    row that happens to come later in the DOM. */
-.tip:hover {
+.tip:hover,
+.tip:focus-within {
   z-index: 70;
 }
 
@@ -1326,8 +1460,9 @@ textarea.save-box {
      pinned body is the one case with its own nested tooltips opening beside
      it — see .tip-body .tip below, and the same trap documented on .terr-map.
      A pinned tooltip is deliberate, so it may hang and be scrolled to. */
-  /* 48px of sticky topbar plus a gutter at each end — see TOP_GUTTER in
-     game/tips.js, which slides tooltips against the same two numbers. */
+  /* 48px of sticky topbar plus a gutter at each end. The starting point only:
+     the bar wraps on a narrow window and this figure stops being the room
+     available, so tips.js overrides it with a measured one — see fitToWindow. */
   max-height: calc(100vh - 64px);
   overflow-y: auto;
   box-sizing: border-box;
@@ -1344,7 +1479,20 @@ textarea.save-box {
   pointer-events: none;
 }
 
-.tip:hover > .tip-body {
+/* HOVER IS NOT THE ONLY WAY IN.
+   A great many of these wrap a control — the molding switches, the assignment
+   caps, the fuel selects, the topbar chips — and the explanation of what the
+   control does was reachable only by mouse. `:focus-within` opens the same
+   tooltip when the keyboard arrives at the control inside it, which costs
+   nothing and adds no tab stops: it fires on things that were already tab
+   stops.
+   The tooltips that wrap plain text deliberately get NOTHING here. Making them
+   reachable means a tabindex on each, and the Territory tab alone has about a
+   hundred — a keyboard user would have to press Tab a hundred times to cross
+   one screen, which is a worse outcome than the one being fixed. Touch is
+   served instead by tap-to-pin; see pinHandlers in game/tips.js. */
+.tip:hover > .tip-body,
+.tip:focus-within > .tip-body {
   opacity: 1;
   visibility: visible;
 }
@@ -2651,6 +2799,26 @@ textarea.save-box {
   }
   .band-desc {
     display: none;
+  }
+
+  /* A JOB ROW STOPS BEING A ROW.
+     Its third column is `.mold-controls` — a toggle, a label, a number field
+     and a status word, all `nowrap` — which has a min-content width of about
+     260px and no way to go below it. On a phone that made the row 446px wide
+     inside a 390px window, and because `.main-col` is a flex item being
+     stretched to its content, the whole COLUMN went to 446 and every panel on
+     the tab with it: the Drones tab was 56px wider than the screen, end to
+     end, because of one button group.
+     So below tablet width the controls drop to a line of their own, where they
+     have the full width to sit in and nothing has to shrink. */
+  .job-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .job-row .mold-controls {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    padding-top: 0.3rem;
   }
 }
 

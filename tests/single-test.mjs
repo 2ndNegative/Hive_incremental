@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import { pathToFileURL } from 'node:url';
-import { LAUNCH, shot, ROOT } from './harness.mjs';
+import { LAUNCH, shot, ROOT, finish, settle } from './harness.mjs';
 
 /**
  * These suites were written before landing sites existed. A fresh save now
@@ -23,7 +23,7 @@ async function ensureLanded(page) {
  */
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 const url = pathToFileURL(`${ROOT}HiveIdle.html`).href;
@@ -91,7 +91,4 @@ await openTab(page, 'Codex');
 await page.waitForSelector('.codex-row');
 await page.screenshot({ path: shot('portable.png') });
 
-console.log(`\nnetwork/console errors: ${errors.length ? errors.join(' | ') : 'none'}`);
-console.log(fail.length ? `\n=== ${fail.length} CHECK(S) FAILED: ${fail.join('; ')} ===` : '\n=== portable build verified ===');
-await browser.close();
-console.log('=== single-file test finished ===');
+await finish({ name: 'portable build', fail, errors, browser });

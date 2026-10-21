@@ -45,10 +45,24 @@ const currentTab = computed(() => {
     <OfflineModal />
     <OriginChooser />
 
-    <div v-if="!saveStatus.ok" class="save-alert">
-      <strong>Progress is not being saved.</strong>
-      {{ saveStatus.error }}
-      <button class="btn" @click="state.ui.tab = 'settings'">Open settings</button>
+    <!-- THE ONE THING IN THE GAME THAT HAS TO INTERRUPT.
+         Nothing in here was a live region, so a storage failure — the one
+         failure that silently costs the player their whole run — was a red
+         banner and nothing else: a screen reader user kept playing a hive
+         that was not being written anywhere.
+         `role="alert"` and not the running log, which is the other candidate
+         and would be unbearable: the log gains a line every few seconds, and
+         a live region reading all of them out would bury exactly this.
+         The region is MOUNTED ALWAYS and emptied by the `v-if` inside it,
+         rather than the whole banner being conditional — a live region has to
+         exist before its contents change or there is nothing watching when
+         they do. -->
+    <div role="alert" aria-live="assertive">
+      <div v-if="!saveStatus.ok" class="save-alert">
+        <strong>Progress is not being saved.</strong>
+        {{ saveStatus.error }}
+        <button class="btn" @click="state.ui.tab = 'settings'">Open settings</button>
+      </div>
     </div>
 
     <TopBar />
@@ -61,7 +75,18 @@ const currentTab = computed(() => {
 
       <main class="main-col">
         <TabBar />
-        <component :is="currentTab" />
+        <!-- Named by whichever tab is selected, and a tab stop of its own, so
+             the keyboard goes from the bar straight into the screen it just
+             opened rather than back out to the page. See the roving tabindex
+             in TabBar.vue for the other half. -->
+        <div
+          id="tab-panel"
+          role="tabpanel"
+          tabindex="0"
+          :aria-labelledby="`tab-${state.ui.tab}`"
+        >
+          <component :is="currentTab" />
+        </div>
       </main>
     </div>
   </div>

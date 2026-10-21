@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * WHAT HOLDING GROUND IS ACTUALLY WORTH.
@@ -35,29 +35,22 @@ async function ensureLanded(page) {
 }
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(200);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /**
@@ -405,6 +398,49 @@ if (barren) {
     `${barren.drones} foragers in ${barren.empty}, all on the stores`);
 }
 
+/*
+ * ======================= 7b. EVERY DRONE IS PLACED SOMEWHERE
+ *
+ * `apportion` clamped the total it handed out to the SUM OF THE WEIGHTS. For
+ * targets that is a no-op; for the leftover spread, whose weights are square
+ * metres, it capped a drone count at an area. A hive with most of its ground
+ * targeted and a sliver left open placed a handful of its spare drones and
+ * quietly left the rest nowhere — counted as idle, eating, producing nothing,
+ * and blamed on the ground by the panel.
+ *
+ * The invariant is conservation: assignment moves drones about, it does not
+ * consume them.
+ */
+const placedAll = await p.evaluate(() => {
+  const s = hive.state;
+  const sum = (m) => Object.values(m || {}).reduce((a, b) => a + b, 0);
+  const run = (territory, assign, forager) => {
+    s.territory = territory;
+    s.assign = assign;
+    s.droneTypes = { forager, scavenger: 0, explorer: 0 };
+    return sum(hive.land.assignment().forager);
+  };
+  return {
+    // Far more drones than square metres, nothing targeted.
+    crowded: run({ temperateForest: 36 }, {}, 100),
+    // The shape from the report: a 2.4 m² sliver is the only open ground.
+    sliver: run(
+      { temperateForest: 53.7, farmland: 2.4, taiga: 4.2 },
+      { temperateForest: { forager: 13 }, taiga: { forager: 1 } },
+      30,
+    ),
+    // And targets still hand out in the ratio asked when they outnumber the hive.
+    ratio: hive.land.apportion({ temperateForest: 6, farmland: 2 }, 4),
+  };
+});
+check('every untargeted drone is placed, however little ground there is',
+  placedAll.crowded === 100, `${placedAll.crowded} of 100 placed on 36 m²`);
+check('and a sliver of open ground does not swallow the leftovers',
+  placedAll.sliver === 30, `${placedAll.sliver} of 30 placed`);
+check('while targets still go out in the ratio asked',
+  placedAll.ratio.temperateForest === 3 && placedAll.ratio.farmland === 1,
+  JSON.stringify(placedAll.ratio));
+
 /* ============================================== 8. patches drift out of step */
 
 const stagger = await p.evaluate(() => {
@@ -424,7 +460,7 @@ check('and they are staggered rather than rolling in lockstep',
 /* ==================================================== 9. the screen says so */
 
 await openTab(p, 'Territory');
-await p.waitForTimeout(250);
+await settle(p);
 const terr = await p.evaluate(() => {
   const panel = (re) => [...document.querySelectorAll('.panel-box')]
     .find((b) => re.test(b.querySelector('.panel-head')?.innerText ?? ''));
@@ -475,7 +511,7 @@ await p.evaluate(() => {
   const plus = cell.querySelectorAll('.btn-mini')[1];
   for (let i = 0; i < 3; i += 1) plus.click();
 });
-await p.waitForTimeout(250);
+await settle(p);
 const set = await p.evaluate(() => ({
   state: hive.state.assign?.temperateForest?.forager ?? 0,
   shown: document.querySelector('.assign-input')?.value,
@@ -484,7 +520,7 @@ check('clicking + sets a target the hive honours',
   set.state === 3 && set.shown === '3', `target ${set.state}, input "${set.shown}"`);
 
 await openTab(p, 'Drones');
-await p.waitForTimeout(250);
+await settle(p);
 const drones = await p.evaluate(() => document.querySelector('.main-col')?.innerText ?? '');
 check('the Drones tab says where its drones went',
   /piece(s)? of ground/.test(drones),
@@ -510,10 +546,4 @@ check('and so does the plan', saved.assign === 3, `target ${saved.assign}`);
 check('the old per-type patch map is gone', saved.stale === true);
 check('at the current save version', saved.version === SAVE_VERSION, `v${saved.version}`);
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'range, crowding and who stands where', fail, errors, browser });

@@ -187,7 +187,20 @@ export function advanceExpeditions(state, dt) {
         break;
       }
     }
-    if (progress >= 1) progress = 0; // whatever is left over is abandoned
+    /*
+     * THE LEFTOVERS ARE CARRIED, NOT BINNED.
+     *
+     * The cap on resolutions is a sensible one — three thousand expeditions
+     * resolved one at a time for a result nobody watched is a lot of work for
+     * nothing. Zeroing what is past the cap is not: a hive with ten explorers
+     * coming back from a long absence lost every trip past the twentieth, and
+     * the longer it had been away the larger the share it lost. Keeping the
+     * fraction means the next steps clear the backlog instead, which is what a
+     * cap is supposed to mean.
+     *
+     * Still bounded, because progress is bounded by what the step could
+     * physically accrue; it does not grow without end.
+     */
     state.expedition[typeId] = progress;
   }
   return results;

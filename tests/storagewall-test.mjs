@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, ensureLanded } from './harness.mjs';
+import { BASE, LAUNCH, ensureLanded, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * THE STORAGE WALL.
@@ -22,24 +22,17 @@ import { BASE, LAUNCH, ensureLanded } from './harness.mjs';
  * count a player could plausibly reach, the cost must fit inside the ceiling.
  */
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
 const browser = await chromium.launch(LAUNCH);
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(BASE, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* ============================== 1. researching never takes a building away */
@@ -194,10 +187,76 @@ check('the mineral assay grants the first Mineral Vault', granted.ok && granted.
   `${granted.vaults} standing`);
 check('and the log says it was free', granted.said === true);
 
-/* ------------------------------------------------------------------ errors */
 
-check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
+/*
+ * ================= COARSE STEPS HAVE TO MEAN WHAT FINE STEPS MEAN
+ *
+ * Offline catch-up takes steps of up to an hour. Four separate things assumed
+ * a step was about a tenth of a second, and all four were invisible in normal
+ * play and wrong the moment somebody closed the tab overnight.
+ */
+const coarse = await p.evaluate(() => {
+  const s = hive.state;
+  const setup = () => {
+    s.tech = { ...s.tech, glycolysis: true };
+    s.territory = {}; s.assign = {}; s.crews = {};
+    s.droneTypes = { forager: 4, scavenger: 0, explorer: 0 };
+    s.larvae = 5;
+    for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 0;
+    s.nutrients.water = 1e6;
+    s.nutrients.carb = 1;
+  };
 
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+  // 1. The ration measured a RATE against a STOCK, so a hive holding ninety
+  //    seconds of food reported itself fully fed for a ten-hour step.
+  setup();
+  const short = hive.derived(600).ration;
+
+  // 2. Drones and larvae each measured themselves against the WHOLE store, so
+  //    a tenth of a gram fed both and neither went hungry.
+  setup();
+  s.nutrients.carb = 0.1;
+  const d = hive.derived(1);
+  const shared = {
+    stock: 0.1,
+    droneGets: d.ration.grams,
+    larvaeDrain: d.larvae.drain,
+    claimed: d.ration.grams + d.larvae.drain,
+  };
+
+  // 3. A brood that could not pay BANKED the attempt, despite the comment
+  //    beside it promising the opposite, and laid the backlog in one tick the
+  //    moment protein arrived.
+  for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e6;
+  s.nutrients.protein = 0;
+  s.larvae = 0;
+  s.energyPool = 1e9;
+  for (const id of Object.keys(hive.structureDefs)) {
+    if (hive.structureDefs[id].brood) s.structures[id] = 5;
+  }
+  s.brood = {};
+  hive.tick(600, 600);
+  const banked = Math.max(...Object.values(s.brood), 0);
+  const before = s.larvae;
+  s.nutrients.protein = 1e6;
+  hive.tick(0.1, 0.1);
+  const burst = s.larvae - before;
+
+  return { short, shared, banked, burst };
+});
+
+check('a hive with a trace of food does not report itself fed over a long step',
+  coarse.short.hungry === true && coarse.short.ratio < 1,
+  `ratio ${coarse.short.ratio.toFixed(3)}, hungry ${coarse.short.hungry}`);
+check('drones and larvae draw from one stock, not one each',
+  coarse.shared.claimed <= coarse.shared.stock + 1e-9,
+  `${coarse.shared.claimed.toFixed(3)} g claimed from ${coarse.shared.stock} g`);
+check('and the brood eats first, because a larva that goes unfed dies',
+  coarse.shared.larvaeDrain > 0 && coarse.shared.droneGets === 0,
+  `larvae ${coarse.shared.larvaeDrain}, drones ${coarse.shared.droneGets}`);
+check('a brood that cannot pay banks nothing', coarse.banked < 1,
+  `${coarse.banked.toFixed(1)} cycles banked over ten unfed minutes`);
+check('so protein arriving does not empty a backlog in one tick',
+  coarse.burst <= 1, `${coarse.burst} larvae in a tenth of a second`);
+
+await finish({ name: 'the storage wall', fail, errors, browser });

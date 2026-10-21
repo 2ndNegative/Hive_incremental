@@ -12,7 +12,7 @@ import { reactive } from 'vue';
 import { NUTRIENT_IDS } from './definitions/nutrients.js';
 import { STRUCTURE_ORDER, DEPRECATED_STRUCTURE_ORDER } from './definitions/structures.js';
 import { CASTE_ORDER, DEPRECATED_CASTE_ORDER } from './definitions/castes.js';
-import { RESEARCH_ORDER } from './definitions/research.js';
+import { RESEARCH } from './definitions/research.js';
 import { DEFAULT_PINNED } from './definitions/topbar.js';
 import { DRONE_TYPE_ORDER } from './definitions/drones.js';
 
@@ -54,8 +54,13 @@ export function createInitialState() {
     droneMolding[id] = { on: false, target: null };
   }
 
+  // LIVE RESEARCH, AND THE PARKED IDS TOO — the same rule the structures and
+  // castes above follow. `tech` is a closed map, so a purchase the defaults do
+  // not name is dropped on load: a hive that had bought Lithovory before it was
+  // parked came back having un-bought it, while its parked BUILDINGS survived.
+  // research.js says this round-trips; now it does.
   const tech = {};
-  for (const id of RESEARCH_ORDER) tech[id] = false;
+  for (const id of Object.keys(RESEARCH)) tech[id] = false;
 
   return {
     version: SAVE_VERSION,
@@ -111,8 +116,9 @@ export function createInitialState() {
     spilledItems: {}, // lifetime item mass lost to full storage, per item
 
     // Land held, in square metres, keyed by biome. What the hive holds decides
-    // what it can find; the landing site seeds it and nothing else adds to it
-    // yet. See run.js grantTerritory, which is the one way in.
+    // what it can find. The landing site seeds it (run.js grantTerritory) and
+    // every metre after that is claimed from ground an Explorer mapped
+    // (actions.js claimTerritory).
     territory: {},
 
     // What the last manual gather turned up, so the panel can show it without
@@ -167,8 +173,8 @@ export function createInitialState() {
     drones: 0,
 
     // Larvae in the brood chamber. A STORE, not a capacity: this is a count of
-    // things the hive is holding, the way nutrients are. Nothing produces or
-    // spends them yet — the drone rebuild is what will.
+    // things the hive is holding, the way nutrients are. The brood chambers lay
+    // them and the molding chambers spend them, one per drone pressed.
     larvae: 0,
 
     // How far each brood structure is through its current cycle, 0 to 1, keyed
@@ -267,6 +273,11 @@ export function createInitialState() {
       groundFound: 0, // square metres mapped, claimed or not
       groundClaimed: 0,
       peakDrones: 0,
+      // Drones let go for being over target. Written by the cull block in
+      // engine.js; it was missing from here, and a closed map drops what the
+      // schema does not declare — so the figure reached the disk and was
+      // erased on the next load.
+      culled: 0,
       ticks: 0,
       devUsed: false,
     },

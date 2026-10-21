@@ -883,7 +883,7 @@ export default [
     tags: ['detritus', 'scavenged'],
     source: 'Modelled on decomposing mammalian soft tissue',
     confidence: 'model',
-    coverage: 'macroOnly',
+    coverage: 'partial',
     note: 'Composition drifts as decomposition proceeds; treated here as degraded muscle and fat.',
     g: { water: 65.0, protein: 18.0, fat: 14.0, carb: 1.0, fiber: 0, ash: 2.0 },
     mg: { sodium: 120, potassium: 250, calcium: 40, phosphorus: 160, iron: 4.0, zinc: 2.5 },

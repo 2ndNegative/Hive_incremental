@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, shot } from './harness.mjs';
+import { BASE, LAUNCH, shot, finish, settle } from './harness.mjs';
 
 // ---------------------------------------------------------------- test larder
 // The hive holds nothing on its own any more: every gram of room comes from
@@ -40,7 +40,7 @@ async function ensureLanded(page) {
 
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 const base = BASE;
@@ -275,7 +275,7 @@ checkOrPark('castes', 'storage spoils at its cap rather than growing forever',
   backlog.stored <= backlog.cap * 25 + 1 && backlog.spoiled > 0,
   `cap ${backlog.cap.toFixed(0)} g each, ${backlog.spoiled.toFixed(0)} g spoiled`);
 
-await p.waitForTimeout(250);
+await settle(p);
 const shown = await p.evaluate(() => ({
   rows: document.querySelectorAll('.store-row').length,
   alert: Boolean(document.querySelector('.tab-bar .badge.is-alert')),
@@ -448,12 +448,12 @@ await openTab(p, 'Hive');
 await p.waitForSelector('.res-row');
 const proteinRow = p.locator('.res-row', { hasText: 'Protein' }).first();
 await proteinRow.hover();
-await p.waitForTimeout(200);
+await settle(p);
 const beforePin = await p.evaluate(() => hive.tips.pinned.value);
 check('nothing is pinned by merely hovering', beforePin === null);
 
 await proteinRow.click({ button: 'middle' });
-await p.waitForTimeout(200);
+await settle(p);
 const pinnedState = await p.evaluate(() => ({
   key: hive.tips.pinned.value,
   marked: Boolean(document.querySelector('.res-row.is-pinned')),
@@ -472,7 +472,7 @@ check('a pinned tooltip accepts the pointer, so its contents can be hovered',
 
 /* move the mouse right off the row — a pinned tooltip must stay */
 await p.mouse.move(20, 20);
-await p.waitForTimeout(250);
+await settle(p);
 const stayed = await p.evaluate(() => {
   const body = document.querySelector('.res-row.is-pinned > .tip-body');
   return body ? getComputedStyle(body).visibility : 'gone';
@@ -493,7 +493,7 @@ checkOrPark('castes', 'sources inside a pinned tooltip have tooltips of their ow
 if (!parked.castes) {
 const innerTip = p.locator('.res-row.is-pinned .tip-body .tip').first();
 await innerTip.hover();
-await p.waitForTimeout(250);
+await settle(p);
 const innerText = await p.evaluate(() => {
   const body = document.querySelector('.res-row.is-pinned .tip-body .tip > .tip-body');
   return { visible: getComputedStyle(body).visibility, text: body.innerText.replace(/\s+/g, ' ') };
@@ -510,7 +510,7 @@ await p.screenshot({ path: shot('pinned-tip.png') });
 
 /* escape releases it */
 await p.keyboard.press('Escape');
-await p.waitForTimeout(200);
+await settle(p);
 check('Escape releases the pin', (await p.evaluate(() => hive.tips.pinned.value)) === null);
 
 /* ---- codex links out of the drone descriptions.
@@ -523,7 +523,7 @@ if (!parked.castes) {
   check('drone yields link into the codex', links > 0, `${links} links`);
 
   await p.click('.job-row .codex-link');
-  await p.waitForTimeout(250);
+  await settle(p);
   const landed = await p.evaluate(() => ({
     tab: hive.state.ui.tab,
     item: hive.state.ui.selectedItem,
@@ -541,7 +541,7 @@ if (!parked.castes) {
 // gathering, so this half of the claim is still live.
 await p.evaluate(() => { hive.state.items = { pasture_grass: 500, carrion: 300 }; });
 await openTab(p, 'Storage');
-await p.waitForTimeout(200);
+await settle(p);
 const storeLinks = await p.evaluate(() => document.querySelectorAll('.store-row .codex-link').length);
 check('stored matter links into the codex too', storeLinks > 0, `${storeLinks} links`);
 await p.screenshot({ path: shot('storage.png') });
@@ -599,7 +599,4 @@ check('storage survives a reload',
   await q.close();
 }
 
-console.log(`\nconsole errors: ${errors.length ? errors.slice(0, 4).join(' | ') : 'none'}`);
-console.log(fail.length ? `\n=== ${fail.length} CHECK(S) FAILED: ${fail.join('; ')} ===` : '\n=== storage, digestion, mass and tooltips verified ===');
-await browser.close();
-console.log('=== storage test finished ===');
+await finish({ name: 'storage, digestion, mass and tooltips', fail, errors, browser });

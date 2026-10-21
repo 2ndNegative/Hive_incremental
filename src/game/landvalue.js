@@ -50,6 +50,7 @@ import { isNamed } from './discovery.js';
 import { cycleFor } from './forage.js';
 import {
   assignmentOf, slotsOn, efficiencyOf, heldBiomes, routePool, offersAnything,
+  squeezeFor, demandOn,
 } from './land.js';
 
 // Re-exported: callers of this module think in terms of what ground is worth,
@@ -126,33 +127,34 @@ export function expectedForage(state, territory, {
   // read as two full-rate crews on ground that could carry one — see landUse.
   for (const biomeId of held) {
     const area = territory?.[biomeId] || 0;
-    let wanted = 0;
+    const here = {};
     for (const typeId of foragingTypes()) {
-      const here = assigned[typeId]?.[biomeId] || 0;
-      wanted += here * (DRONE_TYPES[typeId].range || 0);
+      here[typeId] = assigned[typeId]?.[biomeId] || 0;
       room[typeId] += Math.floor(slotsOn({ territory }, biomeId, typeId));
     }
-    const squeeze = wanted > area && wanted > 0 ? area / wanted : 1;
+    // The simulation's own rule, imported rather than restated — see squeezeFor
+    // in land.js for why a second copy of it is worse than useless.
+    const squeeze = squeezeFor(area, demandOn(here));
 
     for (const typeId of foragingTypes()) {
       const def = DRONE_TYPES[typeId];
-      const here = assigned[typeId]?.[biomeId] || 0;
-      if (here < 1) continue;
+      const drones = here[typeId];
+      if (drones < 1) continue;
 
-      const slots = here * squeeze;
-      const efficiency = efficiencyOf(slots, here, def.crowding ?? 1);
+      const slots = drones * squeeze;
+      const efficiency = efficiencyOf(slots, drones, def.crowding ?? 1);
       const live = offersAnything(def.gather, biomeId);
       // No patch count in it: a patch IS a drone, so the crew's rate is simply
       // its headcount times what one of them manages.
       const rate = live
-        ? (here * efficiency * meanLoad(typeId) * vigour * harvest) / cycleFor(state, typeId)
+        ? (drones * efficiency * meanLoad(typeId) * vigour * harvest) / cycleFor(state, typeId)
         : 0;
 
       crews.push({
-        droneId: typeId, biomeId, drones: here, slots, efficiency, live, rate,
+        droneId: typeId, biomeId, drones, slots, efficiency, live, rate,
       });
       total += rate;
-      working += here;
+      working += drones;
 
       if (rate > 0) {
         const mix = findMix(state, def.gather, biomeId);

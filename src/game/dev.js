@@ -9,7 +9,7 @@ import { NUTRIENT_IDS, NUTRIENTS, MICROS, isRevealed } from './definitions/nutri
 import { RESEARCH, RESEARCH_ORDER } from './definitions/research.js';
 import { ASSAY_GROUPS } from './definitions/nutrients.js';
 import { computeDerived, advance } from './engine.js';
-import { ingestItem } from './actions.js';
+import { ingestItem, advanceResearchQueue } from './actions.js';
 import { ITEMS } from './definitions/items/index.js';
 import { BIOMES } from './definitions/biomes.js';
 import { grantTerritory } from './run.js';
@@ -216,9 +216,14 @@ export function revokeAllResearch() {
 
 /* -------------------------------------------------------------------- time */
 
-/** Fast-forward the simulation. Uses the same tick the game always uses. */
+/**
+ * Fast-forward the simulation. Uses the same tick the game always uses — and
+ * now the same research drain, which it did not: skipping eight hours used to
+ * bank eight hours of insight and buy nothing with it, so the hive you landed
+ * in was not the hive eight hours of play would have produced.
+ */
 export function skipTime(seconds) {
-  advance(state, seconds, Math.max(1, seconds / 5000));
+  advance(state, seconds, Math.max(1, seconds / 5000), advanceResearchQueue);
   touch();
   pushLog(`Fast-forwarded ${formatDuration(seconds)}.`, 'info');
 }

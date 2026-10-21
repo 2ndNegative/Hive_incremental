@@ -1,6 +1,9 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { state, derived } from '../game/useGame.js';
+import { state, derived, ageSince } from '../game/useGame.js';
+
+// Injected from package.json at build time — see vite.config.js.
+const version = __APP_VERSION__;
 import { topbarLayout } from '../game/definitions/topbar.js';
 import { formatDuration } from '../game/format.js';
 import { save, saveStatus } from '../game/save.js';
@@ -39,15 +42,14 @@ const savedAgo = computed(() => {
   // Never report a time when the last attempt failed — a stale "saved 3s ago"
   // next to a broken save is worse than saying nothing.
   if (!saveStatus.ok) return 'FAILING';
-  if (!state.savedAt) return 'not yet';
-  const secs = Math.max(0, Math.round((Date.now() - state.savedAt) / 1000));
-  return secs < 60 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`;
+  // Through the shared clock, so the age actually advances — see ageSince.
+  return ageSince(state.savedAt) ?? 'not yet';
 });
 </script>
 
 <template>
   <header class="topbar">
-    <span class="brand">HiveIdle <small>v0.2</small></span>
+    <span class="brand">HiveIdle <small>v{{ version }}</small></span>
 
     <!-- Clicking anywhere across the resources opens the picker. The chips
          themselves only react to hover, so there is nothing to collide with. -->

@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * Thirst, food, and the sugar sprint.
@@ -21,29 +21,22 @@ async function ensureLanded(page) {
 
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(200);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /** A quiet hive: known ground, known population, nothing else running. */
@@ -367,15 +360,14 @@ const tab = await p.evaluate(() => {
 check('the drones have a row on the Metabolism tab', tab.there, tab.text.slice(0, 80));
 check('with a preferred fuel and a fallback, like a generator does', tab.selects === 2);
 
-const switched = await p.evaluate(() => {
+await p.evaluate(() => {
   const rows = [...document.querySelectorAll('.fuel-row')];
   const drone = rows.find((r) => /Drones/.test(r.innerText));
   const select = drone.querySelector('select');
   select.value = 'fat';
   select.dispatchEvent(new Event('change', { bubbles: true }));
-  return null;
 });
-await p.waitForTimeout(300);
+await settle(p);
 const fed = await p.evaluate(() => ({
   preferred: hive.state.energy.overrides.drones?.preferred,
   eating: hive.derived().ration.nutrient,
@@ -397,10 +389,4 @@ const store = await p.evaluate(() => {
 check('there is a building for water now', store.def);
 check('and it holds 10 kg of it', store.gain === 10000, `${store.before} g → ${store.after} g`);
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'hydration', fail, errors, browser });

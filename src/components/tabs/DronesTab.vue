@@ -26,6 +26,7 @@ import { GATHER_TYPES } from '../../game/definitions/forage.js';
 import { STRUCTURES } from '../../game/definitions/structures.js';
 import { NUTRIENTS, payableCost, substitutedEntries } from '../../game/definitions/nutrients.js';
 import { toggleMolding, setMoldTarget } from '../../game/actions.js';
+import { shortOf } from '../../game/engine.js';
 import { formatCogits, formatMass, formatMassFlow } from '../../game/units.js';
 
 /** What each status reads as on the row, and what colour it is. */
@@ -141,6 +142,33 @@ const standing = computed(() => chambers.value.reduce((n, m) => n + m.count, 0))
 const rate = computed(() => derived.value.moldRate ?? 0);
 const starved = computed(() => chambers.value.some((m) => m.starved));
 
+/*
+ * A CHAMBER WITH WORK AND NOTHING TO BUILD IT OUT OF.
+ *
+ * `derived.molding[].broke` has been computed since the mold loop was written
+ * and nothing ever read it, which left one of the three ways molding can stall
+ * with no explanation on the screen: a chamber that is on, has a target, has a
+ * larva, and cannot pay the nutrient cost just sat there at zero while the
+ * banner cheerfully said how many chambers were standing. The player's next
+ * move depends entirely on which of the three it is — lay more larvae, gather
+ * more of a nutrient, or switch something on — so the one that said nothing was
+ * the one that sent people looking for a bug.
+ *
+ * Named nutrients rather than "cannot afford it", because the answer to "what
+ * do I do about it" is the list.
+ */
+const broke = computed(() => {
+  const stuck = chambers.value.find((m) => m.broke);
+  if (!stuck) return null;
+  const short = shortOf(state, stuck.cost);
+  return {
+    makesName: stuck.makesName,
+    parts: Object.entries(short).map(
+      ([n, g]) => `${formatMass(g)} more ${NUTRIENTS[n]?.name.toLowerCase() ?? n}`,
+    ),
+  };
+});
+
 /**
  * The target field reads from a draft while it is being typed in, because this
  * tab re-renders ten times a second and would otherwise put the old figure back
@@ -164,6 +192,13 @@ const target = useDrafts(setMoldTarget);
       {{ standing }} Molding Chamber{{ standing === 1 ? '' : 's' }} with something to make and
       nothing to make it from, idling at the lower draw until the brood catches up. A Brood
       Chamber lays larvae out of protein.
+    </div>
+
+    <div v-else-if="broke" class="notice is-warn">
+      <strong class="bad">Nothing to press it out of.</strong>
+      {{ standing }} Molding Chamber{{ standing === 1 ? '' : 's' }} with a larva and an order for
+      a {{ broke.makesName ?? 'drone' }}, idling at the lower draw until the hive can pay for one.
+      Short {{ broke.parts.join(' and ') }}.
     </div>
 
     <div v-else class="notice">

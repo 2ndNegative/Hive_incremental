@@ -129,6 +129,47 @@ export function efficiencyOf(slots, drones, crowding = 1) {
 }
 
 /**
+ * THE SQUEEZE: the share of the ground asked for that each type gets.
+ *
+ * Proportional to demand, which is the same rule digestion uses to share the
+ * gut out — nothing sits at the back of the queue starving while something else
+ * drains. Everyone on an over-subscribed biome is squeezed by the SAME ratio,
+ * and what that costs them is their own crowding exponent: at 51% of the room
+ * they wanted, a tolerant forager works at 72% and a touchy scavenger at 37%.
+ *
+ * ONE IMPLEMENTATION, because there were three — the live squeeze and the
+ * planned squeeze in `landUse`, and a third in `landvalue.js` — and they are
+ * not independent facts. The valuation module exists to answer "what would this
+ * ground be worth", and an answer computed by a second copy of the rule is an
+ * answer that can disagree with the simulation. It would have disagreed
+ * quietly: a forage rate a few per cent off reads as the dice, not as a bug.
+ *
+ * Both guards matter and are easy to drop one of. `wanted > area` is what makes
+ * spare room not a bonus; `wanted > 0` is what stops an empty biome returning
+ * `area / 0`, which is Infinity on a held biome and NaN on an empty one — and
+ * NaN propagates through `efficiencyOf` into a forage rate that formats as "?".
+ */
+export function squeezeFor(area, wanted) {
+  return wanted > area && wanted > 0 ? area / wanted : 1;
+}
+
+/**
+ * Square metres a set of drone counts is asking for on one biome.
+ *
+ * `counts` is read as `counts[typeId]` — so the same function takes the live
+ * assignment (`assigned[typeId]?.[biomeId]`, flattened by the caller) or the
+ * player's targets, which is what lets `landUse` compute both squeezes from one
+ * rule rather than two inlined loops.
+ */
+export function demandOn(counts, types = foragingTypes()) {
+  let wanted = 0;
+  for (const typeId of types) {
+    wanted += Math.max(0, counts[typeId] || 0) * (DRONE_TYPES[typeId].range || 0);
+  }
+  return wanted;
+}
+
+/**
  * Hand out `total` whole drones across weighted buckets, largest remainder.
  *
  * Proportional, because a target is a RATIO as much as a number: asked for
@@ -141,6 +182,25 @@ export function efficiencyOf(slots, drones, crowding = 1) {
  * Ties break towards the earlier bucket, which is declared biome order. It has
  * to break somewhere and an arbitrary rule that never changes is worth more
  * than a clever one that does.
+ *
+ * A WEIGHT IS A RATIO AND NOTHING ELSE. It is not a capacity, and this used to
+ * treat it as one: the total handed out was clamped to `Math.min(total, sum)`.
+ *
+ * That clamp is harmless where the weights are targets, because the only call
+ * that passes targets has already established that the targets outnumber the
+ * drones — so it never binds. It is nonsense where the weights are SQUARE
+ * METRES, which is how the leftover spread calls it, because it then caps a
+ * number of drones at an area. A hive holding 36 m² could place at most 36
+ * untargeted drones however many it had; the rest were silently left nowhere,
+ * counted as idle, eating and producing nothing. With most ground targeted and
+ * a sliver left open the bite was much harder — thirteen foragers on the
+ * forest, one on the taiga and 2.4 m² of farmland spare placed TWO of the six
+ * drones left over, and the Territory tab blamed the ground.
+ *
+ * So the clamp is gone rather than parameterised. Every drone passed in is
+ * placed somewhere, which is what both callers always meant, and a caller that
+ * genuinely wants a ceiling applies it to `total` before calling — which is
+ * exactly what the targets branch already does.
  */
 export function apportion(weights, total) {
   const keys = Object.keys(weights);
@@ -153,7 +213,7 @@ export function apportion(weights, total) {
   }
   if (sum <= 0 || total <= 0) return out;
 
-  const want = Math.min(total, sum);
+  const want = Math.floor(total);
   let placed = 0;
   const rest = [];
   for (const k of keys) {
@@ -164,7 +224,7 @@ export function apportion(weights, total) {
     rest.push({ k, frac: exact - whole });
   }
   rest.sort((a, b) => b.frac - a.frac);
-  for (let i = 0; placed < Math.floor(want) && i < rest.length; i += 1, placed += 1) {
+  for (let i = 0; placed < want && i < rest.length; i += 1, placed += 1) {
     out[rest[i].k] += 1;
   }
   return out;
@@ -273,15 +333,9 @@ export function landUse(state) {
       planned += plan[typeId];
     }
 
-    // THE SQUEEZE: the share of the ground it asked for that each type gets.
-    // Proportional to demand, which is the same rule digestion uses to share
-    // the gut out — nothing sits at the back of the queue starving while
-    // something else drains. Everyone on an over-subscribed biome is squeezed
-    // by the SAME ratio, and what that costs them is their own crowding
-    // exponent: at 51% of the room they wanted, a tolerant forager works at
-    // 72% and a touchy scavenger at 37%.
-    const squeeze = wanted > area && wanted > 0 ? area / wanted : 1;
-    const planSqueeze = planned > area && planned > 0 ? area / planned : 1;
+    // Now and under the plan, from the one rule — see squeezeFor.
+    const squeeze = squeezeFor(area, wanted);
+    const planSqueeze = squeezeFor(area, planned);
 
     const crews = [];
     for (const typeId of types) {

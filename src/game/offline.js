@@ -79,22 +79,46 @@ export function runOfflineCatchup(state, seconds) {
       resolve({ applied, skipped: offline.skipped });
     };
 
+    /*
+     * EVERY FRAME IS WRAPPED, because a throw in here is unrecoverable.
+     *
+     * This runs inside a requestAnimationFrame callback. An exception there
+     * goes nowhere the promise can see it: `finish()` is never reached, so the
+     * promise never settles, so main.js never starts the live loop — and
+     * `offline.active` stays true, so the modal stays up over a dead game with
+     * a Skip button that does nothing, because only this loop reads the flag.
+     * One bad tick and the tab is bricked with no way out but a reload.
+     *
+     * Catching it keeps whatever was simulated, stops, and says so. The hive
+     * is a few hours short; it is not gone.
+     */
     const chunk = () => {
       if (offline.skipped) {
         finish();
         return;
       }
-      let ticks = 0;
-      while (ticks < TICKS_PER_CHUNK && offline.done < offline.total) {
-        const dt = Math.min(offline.stepSeconds, offline.total - offline.done);
-        tick(state, dt);
-        // Inside the loop, not after it: a tech bought at hour three changes
-        // what the next five hours generate. Draining only at the end would
-        // simulate an eight-hour absence in which the hive banked insight and
-        // deliberately declined to use it.
-        advanceResearchQueue();
-        offline.done += dt;
-        ticks += 1;
+      try {
+        let ticks = 0;
+        while (ticks < TICKS_PER_CHUNK && offline.done < offline.total) {
+          const dt = Math.min(offline.stepSeconds, offline.total - offline.done);
+          tick(state, dt);
+          // Inside the loop, not after it: a tech bought at hour three changes
+          // what the next five hours generate. Draining only at the end would
+          // simulate an eight-hour absence in which the hive banked insight and
+          // deliberately declined to use it.
+          advanceResearchQueue();
+          offline.done += dt;
+          ticks += 1;
+        }
+      } catch (err) {
+        pushLog(
+          `Catching up went wrong after ${formatDuration(offline.done)}: ${err.message}. `
+          + 'The rest of the time away was not simulated.',
+          'error',
+        );
+        offline.skipped = true;
+        finish();
+        return;
       }
       if (offline.done >= offline.total) {
         finish();

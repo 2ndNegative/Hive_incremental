@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 import { readFileSync } from 'node:fs';
 
 /**
@@ -26,17 +26,13 @@ async function ensureLanded(page) {
 }
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
 /* ===================================================== 1. the AI disclaimer */
 
@@ -52,17 +48,14 @@ check('and it is above the fold, not buried at the bottom',
 check('it also credits where the food data came from',
   /USDA|FoodData/i.test(readme));
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1020 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1020 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(200);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* ============================================ 2. the gather button's wording */
@@ -160,7 +153,7 @@ check('one larva, two larvae',
   larvae.words.join(' / '));
 
 await p.evaluate(() => { hive.state.larvae = 1; });
-await p.waitForTimeout(200);
+await settle(p);
 const oneLarva = await p.evaluate(() => {
   const top = document.querySelector('.topbar').innerText.replace(/\s+/g, ' ');
   return /Larvae\s+(\d+)/.exec(top)?.[1] ?? null;
@@ -316,7 +309,7 @@ await p.evaluate(() => {
   hive.state.structures.metabolicGenerator = 4;
   hive.setActive('metabolicGenerator', 2);
 });
-await p.waitForTimeout(250);
+await settle(p);
 const ui = await p.evaluate(() => {
   const rows = [...document.querySelectorAll('.switch-row')].map((r) =>
     r.textContent.replace(/\s+/g, ' ').trim());
@@ -330,7 +323,7 @@ check('and a levelled building gets a shutdown instead of a counter',
   ui.rows.find((r) => /Running|Shut down/.test(r)) || '(none)');
 
 await p.click('.action-slot .switch-row .btn:text-is("All")');
-await p.waitForTimeout(200);
+await settle(p);
 const clicked = await p.evaluate(() => hive.activeCount('metabolicGenerator'));
 check('the buttons actually work', clicked === 4, `${clicked} of 4 active`);
 
@@ -349,8 +342,14 @@ const tiers = await p.evaluate(() => {
   s.structures.metabolicGenerator = 0;
   s.structures.proteinGranule = 0;
   s.structures.vacuole = 0;
+  // RESTORED PROPERLY. This was `splice(i, 0)` — a deleteCount of zero, which
+  // removes nothing — with `>>> 0` turning a -1 miss into 4294967295. So the
+  // fake building stayed in the registry for the remaining four hundred lines
+  // of this suite, and its definition was never removed at all.
   delete s.structures.__larder;
-  hive.structureOrder.splice(hive.structureOrder.indexOf('__larder') >>> 0, 0);
+  const at = hive.structureOrder.indexOf('__larder');
+  if (at >= 0) hive.structureOrder.splice(at, 1);
+  delete hive.structureDefs.__larder;
 
   const read = (n) => {
     const d = hive.derived();
@@ -457,7 +456,7 @@ await p.evaluate(() => {
   st.apply('fat', 2300);
   st.reconcile();
 });
-await p.waitForTimeout(250);
+await settle(p);
 const panel = await p.evaluate(() => {
   const row = [...document.querySelectorAll('.res-row')]
     .find((r) => r.querySelector('.res-name')?.textContent.trim() === 'Fat');
@@ -480,26 +479,22 @@ check('the pool itself gets a row of its own once there is one',
   /General storage/.test(panel.generalRow || '') && /300 g/.test(panel.generalRow || ''),
   panel.generalRow);
 
-const hidden = await p.evaluate(() => {
+await p.evaluate(() => {
   hive.setActive('vacuole', 'none');
-  return null;
 });
-await p.waitForTimeout(250);
+await settle(p);
 const gone = await p.evaluate(() => [...document.querySelectorAll('.res-name')]
   .some((n) => n.textContent.trim() === 'General storage'));
 check('and no row at all when the hive has none', !gone);
 
-const quiet = await p.evaluate(() => {
+// The helper that used to be declared in here returned a FUNCTION across the
+// evaluate boundary, which does not survive serialisation — so it was never
+// callable and never called. `effectLines` below reads the same cards inline.
+await p.evaluate(() => {
   hive.setActive('vacuole', 'all');
-  const effects = (id) => {
-    const card = [...document.querySelectorAll('.action-card')]
-      .find((c) => c.textContent.includes(hive.structureDefs[id].name));
-    return card?.querySelector('.effect-list')?.textContent.replace(/\s+/g, ' ').trim() ?? null;
-  };
   hive.state.ui.tab = 'hive';
-  return { effects };
 });
-await p.waitForTimeout(250);
+await settle(p);
 const effectLines = await p.evaluate(() => {
   const out = {};
   for (const [id, name] of [['hivecore', 'Hivecore'], ['vacuole', 'Vacuole'], ['proteinGranule', 'Protein Granule']]) {
@@ -674,11 +669,10 @@ check('larvae with no sugar read as unfed rather than as free',
   unfed.starving && unfed.drain === 0 && unfed.want > 0 && /unfed/.test(unfed.label || ''),
   `${unfed.label}: wants ${unfed.want} g/s, getting ${unfed.drain}`);
 
-const broodUi = await p.evaluate(() => {
+await p.evaluate(() => {
   hive.state.ui.tab = 'hive';
-  return null;
 });
-await p.waitForTimeout(250);
+await settle(p);
 const broodCard = await p.evaluate(() => {
   const card = [...document.querySelectorAll('.action-card')]
     .find((c) => c.textContent.includes('Brood Chamber'));
@@ -781,16 +775,15 @@ check('the log says it once per episode, not once per death',
   starve.log.some((t) => /brood is gone/i.test(t)),
   `${starve.log.filter((t) => /dying of hunger/.test(t)).length} death notices for 10 deaths`);
 
-const starveUi = await p.evaluate(() => {
+await p.evaluate(() => {
   const s = hive.state;
   s.larvae = 6;
   s.larvaeHunger = 0;
   s.larvaeDying = 0;
   s.nutrients.carb = 0;
   for (let i = 0; i < 14; i += 1) hive.tick(0.5); // 7s unfed: dying
-  return null;
 });
-await p.waitForTimeout(250);
+await settle(p);
 const warned = await p.evaluate(() => {
   const top = document.querySelector('.topbar').innerText.replace(/\s+/g, ' ');
   return { text: top, larvae: hive.state.larvae, dying: hive.derived().larvae.dying };
@@ -799,8 +792,4 @@ check('the top bar says the brood is dying, without needing a hover',
   warned.dying && /Larvae\s+\d+\s*·?\s*dying/.test(warned.text),
   /Larvae[^|]{0,18}/.exec(warned.text)?.[0]);
 
-check('no console errors anywhere in all that', errors.length === 0, errors.slice(0, 3).join(' / '));
-
-await browser.close();
-console.log(`\n${fail.length ? `FAILURES (${fail.length}): ${fail.join(', ')}` : 'All checks passed.'}`);
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the economy end to end', fail, errors, browser });

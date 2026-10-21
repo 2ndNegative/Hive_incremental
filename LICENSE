@@ -1,0 +1,23 @@
+All rights reserved.
+
+Copyright (c) 2026 Magnus Merkelbach
+
+This source is published so it can be read, and because the game is served from
+this repository. It is not offered under an open-source licence: no permission
+is granted to copy, modify, redistribute or host it, in whole or in part.
+
+If you want to do any of those things, ask.
+
+                              ---
+
+THIRD-PARTY MATERIAL
+
+Nutrient composition data in `src/game/definitions/items/` is derived from the
+USDA FoodData Central SR Legacy and Foundation Foods datasets, which are in the
+public domain and carry no restrictions.
+
+Dependencies listed in `package.json` are each under their own licences, held
+in `node_modules/` and not vendored into this repository.
+
+The game's design owes an obvious debt to Evolve by Peter Motschmann. Nothing of
+its code or assets is used here.

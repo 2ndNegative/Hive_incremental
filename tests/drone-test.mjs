@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * Drones that cost something and do something.
@@ -25,29 +25,22 @@ async function ensureLanded(page) {
 }
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(160);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /**
@@ -237,7 +230,7 @@ await p.evaluate(() => {
   hive.tick(1);
 });
 await openTab(p, 'Drones');
-await p.waitForTimeout(220);
+await settle(p);
 
 const tab = await p.evaluate(() => {
   const main = document.querySelector('.main-col') || document.body;
@@ -246,13 +239,40 @@ const tab = await p.evaluate(() => {
 });
 
 check('the Drones tab counts the standing drones', /4 drones standing/.test(tab.text), tab.text.split('\n')[0]);
+
+/*
+ * AND THE RUN RECORD COUNTS THEM TOO.
+ *
+ * `stats.peakDrones` tracked `state.drones` — the PARKED caste population,
+ * which nothing has added to since the drone rebuild. A hive with twenty
+ * drones standing recorded a peak of zero, and every run summary and lifetime
+ * record built on it read zero with it.
+ */
+const peak = await p.evaluate(() => {
+  const s = hive.state;
+  s.stats.peakDrones = 0;
+  s.droneTypes = { forager: 20, scavenger: 0, explorer: 0 };
+  hive.tick(1, 1);
+  const twenty = s.stats.peakDrones;
+  s.droneTypes.forager = 3;
+  hive.tick(1, 1);
+  const afterLosing = s.stats.peakDrones;
+  // Put the hive back as the sections below expect to find it. A probe that
+  // leaves the state it borrowed is a probe that breaks the next test.
+  s.droneTypes.forager = 4;
+  hive.tick(1, 1);
+  return { twenty, afterLosing };
+});
+check('the run records the drones it actually had', peak.twenty === 20, `${peak.twenty}`);
+check('and a peak is a high-water mark, not a reading',
+  peak.afterLosing === 20, `${peak.afterLosing} after dropping to 3`);
 check('and says what bandwidth they are holding', /cognition/.test(tab.text));
 check('the row states the cogit upkeep', /cognition each/i.test(tab.row), tab.row.replace(/\n/g, ' | '));
 check('and the trip weight', /20–45\s*g/.test(tab.row));
 check('and what is coming in right now', /coming in/.test(tab.row));
 
 await openTab(p, 'Territory');
-await p.waitForTimeout(220);
+await settle(p);
 // Two panels on this tab mention Foragers now and they say different things:
 // "Who works what" is the PLAN and "Out now" is what is actually happening. The
 // assertions belong on the second one.
@@ -292,10 +312,4 @@ check('and the patch, weight and all',
   round.slot && typeof round.slot.grams === 'number', JSON.stringify(round.slot));
 check('at the current save version', round.version === SAVE_VERSION, `${round.version}`);
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'drones and their ground', fail, errors, browser });

@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * The top bar as a registry rather than a hand-written row.
@@ -24,23 +24,16 @@ async function ensureLanded(page) {
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* ============================================== 1. the six it starts with */
@@ -173,9 +166,9 @@ check('reset puts the starting six back', reset.pinned.join() === reset.order.jo
 
 /* ============================================== 4. the picker, on screen */
 
-await p.waitForTimeout(250);
+await settle(p);
 await p.click('.topbar-resources');
-await p.waitForTimeout(300);
+await settle(p);
 const picker = await p.evaluate(() => {
   const rows = [...document.querySelectorAll('.picker-table tbody tr')];
   return {
@@ -202,13 +195,12 @@ check('each row carries what it holds and what it is doing',
 check('and a pin for each', picker.pins === 6, `${picker.pins} pinned`);
 check('the chip tooltips get out of the way while it is open', picker.tipsHidden);
 
-const clicked = await p.evaluate(() => {
+await p.evaluate(() => {
   const row = [...document.querySelectorAll('.picker-table tbody tr')]
     .find((r) => /Insight/.test(r.innerText));
   row.querySelector('.pin-btn').click();
-  return null;
 });
-await p.waitForTimeout(250);
+await settle(p);
 const afterClick = await p.evaluate(() => ({
   pinned: [...hive.state.ui.pinned],
   label: [...document.querySelectorAll('.picker-table tbody tr')]
@@ -219,13 +211,13 @@ check('the pin button actually unpins',
   `${afterClick.pinned.join(', ')} · button now says "${afterClick.label}"`);
 
 await p.click('.picker-foot .btn');
-await p.waitForTimeout(250);
+await settle(p);
 const afterReset = await p.evaluate(() => [...hive.state.ui.pinned]);
 check('and Reset to default restores the six',
   afterReset.join() === 'energy,draw,hydration,cognition,larvae,insight', afterReset.join(', '));
 
 await p.keyboard.press('Escape');
-await p.waitForTimeout(250);
+await settle(p);
 check('Escape closes it', await p.evaluate(() => !document.querySelector('.picker')));
 
 /* ================================================= pins survive a reload */
@@ -241,8 +233,4 @@ const reloaded = await p.evaluate(() => [...hive.state.ui.pinned]);
 check('a pin survives a reload', !reloaded.includes('draw') && reloaded.length === 5,
   reloaded.join(', '));
 
-check('no console errors anywhere in all that', errors.length === 0, errors.slice(0, 3).join(' / '));
-
-await browser.close();
-console.log(`\n${fail.length ? `FAILURES (${fail.length}): ${fail.join(', ')}` : 'All checks passed.'}`);
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the top bar as a registry', fail, errors, browser });

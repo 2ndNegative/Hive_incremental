@@ -73,3 +73,134 @@ export async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
   await page.waitForTimeout(200);
 }
+
+/**
+ * WAIT FOR THE SCREEN TO CATCH UP, rather than for a number of milliseconds.
+ *
+ * Two hundred and three of the waits in these suites were `waitForTimeout` with
+ * something between 100 and 300 in it, and every one of them meant the same
+ * thing: "Vue has not re-rendered yet." A clock is the wrong instrument for
+ * that. It is too long when the render took four milliseconds, which is nearly
+ * always, and too SHORT exactly when it matters — on a loaded machine, which is
+ * now the normal case, because the runner runs several suites at once. A suite
+ * that passes alone and fails in company is the worst kind of red.
+ *
+ * Two frames, because one is not enough. Vue flushes its render queue in a
+ * microtask, so the first `requestAnimationFrame` callback runs after the DOM
+ * has been patched; the second runs after the browser has laid that out, which
+ * is what a suite measuring `getBoundingClientRect` is actually waiting for.
+ *
+ * `ms` is there for the handful of waits that are not about rendering at all —
+ * a CSS transition, or the live game loop ticking at 100ms. Those are waits for
+ * time passing, and time is the right instrument for them.
+ */
+export async function settle(page, ms = 0) {
+  await page.evaluate(() => new Promise((done) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => done()));
+  }));
+  if (ms > 0) await page.waitForTimeout(ms);
+}
+
+/**
+ * A SUITE'S OWN TALLY: `check(label, ok, detail)` and the `fail` array it fills.
+ *
+ * Twenty-four files held a byte-for-byte copy of these five lines. That is not
+ * expensive to maintain — it is a copy nobody has to touch — but it is five
+ * lines of noise at the top of every suite before the first thing the suite is
+ * actually about, and `check` is the one name every suite already shares. The
+ * call sites read exactly as they did.
+ *
+ * Still per-suite state, not module state: `fail` belongs to the file that
+ * made it, so a suite cannot be affected by another one, and the destructure
+ * at the call site makes that obvious.
+ */
+export function checker() {
+  const fail = [];
+  const check = (label, ok, detail = '') => {
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
+    if (!ok) fail.push(label);
+  };
+  return { check, fail };
+}
+
+/**
+ * Watch a page's console and collect anything that went wrong on it.
+ *
+ * Both halves matter and one of them is easy to leave out. `console` catches
+ * what the game logged; `pageerror` catches what it THREW, which never reaches
+ * `console` at all — an uncaught exception in a Vue render shows up only here.
+ * A suite that wired one and not the other looked like it was watching.
+ */
+export function watch(page, errors = []) {
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  return errors;
+}
+
+/**
+ * A watched page, which is the only kind a suite should be opening.
+ *
+ * `options` goes straight to `browser.newPage`, so a suite that needs a
+ * particular window says `{ viewport: { width, height } }` exactly as it did
+ * before — and anything else Playwright takes there keeps working without this
+ * having to know about it.
+ */
+export async function openPage(browser, options = { viewport: { width: 1480, height: 1000 } }) {
+  const page = await browser.newPage(options);
+  return { page, errors: watch(page) };
+}
+
+/**
+ * END A SUITE, AND MAKE ITS VERDICT REACH THE RUNNER.
+ *
+ * Every suite collects failed checks in an array and prints them. Nine of them
+ * then fell off the end of the file, which in Node means exit code 0 — so a
+ * suite could print "9 CHECK(S) FAILED" and the runner, which judges by exit
+ * code and has no other way to judge, would report it green.
+ *
+ * That is not a hypothetical. `rebuild-test` had nine red assertions sitting
+ * behind a green `npm run check` across three separate feature changes, and
+ * the only reason anybody found out was a review that read the files instead
+ * of running them. A test you cannot trust to fail is worse than no test: it
+ * is a test plus a false sense of security.
+ *
+ * BROWSER ERRORS COUNT AS FAILURES, for the same reason. Twelve suites
+ * captured `console.error` and `pageerror` and then printed them as a footnote
+ * — so an exception could be thrown on every single tick and the suite would
+ * still pass, having asserted nothing about it. A page that threw is a page
+ * whose behaviour nobody has established, whatever the assertions above say.
+ *
+ * Takes the browser so the suite cannot exit with it still open, which is the
+ * other thing that kept going wrong: a bare `await browser.close()` after the
+ * last check leaks the process on any throw above it.
+ */
+export async function finish({ name, fail = [], errors = null, browser = null }) {
+  const bad = [...fail];
+  // `null` means this suite has no page to watch — the pure-node ones. An
+  // EMPTY ARRAY means it watched one and nothing happened, which is worth
+  // printing; "console errors: none" under a suite that never opened a browser
+  // is a reassurance about something nobody checked.
+  if (!Array.isArray(errors)) {
+    // nothing to say
+  } else if (errors.length) {
+    console.log(`\nconsole errors (${errors.length}):`);
+    for (const e of errors.slice(0, 8)) console.log(`  ${e}`);
+    if (errors.length > 8) console.log(`  …and ${errors.length - 8} more`);
+    bad.push(`${errors.length} browser error${errors.length === 1 ? '' : 's'}`);
+  } else {
+    console.log('\nconsole errors: none');
+  }
+
+  console.log(bad.length
+    ? `\n=== ${bad.length} CHECK(S) FAILED: ${bad.join('; ')} ===`
+    : `\n=== ${name} verified ===`);
+
+  // Closed before the exit, and never allowed to take the verdict with it: a
+  // browser that refuses to close must not turn a red run green.
+  if (browser) {
+    try { await browser.close(); } catch (err) {
+      console.log(`(browser did not close: ${err.message})`);
+    }
+  }
+  process.exit(bad.length ? 1 : 0);
+}

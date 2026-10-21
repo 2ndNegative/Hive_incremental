@@ -442,6 +442,7 @@ const lastGather = computed(() => {
               v-model="ruleSearch"
               class="codex-search"
               type="text"
+              aria-label="Filter resources"
               placeholder="Filter resources…"
             />
             <button class="btn" style="width: auto; height: auto" @click="banAll(true)">

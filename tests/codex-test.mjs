@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * The codex, and the gizzard.
@@ -21,29 +21,22 @@ async function ensureLanded(page) {
 
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(250);
+  await settle(page);
 }
 
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* ================================================ 1. the gizzard */
@@ -187,9 +180,8 @@ const byFat = await p.evaluate(() => ({
 }));
 check('a macro works the same way', byFat.rows > 0 && byFat.allHaveFat, `${byFat.rows} results`);
 
-const unassayed = await p.evaluate(() => {
+await p.evaluate(() => {
   hive.state.tech = {}; // nothing assayed
-  return null;
 });
 await p.fill('.codex-search', 'iron');
 await p.waitForTimeout(350);
@@ -212,7 +204,7 @@ check('and can be the moment the assay lands',
   `${revealed.rows} results — ${revealed.hint}`);
 
 await p.fill('.codex-search', 'zzzznothing');
-await p.waitForTimeout(300);
+await settle(p);
 const nothing = await p.evaluate(() =>
   document.querySelector('.codex-list .panel-body p')?.innerText.replace(/\s+/g, ' ').trim() ?? '');
 check('a query that matches nothing reads differently from an empty codex',
@@ -221,7 +213,7 @@ check('a query that matches nothing reads differently from an empty codex',
 /* ============================== 5. a stale selection cannot show an unmet item */
 
 await p.fill('.codex-search', '');
-await p.waitForTimeout(300);
+await settle(p);
 const stale = await p.evaluate(() => {
   const s = hive.state;
   const unmet = Object.keys(hive.items).find((id) => !s.found?.temperateForest?.[id]);
@@ -237,11 +229,10 @@ check('a selection the hive has no name for shows nothing',
   !detail.text.includes(stale.name),
   `${stale.name} is not on screen`);
 
-const picking = await p.evaluate(() => {
+await p.evaluate(() => {
   document.querySelector('.codex-row')?.click();
-  return null;
 });
-await p.waitForTimeout(300);
+await settle(p);
 const opened = await p.evaluate(() => ({
   selected: hive.state.ui.selectedItem,
   shows: document.querySelector('.codex-detail .panel-head')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
@@ -249,10 +240,4 @@ const opened = await p.evaluate(() => ({
 check('and clicking a known one still opens it',
   Boolean(opened.selected) && opened.shows.length > 0, opened.shows.slice(0, 50));
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the codex', fail, errors, browser });

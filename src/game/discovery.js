@@ -148,8 +148,21 @@ export function bandFor(chance) {
  */
 export function labelForConfidence(level, chance) {
   switch (level) {
-    case 'exact':
-      return `${(chance * 100).toFixed(0)}%`;
+    case 'exact': {
+      /*
+       * A RARE FIND IS RARE, NOT IMPOSSIBLE.
+       *
+       * Rounding to whole per cent printed every chance below a half as "0%",
+       * which is the one reading the player cannot act on: it says the item
+       * will never turn up, and then it turns up. A hundred and seventy-nine
+       * scavenger item-biome pairings sit under that line today — a horse in
+       * dense urban is 0.137% — and the hive has usually seen them, which is
+       * how it knows the rate at all.
+       */
+      const pct = chance * 100;
+      if (pct > 0 && pct < 0.5) return '<1%';
+      return `${pct.toFixed(0)}%`;
+    }
     case 'range': {
       const [lo, hi] = bandFor(chance);
       return `${lo}–${hi}%`;

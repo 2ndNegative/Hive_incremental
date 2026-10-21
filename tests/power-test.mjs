@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, openPage, finish, settle } from './harness.mjs';
 
 /**
  * Brownout, recovery, and the order energy is handed out in.
@@ -25,7 +25,7 @@ async function ensureLanded(page) {
 }
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 
@@ -66,10 +66,7 @@ const park = (label, why) => {
   parked.push(label);
 };
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
@@ -80,7 +77,7 @@ await p.waitForSelector('.res-row');
 const SAVE_VERSION = await p.evaluate(() => hive.saveVersion);
 // Take the clock. Every sample below is then exactly the simulation time asked
 // for, rather than that plus however long a round-trip took.
-await p.waitForTimeout(300);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* ============================================ 4. the Anthill lands with a core */
@@ -423,7 +420,7 @@ await p.evaluate(() => {
   s.energyPool = 0;
   hive.tick(0.1); // one step, so the deficit is live in the derived state
 });
-await p.waitForTimeout(250);
+await settle(p);
 const shown = await p.evaluate(() => {
   const card = [...document.querySelectorAll('.action-card')]
     .find((c) => c.textContent.includes('Hivecore'));
@@ -761,9 +758,5 @@ check('the gather tooltip shows obfuscated rows',
 
 /* ===================================================================== wrap */
 
-check('no console errors anywhere in all that', errors.length === 0, errors.slice(0, 3).join(' / '));
-
-await browser.close();
-console.log(`\n${fail.length ? `FAILURES (${fail.length}): ${fail.join(', ')}` : 'All checks passed.'}`);
 if (parked.length) console.log(`Parked: ${parked.length}`);
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the power ladder', fail, errors, browser });

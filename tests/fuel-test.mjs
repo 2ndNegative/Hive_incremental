@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * One fuel at a time, and a cooldown before changing back.
@@ -26,23 +26,16 @@ async function ensureLanded(page) {
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 const KEY = 'structure:metabolicGenerator';
@@ -200,7 +193,7 @@ await p.evaluate(() => hive.setGlobalFuel('carb', 'fat'));
 /* ================================================= 7. the screen says so */
 
 await p.click('.tab-bar button:text-is("Metabolism")');
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => {
   const s = hive.state;
   s.nutrients.carb = 0;
@@ -209,7 +202,7 @@ await p.evaluate(() => {
   s.nutrients.carb = 5_000;
   hive.tick(0.1);
 });
-await p.waitForTimeout(250);
+await settle(p);
 const shown = await p.evaluate(() => {
   const row = [...document.querySelectorAll('.fuel-row')].find((r) =>
     /Metabolic Generator/.test(r.innerText),
@@ -233,10 +226,4 @@ check('the lock round-trips through a save',
   saved.lock?.on === 'fat' && typeof saved.lock.hold === 'number', JSON.stringify(saved.lock));
 check('at the current save version', saved.version === SAVE_VERSION, `v${saved.version}`);
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'what gets burned', fail, errors, browser });

@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, ensureLanded } from './harness.mjs';
+import { BASE, LAUNCH, ensureLanded, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * THE MODIFIER LAYER.
@@ -20,24 +20,17 @@ import { BASE, LAUNCH, ensureLanded } from './harness.mjs';
  * part that broke.
  */
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
 const browser = await chromium.launch(LAUNCH);
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(BASE, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* =========================================== 1. the channels are declared */
@@ -60,22 +53,73 @@ check('a fresh hive starts at zero on every channel',
 
 /* ====================================== 2. a typo is refused, not ignored */
 
+/*
+ * NO SKIP. This used to read the adder off `hive.modsApi`, which has never
+ * existed, and treat the miss as a pass — so the one check standing between a
+ * mistyped channel name and a bonus that silently does nothing could not fail.
+ * The adder is on the handle now, for exactly this.
+ */
 const typo = await p.evaluate(() => {
+  const out = {};
+  const mod = hive.mods.empty();
   try {
-    hive.state.structures.__never = 0;
-    const mod = hive.mods.now();
-    // Reach the raw adder the way a definition file would, through a bad name.
-    const { addModifiers } = hive.modsApi ?? {};
-    if (!addModifiers) return { skip: true };
-    addModifiers(mod, { broodRat: 0.5 });
-    return { threw: false };
+    hive.mods.add(mod, { broodRat: 0.5 });
+    out.typo = { threw: false };
   } catch (err) {
-    return { threw: true, message: err.message };
+    out.typo = { threw: true, message: err.message };
   }
+  // And a correctly spelled one still lands, so the guard is not just refusing
+  // everything.
+  try {
+    hive.mods.add(mod, { broodRate: 0.5 });
+    out.good = { threw: false, value: mod.broodRate };
+  } catch (err) {
+    out.good = { threw: true, message: err.message };
+  }
+  return out;
 });
 check('a mistyped channel name throws rather than silently doing nothing',
-  typo.skip || typo.threw === true,
-  typo.message?.slice(0, 60) ?? 'addModifiers not on the handle');
+  typo.typo.threw === true && /broodRat/.test(typo.typo.message ?? ''),
+  typo.typo.message?.slice(0, 70) ?? 'did not throw');
+check('and a real one still lands',
+  typo.good.threw === false && typo.good.value === 0.5,
+  JSON.stringify(typo.good));
+
+/*
+ * ============ 2b. A CHANNEL MOVES THE SIMULATION, NOT JUST THE DISPLAY
+ *
+ * `broodRate` and `moldRate` were applied to the advertised `.rate` while the
+ * tick advanced an unmodified `.cycleRate`. Nothing contributes to either
+ * channel yet, so nothing was visibly wrong — the first gene aimed at one
+ * would have shipped a screen that disagreed with the hive.
+ *
+ * The invariant that holds whatever the modifier is: the figure the interface
+ * quotes is DERIVED from the figure the tick advances. Checked on the real
+ * derive rather than on arithmetic repeated here.
+ */
+const oneRate = await p.evaluate(() => {
+  const s = hive.state;
+  for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e7;
+  s.energyPool = 1e9;
+  s.larvae = 50;
+  for (const id of Object.keys(hive.structureDefs)) {
+    if (hive.structureDefs[id].brood || hive.structureDefs[id].molding) s.structures[id] = 2;
+  }
+  hive.tick(1, 1);
+  const d = hive.derived();
+  return {
+    brood: d.brood.map((b) => ({ id: b.id, rate: b.rate, cycle: b.cycleRate, yield: b.yield })),
+    molding: d.molding.map((m) => ({ id: m.id, rate: m.rate, cycle: m.cycleRate })),
+  };
+});
+check('the brood rate the screen shows is the cycle rate the tick advances',
+  oneRate.brood.length > 0
+  && oneRate.brood.every((b) => Math.abs(b.rate - b.cycle * b.yield) < 1e-12),
+  oneRate.brood.map((b) => `${b.id} ${b.rate} vs ${b.cycle}×${b.yield}`).join(' | '));
+check('and so is the molding rate',
+  oneRate.molding.length > 0
+  && oneRate.molding.every((m) => Math.abs(m.rate - m.cycle) < 1e-12),
+  oneRate.molding.map((m) => `${m.id} ${m.rate} vs ${m.cycle}`).join(' | '));
 
 /* ============================ 3. EVERY CHANNEL MOVES THE NUMBER IT NAMES
 
@@ -271,10 +315,4 @@ check('two sources of +20% give +40%, not +44%',
   Math.abs(stacking.two / stacking.base - 1.4) < 1e-6,
   `×${(stacking.two / stacking.base).toFixed(4)} (compounding would be ×1.44)`);
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the modifier layer', fail, errors, browser });

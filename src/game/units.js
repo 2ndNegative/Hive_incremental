@@ -49,7 +49,14 @@ function trimZeros(text) {
  */
 export function formatSI(value, unit, opts = {}) {
   const { digits, minExp = -6, maxExp = 24 } = opts;
-  if (!Number.isFinite(value)) return `∞ ${unit}`;
+  // NaN IS NOT INFINITY, and neither is minus infinity. All three used to come
+  // out as "∞ g" — so a number that had gone wrong looked exactly like a
+  // number that had gone gloriously right, which is the worst possible way for
+  // a bug to present. They are named now.
+  if (Number.isNaN(value) || value === undefined || value === null) return `? ${unit}`;
+  if (value === Infinity) return `∞ ${unit}`;
+  if (value === -Infinity) return `-∞ ${unit}`;
+  if (!Number.isFinite(value)) return `? ${unit}`;
   const sign = value < 0 ? '-' : '';
   const abs = Math.abs(value);
   if (abs === 0) return `0 ${unit}`;
@@ -59,10 +66,26 @@ export function formatSI(value, unit, opts = {}) {
   const magnitude = Math.floor(Math.log10(abs));
   let exp = Math.floor(magnitude / 3) * 3;
   exp = Math.max(minExp, Math.min(maxExp, exp));
-  const tier = SI[SI.findIndex((s) => s.exp === exp)] ?? SI[ZERO_INDEX];
+  let tier = SI[SI.findIndex((s) => s.exp === exp)] ?? SI[ZERO_INDEX];
 
-  const scaled = abs / 10 ** tier.exp;
-  const decimals = digits ?? (scaled < 10 ? 2 : scaled < 100 ? 1 : 0);
+  let scaled = abs / 10 ** tier.exp;
+  let decimals = digits ?? (scaled < 10 ? 2 : scaled < 100 ? 1 : 0);
+
+  /*
+   * THE TIER IS CHOSEN BEFORE THE ROUNDING, so the rounding has to be able to
+   * push it up one. 999.6 g picked the gram tier, rounded its mantissa to
+   * 1000, and printed "1000 g" — a unit the ladder exists to avoid. Checked
+   * after rounding rather than before, because that is when it is knowable.
+   */
+  if (Math.abs(Number(scaled.toFixed(decimals))) >= 1000) {
+    const next = SI[SI.findIndex((t) => t.exp === tier.exp) + 1];
+    if (next && next.exp <= maxExp) {
+      tier = next;
+      scaled = abs / 10 ** tier.exp;
+      decimals = digits ?? (scaled < 10 ? 2 : scaled < 100 ? 1 : 0);
+    }
+  }
+
   const mantissa = trimZeros(scaled.toFixed(decimals));
   return `${sign}${mantissa} ${tier.prefix}${unit}`;
 }
@@ -77,10 +100,17 @@ export function formatEnergy(joules, opts) {
  * sequence runs µg, mg, g, kg, t, kt, Mt, Gt rather than g, kg, Mg, Gg.
  */
 export function formatMass(grams, opts = {}) {
-  if (!Number.isFinite(grams)) return '∞ g';
+  // Non-finite values are named by formatSI rather than all collapsing to ∞.
+  if (!Number.isFinite(grams)) return formatSI(grams, 'g');
   const abs = Math.abs(grams);
-  if (abs >= 1e6) {
-    // 1 t = 1e6 g. Re-enter the SI ladder with tonnes as the base unit.
+  // 1 t = 1e6 g. The second test is the same rounding promotion formatSI does
+  // internally, which it cannot do here: the gram ladder is capped at kg, so
+  // 999,999.6 g rounded to "1000 kg" with nowhere left to climb. Decided on
+  // the mantissa the kg tier would actually print.
+  const kg = abs / 1e3;
+  const kgDecimals = opts.digits ?? (kg < 10 ? 2 : kg < 100 ? 1 : 0);
+  if (abs >= 1e6 || Number(kg.toFixed(kgDecimals)) >= 1000) {
+    // Re-enter the SI ladder with tonnes as the base unit.
     return formatSI(grams / 1e6, 't', { minExp: 0, ...opts });
   }
   return formatSI(grams, 'g', { minExp: -6, maxExp: 3, ...opts });

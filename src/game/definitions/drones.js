@@ -220,6 +220,26 @@ export const DRONE_TYPES = {
 /** Display order within a caste, and the order the engine will iterate. */
 export const DRONE_TYPE_ORDER = ['forager', 'scavenger', 'explorer'];
 
+/* ------------------------------- the order accounts for every drone type
+ *
+ * Nothing here is parked, so there is no second list and the check is the
+ * simple one: the order IS the table. A type defined and left off would be a
+ * drone the hive cannot mold, no screen lists, and genetics builds no subject
+ * for — see BUILDERS in game/genes.js, which walks this order.
+ */
+{
+  const missing = Object.keys(DRONE_TYPES).filter((id) => !DRONE_TYPE_ORDER.includes(id));
+  if (missing.length) {
+    throw new Error(
+      `drones.js: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} defined but not in `
+      + `DRONE_TYPE_ORDER, so nothing can mold or list ${missing.length === 1 ? 'it' : 'them'}.`,
+    );
+  }
+  for (const id of DRONE_TYPE_ORDER) {
+    if (!DRONE_TYPES[id]) throw new Error(`drones.js: DRONE_TYPE_ORDER names undefined type "${id}".`);
+  }
+}
+
 /**
  * What the molding chambers should make next, or null if there is nothing they
  * are allowed to make.

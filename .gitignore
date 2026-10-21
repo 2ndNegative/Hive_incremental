@@ -104,3 +104,4 @@ tests/.shots/
 # The log `npm run check` leaves behind. One run deep, overwritten each time —
 # evidence for whoever has to read a failure, never repository content.
 check-log.txt
+tests/.last-failure-*.log

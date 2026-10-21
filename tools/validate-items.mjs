@@ -23,6 +23,8 @@
  *   6. Forage coverage — every item must be classified in forage.js, name real
  *      biomes, and be reachable by SOME route; every biome must offer every
  *      caste something, or a hive made of it strands that caste.
+ *   7. Provenance — every item must say where its numbers came from, and a USDA
+ *      citation must name a row.
  */
 
 import { ITEMS, ITEM_IDS, itemJoulesPerGram } from '../src/game/definitions/items/index.js';
@@ -49,6 +51,27 @@ for (const id of ITEM_IDS) {
     err(id, `macros sum to ${macroSum.toFixed(2)} g per 100 g, expected 100 (±2)`);
   } else if (Math.abs(macroSum - 100) > 0.5) {
     warn(id, `macros sum to ${macroSum.toFixed(2)} g per 100 g`);
+  }
+
+  /* 7. provenance.
+     EVERY NUMBER IN HERE CAME FROM SOMEWHERE, and the `source` line is the only
+     record of where. All three hundred and fifty-six items have one today and
+     nothing was enforcing it, which is the state a field is in right before the
+     first `source: 'TODO'` goes in and stays.
+     This cannot check that the figures are RIGHT — the energy cross-check below
+     is the closest thing to that, and nothing short of re-deriving the database
+     from the USDA release would do better. What it checks is that the claim is
+     answerable: a citation specific enough that somebody can go and look. A
+     USDA row is named by its id, so a USDA citation without a number in it is
+     pointing at a dataset rather than at a row, and the eleven thousand rows in
+     SR Legacy are not a citation. */
+  const source = String(item.source ?? '').trim();
+  if (!source) {
+    err(id, 'no source — say where these numbers came from');
+  } else if (source.length < 8 || /^(tbd|todo|\?+|n\/?a)$/i.test(source)) {
+    err(id, `source "${source}" says nothing — name the row, paper or compound`);
+  } else if (/USDA/i.test(source) && !/\d/.test(source)) {
+    err(id, `source cites USDA without a row id: "${source}"`);
   }
 
   /* 4a. no negatives */

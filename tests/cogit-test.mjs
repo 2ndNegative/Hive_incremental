@@ -2,9 +2,9 @@ import { formatCogits } from '../src/game/units.js';
 import { computeCognition } from '../src/game/engine.js';
 import { BASE_COGIT_CAPACITY, COGIT_PER_DRONE, COGIT } from '../src/game/definitions/cognition.js';
 import { STRUCTURES } from '../src/game/definitions/structures.js';
+import { checker, finish } from './harness.mjs';
 
-let fails = 0;
-const ck = (l, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${l}${d ? ` — ${d}` : ''}`); if (!ok) fails++; };
+const { check: ck, fail } = checker();
 
 /* ------------------------------------------------------------- the unit */
 ck('cogits print with SI prefixes',
@@ -79,5 +79,4 @@ ck('the per-drone cost is wired but unset', COGIT_PER_DRONE === 0);
     computeCognition(s).used === 0, 'COGIT_PER_DRONE is 0');
 }
 
-console.log(fails ? `\n=== ${fails} FAILED ===` : '\n=== cognition verified ===');
-process.exit(fails ? 1 : 0);
+await finish({ name: 'cognition', fail });

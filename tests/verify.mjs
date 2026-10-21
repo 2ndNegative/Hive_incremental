@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, shot } from './harness.mjs';
+import { BASE, LAUNCH, shot, finish, settle } from './harness.mjs';
 
 /**
  * These suites were written before landing sites existed. A fresh save now
@@ -22,7 +22,7 @@ async function ensureLanded(page) {
  */
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 const base = BASE;
@@ -98,7 +98,7 @@ for (const w of [1400, 980, 700, 420]) {
   await p.waitForSelector('.res-row');
   await ensureLanded(p);
   await p.hover('.gather-btn');
-  await p.waitForTimeout(300);
+  await settle(p);
 
   const before = await p.evaluate(() => {
     const tip = document.querySelector('.tip-side .tip-body');
@@ -121,9 +121,9 @@ for (const w of [1400, 980, 700, 420]) {
   await p.evaluate(() => {
     hive.state.territory = { denseUrban: 100 };
   });
-  await p.waitForTimeout(250);
+  await settle(p);
   await p.hover('.gather-btn');
-  await p.waitForTimeout(250);
+  await settle(p);
   // What the odds are ABOUT is a fact about the ground; what they SAY is
   // limited by what the hive has found. So the ground is checked against the
   // ids, and the rendering against the text.
@@ -139,9 +139,9 @@ for (const w of [1400, 980, 700, 420]) {
 
   // Find one, and only that one is named.
   await p.evaluate(() => hive.discovery.recordFind(hive.state, 'denseUrban', 'bread_white'));
-  await p.waitForTimeout(250);
+  await settle(p);
   await p.hover('.gather-btn');
-  await p.waitForTimeout(250);
+  await settle(p);
   const urban = await p.evaluate(() => document.querySelector('.tip-side .tip-body').innerText);
   check('finding a thing once puts its name in the odds',
     urban.includes('Bread') && urban.includes('???'),
@@ -247,14 +247,14 @@ async function bootWithAgedSave(ageSeconds, setup = () => {}) {
   await p.waitForSelector('.codex-search[placeholder="code"]');
   await p.fill('.codex-search[placeholder="code"]', 'wrong code');
   await p.click('button:text-is("Unlock")');
-  await p.waitForTimeout(200);
+  await settle(p);
   const rejected = await p.evaluate(() => hive.state.dev.enabled);
   check('wrong code is rejected', rejected === false);
 
   // keyboard path this time, so both ways in are covered
   await p.fill('.codex-search[placeholder="code"]', 'Code Midas');
   await p.press('.codex-search[placeholder="code"]', 'Enter');
-  await p.waitForTimeout(300);
+  await settle(p);
   const unlocked = await p.evaluate(() => ({ dev: hive.state.dev.enabled, tab: hive.state.ui.tab }));
   check('Code Midas unlocks dev mode', unlocked.dev === true && unlocked.tab === 'dev');
 
@@ -272,13 +272,13 @@ async function bootWithAgedSave(ageSeconds, setup = () => {}) {
     `protein ${filled.protein.toFixed(0)} g, save flagged devUsed`);
 
   await p.click('button:text-is("All assays")');
-  await p.waitForTimeout(300);
+  await settle(p);
   const assayed = await p.$$eval('.res-name', (e) => e.length);
   check('all assays reveals the full panel', assayed === 35, `${assayed} nutrient rows`);
 
   const viaButton = await p.evaluate(() => { hive.state.nutrients.protein = 0; return true; });
   await p.click('button:text-is("Fill all")');
-  await p.waitForTimeout(150);
+  await settle(p);
   const buttonWorked = await p.evaluate(() => hive.state.nutrients.protein > 1000);
   check('the Fill all button works from the UI', viaButton && buttonWorked);
 
@@ -293,13 +293,10 @@ async function bootWithAgedSave(ageSeconds, setup = () => {}) {
   check('dev unlock survives a reload', persisted === true);
 
   await p.evaluate(() => hive.dev.lockDev());
-  await p.waitForTimeout(200);
+  await settle(p);
   const relocked = await p.$$eval('.tab-bar button', (e) => e.map((x) => x.textContent.trim()));
   check('locking hides the tab again', !relocked.some((t) => t.startsWith('Dev')));
   await p.close();
 }
 
-console.log(`\nconsole errors: ${errors.length ? errors.slice(0, 5).join(' | ') : 'none'}`);
-console.log(fail.length ? `\n=== ${fail.length} CHECK(S) FAILED: ${fail.join('; ')} ===` : '\n=== all checks passed ===');
-await browser.close();
-console.log('=== verification finished ===');
+await finish({ name: 'verification', fail, errors, browser });

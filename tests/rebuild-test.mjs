@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH, shot } from './harness.mjs';
+import { BASE, LAUNCH, shot, finish, settle } from './harness.mjs';
 
 /**
  * Discovery, the metabolism rewrite, and levelled buildings.
@@ -18,7 +18,7 @@ async function ensureLanded(page) {
 }
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(140);
+  await settle(page);
 }
 
 
@@ -103,34 +103,48 @@ check('naming one thing names nothing else', !named.other);
 
 /* ============================================== 3. rates sharpen with evidence */
 
+/*
+ * READ OFF THE CONSTANTS, NOT OFF THE NUMBERS THEY HAPPENED TO BE.
+ *
+ * This section was written against RANGE_AT 10 and EXACT_AT 25 and hard-coded
+ * both. The land rewrite moved them to 100 and 350 — a roll is a DRONE now
+ * rather than a patch, so the hive learns an order of magnitude faster — and
+ * these four checks have been red ever since, behind a suite that exited 0.
+ * Every other suite in the project reads them symbolically; this one was
+ * simply missed, which is the argument for never typing the number.
+ */
 const sharpening = await p.evaluate(() => {
   const s = hive.state;
-  const out = [];
+  const { RANGE_AT, EXACT_AT } = hive.discovery;
   const take = (n) => ({
     at: n,
     level: hive.discovery.rateConfidence(s, 'grassland', 'pasture_grass'),
     label: hive.discovery.rateLabel(s, 'grassland', 'pasture_grass', 0.173),
   });
-  out.push(take(0));
-  for (let i = 0; i < 9; i += 1) hive.discovery.recordFind(s, 'grassland', 'pasture_grass');
-  out.push(take(9));
-  hive.discovery.recordFind(s, 'grassland', 'pasture_grass');
-  out.push(take(10));
-  for (let i = 0; i < 14; i += 1) hive.discovery.recordFind(s, 'grassland', 'pasture_grass');
-  out.push(take(24));
-  hive.discovery.recordFind(s, 'grassland', 'pasture_grass');
-  out.push(take(25));
+  const to = (n, from) => {
+    for (let i = from; i < n; i += 1) hive.discovery.recordFind(s, 'grassland', 'pasture_grass');
+    return take(n);
+  };
+  const out = { RANGE_AT, EXACT_AT };
+  out.none = take(0);
+  out.justShortOfRange = to(RANGE_AT - 1, 0);
+  out.atRange = to(RANGE_AT, RANGE_AT - 1);
+  out.justShortOfExact = to(EXACT_AT - 1, RANGE_AT);
+  out.atExact = to(EXACT_AT, EXACT_AT - 1);
   return out;
 });
-const [at0, at9, at10, at24, at25] = sharpening;
-check('nine finds is still not enough to say anything',
-  at0.label === '?%' && at9.label === '?%', `${at9.at} finds -> ${at9.label}`);
-check('the tenth find brackets the rate',
-  at10.level === 'range' && at10.label === '10–25%', `${at10.at} finds -> ${at10.label}`);
-check('the bracket holds until the twenty-fifth',
-  at24.label === '10–25%', `${at24.at} finds -> ${at24.label}`);
-check('the twenty-fifth resolves it exactly',
-  at25.level === 'exact' && at25.label === '17%', `${at25.at} finds -> ${at25.label}`);
+check('a handful of finds is still not enough to say anything',
+  sharpening.none.label === '?%' && sharpening.justShortOfRange.label === '?%',
+  `${sharpening.justShortOfRange.at} finds -> ${sharpening.justShortOfRange.label}`);
+check('the RANGE_AT-th find brackets the rate',
+  sharpening.atRange.level === 'range' && sharpening.atRange.label === '10–25%',
+  `${sharpening.atRange.at} finds -> ${sharpening.atRange.label}`);
+check('the bracket holds until EXACT_AT',
+  sharpening.justShortOfExact.label === '10–25%',
+  `${sharpening.justShortOfExact.at} finds -> ${sharpening.justShortOfExact.label}`);
+check('and EXACT_AT resolves it exactly',
+  sharpening.atExact.level === 'exact' && sharpening.atExact.label === '17%',
+  `${sharpening.atExact.at} finds -> ${sharpening.atExact.label}`);
 
 const bands = await p.evaluate(() => [0.004, 0.015, 0.03, 0.08, 0.17, 0.4, 0.9]
   .map((c) => hive.discovery.bandFor(c).join('–')));
@@ -210,11 +224,14 @@ check('unworked ground shows what is there but not what it is',
   `${hidden.count} entries, all ??? at ?%`);
 check('no real name leaks into the list', hidden.noRealNames);
 
+// RANGE_AT finds on one entry and a single find on another, so the panel has
+// to show a bracket beside a name beside a row that is still ???.
 await p.evaluate(() => {
-  for (let i = 0; i < 12; i += 1) hive.discovery.recordFind(hive.state, 'temperateForest', 'leaf_litter');
+  const n = hive.discovery.RANGE_AT;
+  for (let i = 0; i < n; i += 1) hive.discovery.recordFind(hive.state, 'temperateForest', 'leaf_litter');
   hive.discovery.recordFind(hive.state, 'temperateForest', 'wood');
 });
-await p.waitForTimeout(300);
+await settle(p);
 const partly = await p.evaluate(() => {
   const chips = [...document.querySelectorAll('.offer-chip')];
   const text = (n) => chips.find((c) => c.textContent.includes(n))?.querySelector('.offer-pct').textContent.trim();
@@ -224,7 +241,7 @@ const partly = await p.evaluate(() => {
     stillHidden: chips.filter((c) => c.textContent.includes('???')).length,
   };
 });
-check('twelve finds brackets that one entry', /^\d+–\d+%$/.test(partly.litter || ''), partly.litter);
+check('enough finds brackets that one entry', /^\d+–\d+%$/.test(partly.litter || ''), partly.litter);
 check('one find names it without revealing its rate', partly.wood === '?%', partly.wood);
 check('everything else stays hidden', partly.stillHidden > 3, `${partly.stillHidden} still ???`);
 await p.screenshot({ path: shot('discovery.png') });
@@ -276,6 +293,7 @@ const withGenerator = await p.evaluate(() => {
     massRate: d.energy.massRate,
     generated: d.energy.generated,
     pool: s.energyPool,
+    wasted: d.energy.wasted,
     ate: before - s.nutrients.fat,
   };
 });
@@ -290,9 +308,21 @@ check('it converts that mass at the fraction it can actually recover',
 check('the mass is gone whatever was got out of it',
   Math.abs(withGenerator.ate - 10) < 1e-6,
   `${withGenerator.ate.toFixed(1)} g eaten for ${(withGenerator.generated / 1000).toFixed(0)} kW`);
-check('and what was recovered is banked',
-  withGenerator.pool > 258_000,
-  `${(withGenerator.pool / 1000).toFixed(0)} kJ banked`);
+/*
+ * AND NOTHING NOBODY ASKED FOR IS BANKED.
+ *
+ * This asserted the opposite — that the recovered 259 kJ landed in the pool —
+ * and it was right until the reserve became one-way. There is no energy
+ * storage building yet, so the pool can only ever be drawn down: a generator
+ * running with nothing demanding its output is burning fat to heat the room.
+ * The figure that says so is `wasted`, and it exists precisely so this is a
+ * number on a screen rather than mass quietly vanishing.
+ */
+check('but with nothing demanding it, none of it is banked',
+  withGenerator.pool === 0, `${withGenerator.pool} J in the pool`);
+check('and the hive is told it was wasted rather than stored',
+  Math.abs(withGenerator.wasted - withGenerator.generated) < 1,
+  `${(withGenerator.wasted / 1000).toFixed(0)} kW of ${(withGenerator.generated / 1000).toFixed(0)} kW wasted`);
 const ceiling = await p.evaluate(() => {
   // The whole point of the inversion: no amount of research takes a gram past
   // its own energy. Every tech in the ladder, then check nothing exceeds 1.
@@ -331,28 +361,75 @@ check('an empty pool with no generation starves the hive', starves === 0, `ratio
 
 /* =============================================== 8. levelled buildings */
 
+/*
+ * LEVELS, AND THE QUEUE THAT DELIVERS THEM — two separate claims, tested
+ * separately, because they used to be tested as one and the join broke.
+ *
+ * This section called `hive.build()` and then read the level on the next line.
+ * That worked while building was instant; v22 gave every structure a build
+ * time and `build()` became a thin alias for `queueBuild`, so the level now
+ * arrives seconds later and all four of these checks have been red ever since
+ * — behind a suite that exited 0.
+ *
+ * The level arithmetic is asserted against levels set directly, which is what
+ * those checks were ever really about. The queue is asserted on its own below.
+ */
 const levels = await p.evaluate(() => {
   const s = hive.state;
-  s.structures.hivecore = 0;
+  // Watered, fed and LIT. Bandwidth browns out with everything else — a
+  // Hivecore at a third charge holds a third of the thoughts — and this check
+  // is about what a level is worth, not about the power budget.
   for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e9;
-  const built = hive.build('hivecore', 1);
-  const lvl1 = { level: s.structures.hivecore, cogits: hive.cognition().capacity };
-  hive.build('hivecore', 3);
-  const lvl4 = { level: s.structures.hivecore, cogits: hive.cognition().capacity };
-  // Ask for far more than the cap allows.
-  hive.build('hivecore', 999);
-  const capped = { level: s.structures.hivecore, max: hive.maxLevelOf('hivecore') };
-  const refused = hive.build('hivecore', 1);
-  return { built, lvl1, lvl4, capped, refused, leveled: hive.structureDefs.hivecore.leveled };
+  s.energyPool = 1e9;
+  s.power = {};
+  const at = (n) => {
+    s.structures.hivecore = n;
+    return hive.cognition().capacity;
+  };
+  return {
+    leveled: hive.structureDefs.hivecore.leveled,
+    one: at(1),
+    four: at(4),
+    max: hive.maxLevelOf('hivecore'),
+  };
 });
 check('a levelled building is declared as one', levels.leveled);
-check('building it sets its level', levels.built === 1 && levels.lvl1.level === 1);
 check('a Hivecore supplies 5 Cg a level',
-  levels.lvl1.cogits === 5 && levels.lvl4.cogits === 20,
-  `level 1 -> ${levels.lvl1.cogits} Cg, level 4 -> ${levels.lvl4.cogits} Cg`);
-check('upgrading stops at the cap rather than overshooting',
-  levels.capped.level === levels.capped.max, `level ${levels.capped.level} of ${levels.capped.max}`);
-check('and refuses to go further', levels.refused === 0);
+  levels.one === 5 && levels.four === 20,
+  `level 1 -> ${levels.one} Cg, level 4 -> ${levels.four} Cg`);
+
+const queued = await p.evaluate(() => {
+  const s = hive.state;
+  // From a standing Hivecore, because a hive at level 0 has no cognition and
+  // therefore cannot start a build at all — a state the game never reaches,
+  // since the landing seeds one.
+  s.structures.hivecore = 1;
+  s.buildQueue = [];
+  s.building = null;
+  for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e9;
+  s.energyPool = 1e9;
+
+  const accepted = hive.build('hivecore', 1);
+  const beforeTicking = s.structures.hivecore;
+  hive.tick(5, 1);
+  const onTheBench = s.building ? { id: s.building.id, remaining: s.building.remaining } : null;
+  hive.tick(5, 1);
+  const later = s.building ? s.building.remaining : 0;
+
+  // At the cap it must refuse rather than queue a promise it cannot keep.
+  s.buildQueue = [];
+  s.building = null;
+  s.structures.hivecore = hive.maxLevelOf('hivecore');
+  const refused = hive.build('hivecore', 1);
+  return { accepted, beforeTicking, onTheBench, later, refused };
+});
+check('asking for a level queues it rather than granting it', queued.accepted === 1
+  && queued.beforeTicking === 1, `accepted ${queued.accepted}, level ${queued.beforeTicking}`);
+check('and the queue puts it on the bench and works at it',
+  queued.onTheBench?.id === 'hivecore' && queued.later < queued.onTheBench.remaining,
+  `${queued.onTheBench?.remaining?.toFixed(0)} -> ${queued.later.toFixed(0)} of work left`);
+check('at the cap it refuses rather than queueing the impossible',
+  queued.refused === 0, `${queued.refused} accepted at level ${levels.max}`);
 
 const upkeep = await p.evaluate(() => {
   const s = hive.state;
@@ -362,17 +439,22 @@ const upkeep = await p.evaluate(() => {
 check('a Hivecore costs fifty kilojoules every second', Math.abs(upkeep - 50e3) < 1,
   `${(upkeep / 1e3).toFixed(0)} kW`);
 
+// A COUNTED building stacks, as opposed to a levelled one. Set directly for
+// the same reason as above: `build()` queues now, and what is being asserted
+// here is that four generators process four times one generator's mass.
 const counted2 = await p.evaluate(() => {
   const s = hive.state;
-  s.structures.metabolicGenerator = 0;
-  hive.build('metabolicGenerator', 4);
+  s.structures.metabolicGenerator = 4;
+  s.nutrients.fat = 1e6;
+  s.energy.preferred = 'fat';
+  hive.tick(1);
   return { count: s.structures.metabolicGenerator, massRate: hive.derived().energy.massRate };
 });
 check('a counted building still stacks', counted2.count === 4 && counted2.massRate === 40,
   `${counted2.count} generators, ${counted2.massRate} g/s`);
 
 await openTab(p, 'Hive');
-await p.waitForTimeout(300);
+await settle(p);
 const tab = await p.evaluate(() => {
   const txt = document.querySelector('.main-col, .band-stack')?.innerText ?? document.body.innerText;
   return {
@@ -422,7 +504,4 @@ await ensureLanded(p);
 check('a building keeps its level across a reload',
   await p.evaluate(() => hive.state.structures.hivecore === 7), 'Hivecore still level 7');
 
-console.log(`\nconsole errors: ${errors.length ? errors.slice(0, 4).join(' | ') : 'none'}`);
-console.log(fail.length ? `\n=== ${fail.length} CHECK(S) FAILED: ${fail.join('; ')} ===` : '\n=== discovery, metabolism and levels verified ===');
-await browser.close();
-console.log('=== rebuild test finished ===');
+await finish({ name: 'discovery, metabolism and levels', fail, errors, browser });

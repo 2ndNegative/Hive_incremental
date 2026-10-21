@@ -223,3 +223,50 @@ export const RESEARCH_ORDER = [
   'rareElementAssay',
   'ketogenesis',
 ];
+
+/**
+ * Parked. Defined above, deliberately not on the ladder.
+ *
+ * Declared rather than left implicit, because "parked" and "forgotten" looked
+ * identical before this list existed: a tech left out of RESEARCH_ORDER simply
+ * does not exist in the game, which is correct for Lithovory and a silent bug
+ * for the next one somebody adds. The partition check below makes the two
+ * distinguishable — a tech in neither list is now an error at load rather than
+ * a feature nobody can find.
+ *
+ * `state.tech` still round-trips these, so a save that holds one keeps it.
+ */
+export const PARKED_RESEARCH_ORDER = ['lithovory', 'predation'];
+
+/* ---------------------------------------- the ladder accounts for every tech
+ *
+ * Every tech defined above is on the ladder or declared parked, exactly once.
+ * Three mistakes it catches, all of which used to be invisible:
+ *   - a new tech added to RESEARCH and forgotten in RESEARCH_ORDER, which is a
+ *     tech the player can never buy and no screen ever mentions;
+ *   - a tech listed twice, which puts two of the same card on the screen;
+ *   - an order naming a tech that does not exist, which is a card that renders
+ *     as blank or throws, depending on which screen reaches it first.
+ */
+{
+  const defined = Object.keys(RESEARCH);
+  const listed = [...RESEARCH_ORDER, ...PARKED_RESEARCH_ORDER];
+  const seen = new Set();
+  for (const id of listed) {
+    if (!RESEARCH[id]) {
+      throw new Error(`research.js: "${id}" is listed in an order but not defined.`);
+    }
+    if (seen.has(id)) {
+      throw new Error(`research.js: "${id}" is listed twice. A tech is live or parked, not both.`);
+    }
+    seen.add(id);
+  }
+  const missing = defined.filter((id) => !seen.has(id));
+  if (missing.length) {
+    throw new Error(
+      `research.js: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} defined but on `
+      + `neither RESEARCH_ORDER nor PARKED_RESEARCH_ORDER. A tech on neither list cannot be `
+      + `bought and is named nowhere — add it to the ladder, or park it and say why.`,
+    );
+  }
+}

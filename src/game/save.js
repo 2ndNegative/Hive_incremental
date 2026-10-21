@@ -23,6 +23,7 @@ import {
 } from './state.js';
 import { DISCOVERY_RESCALE } from './discovery.js';
 import { logIntro } from './actions.js';
+import { offline } from './offline.js';
 
 export const SAVE_KEY = 'hiveidle.save.v2';
 export const AUTOSAVE_SECONDS = 30;
@@ -111,7 +112,28 @@ function byteLength(text) {
 
 export function serialize() {
   const snapshot = JSON.parse(JSON.stringify(state));
-  snapshot.savedAt = Date.now();
+
+  /*
+   * THE CLOCK CARRIES WHAT HAS NOT BEEN SIMULATED YET.
+   *
+   * A catch-up for a long absence runs over many frames, and the tab can be
+   * closed or hidden in the middle of it — both of which fire a save. Stamping
+   * the real wall-clock time there threw away every second the catch-up had
+   * not reached: shut the tab three seconds into an eight-hour catch-up and
+   * seven and a half of those hours simply never happened.
+   *
+   * Back-dating the stamp by the unsimulated remainder makes the next load
+   * compute exactly that remainder as its offline span, so the catch-up
+   * resumes instead of restarting or vanishing. No cursor to store and nothing
+   * to keep in step: the one field that already means "simulated up to here"
+   * is made to say so honestly.
+   *
+   * A SKIPPED catch-up is not pending — `offline.active` goes false the moment
+   * it is skipped, so the remainder is discarded, which is what the player
+   * asked for and what the log already tells them.
+   */
+  const unsimulated = offline.active ? Math.max(0, offline.total - offline.done) : 0;
+  snapshot.savedAt = Date.now() - unsimulated * 1000;
   snapshot.version = SAVE_VERSION;
   return snapshot;
 }
@@ -278,26 +300,144 @@ export function measureStorageHeadroom() {
  * the save has never heard of are added. So a new shipped default appears for
  * an existing player without a migration, and their own keys survive it.
  */
-function mergeDefaults(defaults, loaded, path = '') {
+/*
+ * AND TYPED, which it was not.
+ *
+ * Every leaf the schema declares has a type, and the merge now holds the save
+ * to it: a number stays a finite number, a boolean stays a boolean, a string
+ * stays a string, and anything else falls back to the default and is counted.
+ * Numbers whose default is zero or above are also held at or above zero.
+ *
+ * Nothing checked any of this before, and nothing had to be malicious to break
+ * it. `"broken"` as a carbohydrate quantity, `-5000` larvae and `"lots"` of
+ * foragers all imported cleanly, straight into the live state, where the first
+ * arithmetic on them turns into NaN and spreads through every rate in the game
+ * before anything complains. The save is the one input the player can hand the
+ * engine directly, and it was the one input nobody checked.
+ *
+ * Repaired rather than rejected, deliberately. A save with one bad field is
+ * still somebody's run, and throwing the whole thing away over a field they
+ * cannot see is a worse outcome than resetting that field and saying so. What
+ * gets rejected is a save that is not a save at all — see `readSave`.
+ */
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Strip values an open map cannot legally hold. Open keys, closed values. */
+function sanitiseOpen(value, repairs, path) {
+  if (typeof value === 'number') {
+    if (Number.isFinite(value)) return value;
+    repairs.push(path);
+    return 0;
+  }
+  if (Array.isArray(value)) return value.map((v, i) => sanitiseOpen(v, repairs, `${path}[${i}]`));
+  if (isPlainObject(value)) {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = sanitiseOpen(v, repairs, `${path}.${k}`);
+    return out;
+  }
+  return value;
+}
+
+function mergeDefaults(defaults, loaded, path = '', repairs = []) {
   if (Array.isArray(defaults)) return Array.isArray(loaded) ? loaded : defaults;
   if (defaults && typeof defaults === 'object') {
-    const saved = loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? loaded : null;
+    const saved = isPlainObject(loaded) ? loaded : null;
     if (OPEN_MAPS.has(path) || Object.keys(defaults).length === 0) {
-      return saved ? { ...defaults, ...saved } : { ...defaults };
+      const merged = saved ? { ...defaults, ...saved } : { ...defaults };
+      return sanitiseOpen(merged, repairs, path);
     }
     const out = {};
     for (const key of Object.keys(defaults)) {
       const value = saved ? saved[key] : undefined;
+      const at = path ? `${path}.${key}` : key;
       out[key] = value === undefined
         ? defaults[key]
-        : mergeDefaults(defaults[key], value, path ? `${path}.${key}` : key);
+        : mergeDefaults(defaults[key], value, at, repairs);
     }
     return out;
   }
-  return loaded === undefined || loaded === null ? defaults : loaded;
+
+  if (loaded === undefined || loaded === null) return defaults;
+
+  if (typeof defaults === 'number') {
+    if (typeof loaded !== 'number' || !Number.isFinite(loaded)) {
+      repairs.push(path);
+      return defaults;
+    }
+    // A schema default of zero or more means the field counts something. None
+    // of them can be negative, and a negative one is a store that pays out.
+    if (defaults >= 0 && loaded < 0) {
+      repairs.push(path);
+      return defaults;
+    }
+    return loaded;
+  }
+  if (typeof defaults === 'boolean' && typeof loaded !== 'boolean') {
+    repairs.push(path);
+    return defaults;
+  }
+  if (typeof defaults === 'string' && typeof loaded !== 'string') {
+    repairs.push(path);
+    return defaults;
+  }
+  return loaded;
+}
+
+/**
+ * Say what had to be reset, once, naming a few fields rather than all of them.
+ *
+ * Silence here would be the same mistake in a new place: a field quietly
+ * reverting to its default is exactly as invisible as a field quietly holding
+ * `NaN`, and the player is the only one who can tell whether it mattered.
+ */
+function reportRepairs(repairs) {
+  if (!repairs.length) return;
+  const shown = repairs.slice(0, 4).join(', ');
+  const more = repairs.length > 4 ? `, and ${repairs.length - 4} more` : '';
+  pushLog(
+    `${repairs.length} field${repairs.length === 1 ? '' : 's'} in the save held something `
+    + `impossible and ${repairs.length === 1 ? 'was' : 'were'} reset: ${shown}${more}.`,
+    'error',
+  );
 }
 
 /** Hook for future save-format changes. */
+/**
+ * IS THIS A SAVE AT ALL? Throws with something a player can read if not.
+ *
+ * Separate from the field-by-field repair above, because the two failures are
+ * different in kind. A save with one bad number is somebody's run with a bad
+ * number in it, and gets repaired. `null`, an array, or a string is not a save
+ * and never was — `load()` used to walk straight into it and throw
+ * "Cannot read properties of null (reading 'version')" out of a startup path
+ * with no catch around it, which is a blank page.
+ *
+ * A SAVE FROM THE FUTURE IS REFUSED, which is the one case where repairing is
+ * the wrong instinct. The migrations only ever run forward; a v999 save was
+ * accepted untouched and then written back stamped v24, so a hive played on a
+ * newer build and opened on an older one was silently downgraded, losing
+ * whatever that build had added. Better to refuse and leave the file alone:
+ * the player can update and open it again, and nothing has been destroyed in
+ * the meantime.
+ */
+function assertLoadable(raw) {
+  if (!isPlainObject(raw)) {
+    throw new Error('that is not a save file');
+  }
+  const version = raw.version;
+  if (version !== undefined && (typeof version !== 'number' || !Number.isFinite(version))) {
+    throw new Error('the save does not say which version it is');
+  }
+  if ((version ?? 0) > SAVE_VERSION) {
+    throw new Error(
+      `the save is from a newer version of the game (v${version}, this build reads v${SAVE_VERSION})`,
+    );
+  }
+  return raw;
+}
+
 function migrate(raw) {
   // Saves from before landing sites existed describe a run already under way.
   // Showing them the chooser would re-seed a hive someone has been playing for
@@ -542,8 +682,20 @@ export function load() {
     return { status: 'fresh', offlineSeconds: 0 };
   }
 
-  const merged = mergeDefaults(createInitialState(), migrate(parsed));
+  let merged;
+  const repairs = [];
+  try {
+    merged = mergeDefaults(createInitialState(), migrate(assertLoadable(parsed)), '', repairs);
+  } catch (err) {
+    // The stored data is LEFT WHERE IT IS. A save this build cannot read may
+    // be perfectly readable by the build it came from, and starting a fresh
+    // game over the top of it is the one outcome that cannot be undone.
+    pushLog(`This save could not be opened: ${err.message}. It has been left untouched.`, 'error');
+    logIntro();
+    return { status: 'fresh', offlineSeconds: 0 };
+  }
   replaceState(merged);
+  reportRepairs(repairs);
 
   // Offline time is NOT applied here. It is handed back to the caller, which
   // runs it through the catch-up modal so a long absence can show progress and
@@ -572,16 +724,50 @@ export function exportSave() {
   return btoa(encodeURIComponent(json));
 }
 
+/**
+ * TAKE A SAVE STRING, OR LEAVE THE HIVE EXACTLY AS IT WAS.
+ *
+ * This used to replace the live state, call `save()`, ignore what `save()`
+ * said, and report success either way. So a quota-full browser — the single
+ * likeliest reason anybody is importing a save in the first place — swallowed
+ * the run that was open, kept the old one on disk, and printed "Save
+ * imported." The player had neither save and no way to know.
+ *
+ * Three rules now, in order of how much they matter:
+ *
+ *   1. NOTHING IS REPLACED UNTIL THE NEW SAVE PARSES. A string that is not a
+ *      save never touches the live hive.
+ *   2. THE WRITE IS PART OF THE IMPORT. If it cannot be persisted the previous
+ *      state is put back, and the failure is what gets reported.
+ *   3. "LOADED" AND "SAVED" ARE DIFFERENT CLAIMS. The log says which happened.
+ *
+ * The rollback copy is a plain structural clone rather than an exported
+ * string: it has to be restorable when storage is exactly what is not working.
+ */
 export function importSave(text) {
+  let merged;
+  const repairs = [];
   try {
-    const json = decodeURIComponent(atob(text.trim()));
-    const parsed = migrate(JSON.parse(json));
-    replaceState(mergeDefaults(createInitialState(), parsed));
-    save();
-    pushLog('Save imported.', 'info');
-    return true;
+    const json = decodeURIComponent(atob(String(text).trim()));
+    merged = mergeDefaults(createInitialState(), migrate(assertLoadable(JSON.parse(json))), '', repairs);
   } catch (err) {
-    pushLog(`Import failed: ${err.message}`, 'error');
+    pushLog(`Import failed: ${err.message}. Nothing was changed.`, 'error');
     return false;
   }
+
+  const rollback = JSON.parse(JSON.stringify(state));
+  replaceState(merged);
+  reportRepairs(repairs);
+
+  if (!save()) {
+    replaceState(rollback);
+    pushLog(
+      'That save could be read but could not be stored, so it was not loaded — '
+      + `the hive is as it was. ${saveStatus.error ?? ''}`.trim(),
+      'error',
+    );
+    return false;
+  }
+  pushLog('Save imported.', 'info');
+  return true;
 }

@@ -1,6 +1,7 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { offline, skipOffline } from '../game/offline.js';
+import { useDialog, dialogId } from './useDialog.js';
 import { state, derived } from '../game/useGame.js';
 import { formatDuration } from '../game/format.js';
 import { formatMass, formatEnergy } from '../game/units.js';
@@ -10,12 +11,19 @@ const percent = computed(() =>
 );
 
 const remaining = computed(() => Math.max(0, offline.total - offline.done));
+
+// Escape does what the Skip button does — this dialog's "close" is "stop
+// simulating", and there is nothing else it could honestly mean.
+const card = ref(null);
+const titleId = dialogId();
+useDialog(card, () => offline.active, () => skipOffline());
 </script>
 
 <template>
   <div v-if="offline.active" class="modal-backdrop">
-    <div class="modal-card">
-      <div class="modal-head">Simulating time away</div>
+    <div ref="card" class="modal-card" role="dialog" aria-modal="true"
+         :aria-labelledby="titleId" tabindex="-1">
+      <div :id="titleId" class="modal-head">Simulating time away</div>
       <div class="modal-body">
         <p class="muted" style="font-size: 0.82rem; margin-bottom: 0.8rem">
           The hive kept running while you were gone. It has been dormant for

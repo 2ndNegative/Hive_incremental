@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { BASE, LAUNCH } from './harness.mjs';
+import { BASE, LAUNCH, checker, openPage, finish, settle } from './harness.mjs';
 
 /**
  * The card-level pass: cycle bars, the opening grace period, the brownout
@@ -19,7 +19,7 @@ async function ensureLanded(page) {
 }
 async function openTab(page, label) {
   await page.click(`.tab-bar button:text-is("${label}")`);
-  await page.waitForTimeout(160);
+  await settle(page);
 }
 /** The Hive tab card for a structure, as text. */
 async function cardText(page, name) {
@@ -34,23 +34,16 @@ async function cardText(page, name) {
 const base = BASE;
 const browser = await chromium.launch(LAUNCH);
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 
-const errors = [];
-const p = await browser.newPage({ viewport: { width: 1480, height: 1000 } });
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1000 } });
 
 await p.goto(base, { waitUntil: 'networkidle' });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'networkidle' });
 await p.waitForSelector('.res-row');
 await ensureLanded(p);
-await p.waitForTimeout(250);
+await settle(p);
 await p.evaluate(() => hive.loop.stop());
 
 /* =============================================== 1. the opening grace period */
@@ -100,7 +93,7 @@ check('and when it runs out the hive starts browning out',
 /* ================================================== 2. the brownout now reads */
 
 await openTab(p, 'Hive');
-await p.waitForTimeout(250);
+await settle(p);
 
 // Hold it at a steady fraction: a generator that covers part of the upkeep.
 await p.evaluate(() => {
@@ -123,7 +116,7 @@ await p.evaluate(() => {
   }
   s.power.metabolicGenerator = 0.1;
 });
-await p.waitForTimeout(250);
+await settle(p);
 
 const brownout = await p.evaluate(() => {
   const d = hive.derived();
@@ -168,7 +161,7 @@ const lit = await p.evaluate(() => {
     footer: card?.querySelector('.switch-label')?.innerText.trim() ?? '',
   };
 });
-await p.waitForTimeout(220);
+await settle(p);
 const litFooter = await p.evaluate(() =>
   [...document.querySelectorAll('.action-slot')]
     .find((c) => c.querySelector('.action-name')?.textContent.trim().startsWith('Hivecore'))
@@ -190,7 +183,7 @@ await p.evaluate(() => {
   s.molding = {};
   hive.tick(6); // part-way through a 20s cycle
 });
-await p.waitForTimeout(250);
+await settle(p);
 
 const brood = await p.evaluate(() => {
   const card = [...document.querySelectorAll('.action-slot')].find((c) =>
@@ -211,11 +204,10 @@ check('the bar matches the cycle underneath it',
 check('and it says what is coming and when',
   /Larva in \d+s/.test(brood.text), brood.text);
 
-const starved = await p.evaluate(() => {
+await p.evaluate(() => {
   hive.state.nutrients.protein = 0;
-  return null;
 });
-await p.waitForTimeout(220);
+await settle(p);
 const starvedText = await p.evaluate(() =>
   [...document.querySelectorAll('.action-slot')]
     .find((c) => c.querySelector('.action-name')?.textContent.trim().startsWith('Brood Chamber'))
@@ -226,7 +218,7 @@ check('a chamber that cannot pay says so rather than counting down',
 
 await p.evaluate(() => { hive.state.nutrients.protein = 5_000; });
 
-const molding = await p.evaluate(() => {
+await p.evaluate(() => {
   hive.drones.setMolding('forager', true);
   hive.state.larvae = 5;
   // A Forager costs five grams of fat to press now, and this fixture has been
@@ -235,9 +227,8 @@ const molding = await p.evaluate(() => {
   hive.state.structures.lipidDroplet = 100;
   hive.state.molding = {};
   hive.tick(4); // part-way through a cycle that five larvae make twice as fast
-  return null;
 });
-await p.waitForTimeout(220);
+await settle(p);
 const moldText = await p.evaluate(() => {
   const card = [...document.querySelectorAll('.action-slot')].find((c) =>
     c.querySelector('.action-name')?.textContent.trim().startsWith('Molding Chamber'),
@@ -253,11 +244,10 @@ check('and says how much the brood is speeding it up',
   /×\d\.\d on a full brood/.test(moldText.text), moldText.text);
 check('and its bar moves too', moldText.width > 20, `${moldText.width.toFixed(0)}% wide`);
 
-const idleMold = await p.evaluate(() => {
+await p.evaluate(() => {
   hive.drones.setMolding('forager', false);
-  return null;
 });
-await p.waitForTimeout(220);
+await settle(p);
 const idleText = await p.evaluate(() =>
   [...document.querySelectorAll('.action-slot')]
     .find((c) => c.querySelector('.action-name')?.textContent.trim().startsWith('Molding Chamber'))
@@ -274,7 +264,7 @@ await p.evaluate(() => {
   hive.state.power.broodChamber = 0;
   hive.state.power.moldingChamber = 0;
 });
-await p.waitForTimeout(220);
+await settle(p);
 const darkCycle = await p.evaluate(() =>
   [...document.querySelectorAll('.action-slot')]
     .filter((c) => c.querySelector('.action-cycle'))
@@ -287,7 +277,7 @@ await p.evaluate(() => {
   hive.state.power.moldingChamber = 1;
   hive.drones.setMolding('forager', false);
 });
-await p.waitForTimeout(220);
+await settle(p);
 
 // Nothing else grows a bar: a Vacuole is not doing anything over time.
 const bars = await p.evaluate(() =>
@@ -343,7 +333,7 @@ check('and they cost nothing to keep',
   stores.fatUpkeep === 0 && stores.fiberUpkeep === 0, `${stores.fatUpkeep} W`);
 
 await openTab(p, 'Hive');
-await p.waitForTimeout(250);
+await settle(p);
 const lipid = await cardText(p, 'Lipid Droplet');
 const bale = await cardText(p, 'Cellulose Bale');
 const crop = await cardText(p, 'Crop Chamber');
@@ -400,17 +390,11 @@ check('a Nerve Node at 40% supplies 40% of its cogits',
   `${(dimmed.capacity - node.before).toFixed(1)} Cg of 15`);
 
 await openTab(p, 'Hive');
-await p.waitForTimeout(250);
+await settle(p);
 const nodeCard = await cardText(p, 'Nerve Node');
 check('the card says what it gives and what it costs',
   /\+5 Cg cognition/.test(nodeCard || '') && /20 kW upkeep/.test(nodeCard || ''),
   nodeCard?.slice(-70));
 await p.evaluate(() => { hive.state.structures.nodeCluster = 0; delete hive.state.power.nodeCluster; });
 
-/* ------------------------------------------------------------------ errors */
-
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'what a chamber card says', fail, errors, browser });

@@ -11,19 +11,12 @@
  * again, and insist the figure moved by the amount the gene claims.
  */
 import { chromium } from 'playwright';
-import { LAUNCH, BASE, shot } from './harness.mjs';
+import { LAUNCH, BASE, shot, checker, openPage, finish, settle } from './harness.mjs';
 
 const browser = await chromium.launch(LAUNCH);
-const p = await browser.newPage({ viewport: { width: 1480, height: 1020 } });
-const errors = [];
-p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-p.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+const { page: p, errors } = await openPage(browser, { viewport: { width: 1480, height: 1020 } });
 
-const fail = [];
-const check = (label, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  if (!ok) fail.push(label);
-};
+const { check, fail } = checker();
 const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
 
 await p.goto(BASE);
@@ -157,13 +150,55 @@ check('and only for the body it is written into',
 
 /* ================================= 5. nothing is summed that nothing reads */
 
+/*
+ * AND THE ENGINE IS THE ONE DOING THE READING.
+ *
+ * This asked `traitsRead()` what had been requested — but the recording lived
+ * inside `traitsOf`, which builds the whole map, so one request for `pace`
+ * marked `appetite` read as well. And `traitsOf` is the Genetics tab's preview
+ * path, so the check was satisfied by the interface having been opened. It
+ * could not fail.
+ *
+ * So: forget everything, drive ONE real tick of the actual game with drones
+ * out on real ground, and ask again. Anything still unread is a trait the
+ * simulation does not consult — which is the whole failure this guard exists
+ * to catch, and the one that is invisible from the inside.
+ */
 const unread = await p.evaluate(() => {
-  const declared = Object.keys(hive.genes.traits);
+  const s = hive.state;
+  s.genes = {};
+  s.territory = { temperateForest: 200 };
+  s.assign = {};
+  s.droneTypes = { forager: 6, scavenger: 0, explorer: 2 };
+  for (const n of Object.keys(s.nutrients)) s.nutrients[n] = 1e7;
+  hive.forage.resetForage(s);
+  hive.tick(1, 1);
+
+  hive.genes.forgetRead();
+  hive.tick(1, 1);
   const read = hive.genes.read();
-  return declared.filter((id) => !read.includes(id));
+  return {
+    declared: Object.keys(hive.genes.traits),
+    read,
+    missing: Object.keys(hive.genes.traits).filter((id) => !read.includes(id)),
+  };
 });
-check('every declared trait has been produced for a reader', unread.length === 0,
-  unread.join(', '));
+check('one tick of the real engine asks for every declared trait',
+  unread.missing.length === 0,
+  unread.missing.length ? `never asked for: ${unread.missing.join(', ')}`
+    : `${unread.read.join(', ')}`);
+
+// And the guard can still go red: the interface's own path must not satisfy it.
+const guardBites = await p.evaluate(() => {
+  hive.genes.forgetRead();
+  hive.genes.traitsOf('drone:forager');        // what the tab does
+  const afterPreview = hive.genes.read();
+  hive.genes.droneTrait('forager', 'pace');    // what the engine does
+  return { afterPreview, afterEngine: hive.genes.read() };
+});
+check('and opening the tab does not satisfy it on the engine\'s behalf',
+  guardBites.afterPreview.length === 0 && guardBites.afterEngine.includes('pace'),
+  `preview marked ${guardBites.afterPreview.length}, engine marked ${guardBites.afterEngine.join(', ')}`);
 
 /* ============================================= 6. a save carries the genome */
 
@@ -211,7 +246,7 @@ check('and the kind with nothing in it still has a band', laid.empty);
 
 // Selecting a gene PREVIEWS it. Nothing reaches the hive until it is written.
 await p.click('.gene-row:not(:disabled)');
-await p.waitForTimeout(250);
+await settle(p);
 const preview = await p.evaluate(() => {
   const moved = [...document.querySelectorAll('.gene-trait.is-moved')];
   return {
@@ -245,7 +280,7 @@ check('and the panel settles: nothing is moving any more, one gene is held',
 // Clicking a gene that is already in stages its REMOVAL, which is the same
 // gesture — there is no second set of controls for taking something out.
 await p.click('.gene-row.is-held');
-await p.waitForTimeout(250);
+await settle(p);
 const pulling = await p.evaluate(() => ({
   out: document.querySelectorAll('.gene-row.is-out').length,
   commit: document.querySelector('.gene-commit')?.innerText.replace(/\s+/g, ' ') ?? '',
@@ -260,7 +295,7 @@ check('and the preview runs the other way', /×1\.15 → ×1\.00/.test(pulling.t
 await p.evaluate(() => {
   [...document.querySelectorAll('.gene-subject')].find((n) => /Explorer/.test(n.innerText)).click();
 });
-await p.waitForTimeout(300);
+await settle(p);
 const blocked = await p.evaluate(() => {
   const row = document.querySelector('.gene-row.is-blocked');
   return {
@@ -282,11 +317,5 @@ const switched = await p.evaluate(() => document.querySelector('.gene-commit')?.
 check('switching body discards the proposal staged against the last one',
   /Pick a gene on the right/.test(switched), switched.replace(/\s+/g, ' ').slice(0, 60));
 
-/* ------------------------------------------------------------------ errors */
-
 if (fail.length) await p.screenshot({ path: shot('genes.png') });
-check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-
-console.log(`\n${fail.length ? `FAILURES: ${fail.join(', ')}` : 'all green'}`);
-await browser.close();
-process.exit(fail.length ? 1 : 0);
+await finish({ name: 'the gene layer', fail, errors, browser });

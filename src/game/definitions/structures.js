@@ -1,7 +1,9 @@
 // Hive structures.
 //
 // ============================================================================
-// SIXTEEN OF THESE ARE LIVE. The rest are PARKED pending the building rebuild.
+// EIGHTEEN OF THESE ARE LIVE. The other five are PARKED pending the building
+// rebuild. The partition check at the foot of the file proves every structure
+// in the table is on one of the two lists — see it for why that matters.
 //
 // `STRUCTURE_ORDER` is the definition of live: the engine computes capacity,
 // upkeep, slots and multipliers from the ids in that list and the Hive tab
@@ -13,8 +15,9 @@
 // save round-trips its counts instead of silently losing them.
 //
 // To bring one back: give it a `category` from BUILDING_CATEGORIES, check its
-// cost and `time` rungs still make sense, and move its id into
-// STRUCTURE_ORDER.
+// cost and `time` rungs still make sense, and move its id from
+// DEPRECATED_STRUCTURE_ORDER into STRUCTURE_ORDER. Moving it rather than
+// copying it: the check refuses an id on both lists.
 // ============================================================================
 //
 // Built out of nutrient mass, not an abstract currency — a Nerve Node costs
@@ -640,6 +643,43 @@ export const DEPRECATED_STRUCTURE_ORDER = [
   'boreShaft',
   'ambushBurrow',
 ];
+
+/* ------------------------------- the two orders account for every structure
+ *
+ * Every structure defined above is buildable or declared parked, exactly once.
+ * There were already two lists and nothing tying them to the table, so a
+ * structure in neither was invisible twice over: no card, and — because
+ * DEPRECATED_STRUCTURE_ORDER is what seeds `state.structures` — no slot in the
+ * save either, so any count a player already had in it was dropped on the next
+ * load rather than parked.
+ *
+ * "Parked" and "forgotten" are the same shape in a list that works by omission.
+ * This is what makes them different shapes.
+ */
+{
+  const listed = [...STRUCTURE_ORDER, ...DEPRECATED_STRUCTURE_ORDER];
+  const seen = new Set();
+  for (const id of listed) {
+    if (!STRUCTURES[id]) {
+      throw new Error(`structures.js: "${id}" is listed in an order but not defined.`);
+    }
+    if (seen.has(id)) {
+      throw new Error(
+        `structures.js: "${id}" is listed twice. A structure is buildable or parked, not both.`,
+      );
+    }
+    seen.add(id);
+  }
+  const missing = Object.keys(STRUCTURES).filter((id) => !seen.has(id));
+  if (missing.length) {
+    throw new Error(
+      `structures.js: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} defined but on `
+      + `neither STRUCTURE_ORDER nor DEPRECATED_STRUCTURE_ORDER. A structure on neither cannot be `
+      + `built, is on no screen, and is not even seeded into the save — add it to the order, or `
+      + `park it and say why.`,
+    );
+  }
+}
 
 /**
  * EVERY STRUCTURE DECLARES A BUILD TIME, checked here at module load.
